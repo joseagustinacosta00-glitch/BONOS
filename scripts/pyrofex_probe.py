@@ -43,11 +43,17 @@ def configure_environment_urls(pyRofex: Any, env: Any) -> None:
 
 
 def normalized_api_urls() -> tuple[str, str]:
-    rest_url = os.getenv("ROFEX_REST_URL", "https://api.VETA.xoms.com.ar/").strip()
-    ws_url = os.getenv("ROFEX_WS_URL", "wss://api.VETA.xoms.com.ar/").strip()
+    rest_url = clean_url(os.getenv("ROFEX_REST_URL", "https://api.VETA.xoms.com.ar/"))
+    ws_url = clean_url(os.getenv("ROFEX_WS_URL", "wss://api.VETA.xoms.com.ar/"))
 
     if rest_url.startswith("wss://") and ws_url.startswith(("http://", "https://")):
         rest_url, ws_url = ws_url, rest_url
+    elif rest_url.startswith("wss://"):
+        ws_url = ws_url if ws_url.startswith("wss://") else rest_url
+        rest_url = "https://" + rest_url.removeprefix("wss://")
+    elif ws_url.startswith(("http://", "https://")):
+        rest_url = rest_url if rest_url.startswith(("http://", "https://")) else ws_url
+        ws_url = "wss://" + ws_url.removeprefix("https://").removeprefix("http://")
 
     if not rest_url.startswith(("http://", "https://")):
         raise RuntimeError("ROFEX_REST_URL must start with https://")
@@ -59,6 +65,10 @@ def normalized_api_urls() -> tuple[str, str]:
 
 def ensure_trailing_slash(url: str) -> str:
     return url if url.endswith("/") else f"{url}/"
+
+
+def clean_url(url: str | None) -> str:
+    return (url or "").strip().strip('"').strip("'").strip()
 
 
 def market(pyRofex: Any) -> Any:

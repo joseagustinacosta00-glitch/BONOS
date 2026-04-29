@@ -30,7 +30,12 @@ class MarketDataService:
     async def start(self) -> None:
         self._seed_quotes()
         if self.settings.market_source == "pyrofex":
-            await asyncio.to_thread(self._start_pyrofex)
+            try:
+                await asyncio.to_thread(self._start_pyrofex)
+            except Exception as exc:
+                self.status = "error"
+                self.last_error = str(exc)
+                logger.exception("Could not start pyRofex market data: %s", exc)
             return
 
         self.status = "mock"
@@ -280,16 +285,16 @@ class MarketDataService:
         pyRofex._set_environment_parameter("ws", ws_url, environment)
 
     def _normalized_api_urls(self) -> tuple[str, str]:
-        rest_url = (self.settings.rofex_rest_url or "").strip()
-        ws_url = (self.settings.rofex_ws_url or "").strip()
+        rest_url = self._clean_url(self.settings.rofex_rest_url)
+        ws_url = self._clean_url(self.settings.rofex_ws_url)
 
         if rest_url.startswith("wss://") and ws_url.startswith(("http://", "https://")):
             rest_url, ws_url = ws_url, rest_url
-        elif rest_url.startswith("wss://") and not ws_url:
-            ws_url = rest_url
+        elif rest_url.startswith("wss://"):
+            ws_url = ws_url if ws_url.startswith("wss://") else rest_url
             rest_url = "https://" + rest_url.removeprefix("wss://")
-        elif ws_url.startswith(("http://", "https://")) and not rest_url:
-            rest_url = ws_url
+        elif ws_url.startswith(("http://", "https://")):
+            rest_url = rest_url if rest_url.startswith(("http://", "https://")) else ws_url
             ws_url = "wss://" + ws_url.removeprefix("https://").removeprefix("http://")
 
         if not rest_url.startswith(("http://", "https://")):
@@ -302,6 +307,10 @@ class MarketDataService:
     @staticmethod
     def _ensure_trailing_slash(url: str) -> str:
         return url if url.endswith("/") else f"{url}/"
+
+    @staticmethod
+    def _clean_url(url: str | None) -> str:
+        return (url or "").strip().strip('"').strip("'").strip()
 
     def _market(self, pyRofex: Any) -> Any:
         if self.settings.rofex_market == "ROFEX":
