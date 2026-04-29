@@ -43,6 +43,22 @@ class BondDefinition:
 
 
 @dataclass(frozen=True)
+class BondDraft:
+    model_type: BondModelType
+    issue_date: date
+    maturity_date: date
+    face_value: float
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "model_type": self.model_type.value,
+            "issue_date": self.issue_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "face_value": self.face_value,
+        }
+
+
+@dataclass(frozen=True)
 class BondValuationInput:
     settlement_date: date
     clean_price: float
@@ -68,3 +84,22 @@ def year_fraction(start: date, end: date, convention: DayCount) -> float:
     start_day = min(start.day, 30)
     end_day = min(end.day, 30)
     return ((end.year - start.year) * 360 + (end.month - start.month) * 30 + end_day - start_day) / 360
+
+
+def build_bond_draft(
+    model_type: BondModelType,
+    issue_date: date,
+    maturity_date: date,
+    face_value: float,
+) -> BondDraft:
+    if maturity_date <= issue_date:
+        raise ValueError("La fecha de vencimiento debe ser posterior a la fecha de emision.")
+    if face_value <= 0:
+        raise ValueError("El VNO debe ser mayor a cero.")
+
+    return BondDraft(
+        model_type=model_type,
+        issue_date=issue_date,
+        maturity_date=maturity_date,
+        face_value=face_value,
+    )

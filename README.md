@@ -107,6 +107,7 @@ Abrir http://127.0.0.1:8000
 - `GET /api/bcra/series?refresh=true`: fuerza actualizacion desde BCRA.
 - `GET /api/bcra/series/cer?limit=0`: serie CER completa.
 - `GET /api/bcra/series/tamar_private_banks_na?limit=0`: serie TAMAR n.a. completa.
+- `POST /api/calculators/bond-draft`: crea la base inicial de un bono para calculadoras.
 - `WS /ws/quotes`: snapshot continuo para la UI.
 
 ## Calendario y Modelos
@@ -123,6 +124,8 @@ La base de modelos para calculadoras esta en `backend/bond_calculators.py` y con
 - TAMAR
 - pesos tasa fija
 - hard dollar
+
+La solapa `Calculadoras` tiene templates separados para tasa fija, CER, TAMAR y hard dollar. El primer paso del formulario pide fecha de emision, fecha de vencimiento y VNO; con eso arma la base del futuro cashflow.
 
 ## Datos BCRA
 

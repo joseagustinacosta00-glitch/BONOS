@@ -7,6 +7,7 @@ const connectionText = document.querySelector("#connectionText");
 const searchInput = document.querySelector("#searchInput");
 const marketView = document.querySelector("#marketView");
 const bcraView = document.querySelector("#bcraView");
+const calculatorsView = document.querySelector("#calculatorsView");
 const bcraBody = document.querySelector("#bcraBody");
 const bcraSeriesLabel = document.querySelector("#bcraSeriesLabel");
 const bcraLatest = document.querySelector("#bcraLatest");
@@ -14,10 +15,18 @@ const bcraCount = document.querySelector("#bcraCount");
 const bcraFrom = document.querySelector("#bcraFrom");
 const bcraTo = document.querySelector("#bcraTo");
 const bcraRefresh = document.querySelector("#bcraRefresh");
+const calculatorTitle = document.querySelector("#calculatorTitle");
+const calculatorStatus = document.querySelector("#calculatorStatus");
+const bondDraftForm = document.querySelector("#bondDraftForm");
+const issueDate = document.querySelector("#issueDate");
+const maturityDate = document.querySelector("#maturityDate");
+const faceValue = document.querySelector("#faceValue");
+const cashflowPreview = document.querySelector("#cashflowPreview");
 
 let currentCurrency = "all";
 let currentView = "market";
 let currentBcraSeries = "cer";
+let currentBondModel = "pesos_fixed_rate";
 const DEFAULT_QUOTES = [
   ["AO27", "AO27", "ARS"],
   ["AO27D", "AO27", "USD"],
@@ -53,6 +62,13 @@ const DEFAULT_QUOTES = [
 
 let latestQuotes = [...DEFAULT_QUOTES];
 let ws;
+
+const BOND_MODEL_LABELS = {
+  pesos_fixed_rate: "Tasa fija",
+  cer: "Bonos CER",
+  tamar: "Bonos TAMAR",
+  hard_dollar: "Bonos Hard Dollar",
+};
 
 function formatNumber(value, options = {}) {
   if (value === null || value === undefined || value === "") {
@@ -163,6 +179,7 @@ function setView(view) {
   currentView = view;
   marketView.classList.toggle("active", view === "market");
   bcraView.classList.toggle("active", view === "bcra");
+  calculatorsView.classList.toggle("active", view === "calculators");
   document.querySelectorAll("[data-view]").forEach((button) => {
     const active = button.dataset.view === view;
     button.classList.toggle("active", active);
@@ -173,6 +190,70 @@ function setView(view) {
   if (view === "bcra") fetchBcraSeries().catch(() => {
     bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron cargar datos BCRA</td></tr>';
   });
+}
+
+function setCalculatorStatus(state, text) {
+  calculatorStatus.classList.toggle("ok", state === "ok");
+  calculatorStatus.classList.toggle("error", state === "error");
+  calculatorStatus.textContent = text;
+}
+
+function setBondModel(model) {
+  currentBondModel = model;
+  calculatorTitle.textContent = BOND_MODEL_LABELS[model] || "Calculadora";
+  setCalculatorStatus("draft", "Borrador");
+  cashflowPreview.innerHTML = '<tr><td class="empty-state">Completá los datos iniciales</td></tr>';
+
+  document.querySelectorAll("[data-bond-model]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.bondModel === model);
+  });
+}
+
+function renderCashflowDraft(payload) {
+  const draft = payload.draft;
+  cashflowPreview.innerHTML = `
+    <tr>
+      <th>Tipo</th>
+      <td>${BOND_MODEL_LABELS[draft.model_type] || draft.model_type}</td>
+    </tr>
+    <tr>
+      <th>Fecha de emisión</th>
+      <td>${formatDate(draft.issue_date)}</td>
+    </tr>
+    <tr>
+      <th>Fecha de vencimiento</th>
+      <td>${formatDate(draft.maturity_date)}</td>
+    </tr>
+    <tr>
+      <th>VNO</th>
+      <td>${formatNumber(draft.face_value, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+    </tr>
+  `;
+  setCalculatorStatus("ok", "Base creada");
+}
+
+async function submitBondDraft(event) {
+  event.preventDefault();
+  setCalculatorStatus("draft", "Calculando");
+
+  const response = await fetch("/api/calculators/bond-draft", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model_type: currentBondModel,
+      issue_date: issueDate.value,
+      maturity_date: maturityDate.value,
+      face_value: Number(faceValue.value),
+    }),
+  });
+
+  if (!response.ok) {
+    setCalculatorStatus("error", "Revisar datos");
+    cashflowPreview.innerHTML = '<tr><td class="empty-state">No se pudo crear la base</td></tr>';
+    return;
+  }
+
+  renderCashflowDraft(await response.json());
 }
 
 async function fetchSnapshot() {
@@ -234,11 +315,17 @@ document.querySelectorAll("[data-bcra-series]").forEach((button) => {
   });
 });
 
+document.querySelectorAll("[data-bond-model]").forEach((button) => {
+  button.addEventListener("click", () => setBondModel(button.dataset.bondModel));
+});
+
 bcraRefresh.addEventListener("click", () => {
   fetchBcraSeries(true).catch(() => {
     bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron actualizar datos BCRA</td></tr>';
   });
 });
+
+bondDraftForm.addEventListener("submit", submitBondDraft);
 
 searchInput.addEventListener("input", renderQuotes);
 

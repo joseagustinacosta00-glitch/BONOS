@@ -38,6 +38,7 @@
       <nav class="view-tabs" aria-label="Vistas">
         <button class="btn btn-sm btn-dark active" data-view="market" type="button">Mercado</button>
         <button class="btn btn-sm btn-outline-dark" data-view="bcra" type="button">Datos BCRA</button>
+        <button class="btn btn-sm btn-outline-dark" data-view="calculators" type="button">Calculadoras</button>
       </nav>
 
       <section id="marketView" class="view-panel active">
@@ -167,6 +168,66 @@
               </tr>
             </tbody>
           </table>
+        </section>
+      </section>
+
+      <section id="calculatorsView" class="view-panel" aria-label="Calculadoras">
+        <section class="calculator-layout">
+          <aside class="calculator-menu" aria-label="Tipo de bono">
+            <button class="calculator-option active" data-bond-model="pesos_fixed_rate" type="button">
+              <span>Tasa fija</span>
+              <small>Pesos con cupón fijo</small>
+            </button>
+            <button class="calculator-option" data-bond-model="cer" type="button">
+              <span>Bonos CER</span>
+              <small>Ajuste por CER</small>
+            </button>
+            <button class="calculator-option" data-bond-model="tamar" type="button">
+              <span>Bonos TAMAR</span>
+              <small>Floating rate</small>
+            </button>
+            <button class="calculator-option" data-bond-model="hard_dollar" type="button">
+              <span>Bonos Hard Dollar</span>
+              <small>Dólar linked legal hard dollar</small>
+            </button>
+          </aside>
+
+          <section class="calculator-panel">
+            <div class="calculator-heading">
+              <div>
+                <p class="eyebrow">Template</p>
+                <h2 id="calculatorTitle">Tasa fija</h2>
+              </div>
+              <span id="calculatorStatus" class="calc-status">Borrador</span>
+            </div>
+
+            <form id="bondDraftForm" class="calculator-form">
+              <label>
+                <span>Fecha de emisión</span>
+                <input id="issueDate" class="form-control form-control-sm" type="date" required>
+              </label>
+              <label>
+                <span>Fecha de vencimiento</span>
+                <input id="maturityDate" class="form-control form-control-sm" type="date" required>
+              </label>
+              <label>
+                <span>VNO</span>
+                <input id="faceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100" required>
+              </label>
+              <button class="btn btn-sm btn-dark" type="submit">Crear base</button>
+            </form>
+
+            <section class="cashflow-preview" aria-label="Base del cashflow">
+              <h3>Base del cashflow</h3>
+              <table class="table table-sm align-middle mb-0">
+                <tbody id="cashflowPreview">
+                  <tr>
+                    <td class="empty-state">Completá los datos iniciales</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+          </section>
         </section>
       </section>
     </main>

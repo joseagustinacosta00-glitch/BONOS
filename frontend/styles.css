@@ -200,6 +200,111 @@ tbody td {
   text-align: center;
 }
 
+.calculator-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.calculator-menu {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.calculator-option {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.calculator-option.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.calculator-option span,
+.calculator-option small {
+  display: block;
+}
+
+.calculator-option span {
+  font-weight: 750;
+}
+
+.calculator-option small {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.calculator-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 16px;
+}
+
+.calculator-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.calculator-heading h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.calc-status {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #27364a;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.calc-status.ok {
+  background: #d3f9d8;
+  color: #087f5b;
+}
+
+.calc-status.error {
+  background: #ffe3e3;
+  color: var(--negative);
+}
+
+.calculator-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.calculator-form label span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 5px;
+}
+
+.cashflow-preview {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.cashflow-preview h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     width: min(100vw - 20px, 1280px);
@@ -228,5 +333,10 @@ tbody td {
   .date-filters,
   .date-filters .form-control {
     width: 100%;
+  }
+
+  .calculator-layout,
+  .calculator-form {
+    grid-template-columns: 1fr;
   }
 }

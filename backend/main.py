@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.bcra_client import BCRA_SERIES, BcraClient
+from backend.bond_calculators import BondModelType, build_bond_draft
 from backend.bonds import BOND_TICKERS
 from backend.config import get_settings
 from backend.market_calendar import market_calendar, parse_date
@@ -26,6 +28,13 @@ bcra = BcraClient(settings)
 
 app = FastAPI(title="Monitor de Bonos", version="0.1.0")
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+
+class BondDraftRequest(BaseModel):
+    model_type: BondModelType
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
 
 
 @app.on_event("startup")
@@ -103,6 +112,25 @@ async def bcra_one_series(
 @app.get("/api/bcra/catalog")
 async def bcra_catalog() -> dict:
     return {"series": [definition.__dict__ for definition in BCRA_SERIES.values()]}
+
+
+@app.post("/api/calculators/bond-draft")
+async def calculator_bond_draft(payload: BondDraftRequest) -> dict:
+    draft = build_bond_draft(
+        model_type=payload.model_type,
+        issue_date=payload.issue_date,
+        maturity_date=payload.maturity_date,
+        face_value=payload.face_value,
+    )
+    return {
+        "draft": draft.to_dict(),
+        "cashflow_inputs": {
+            "issue_date": draft.issue_date.isoformat(),
+            "maturity_date": draft.maturity_date.isoformat(),
+            "face_value": draft.face_value,
+        },
+        "next_questions": [],
+    }
 
 
 @app.get("/health")
