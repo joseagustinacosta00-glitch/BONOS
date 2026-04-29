@@ -55,6 +55,11 @@ ROFEX_SYMBOL_TEMPLATE=MERV - XMEV - {symbol} - {settlement}
 
 Para VETA, usar `ROFEX_ENVIRONMENT=LIVE` junto con `ROFEX_REST_URL` y `ROFEX_WS_URL`. La app pisa esas URLs en `pyRofex.Environment.LIVE` antes de llamar a `pyRofex.initialize(...)`.
 
+En deploy, revisa que no queden cruzadas:
+
+- `ROFEX_REST_URL` debe empezar con `https://`
+- `ROFEX_WS_URL` debe empezar con `wss://`
+
 ## Probar pyRofex sin la webapp
 
 ```powershell

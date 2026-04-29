@@ -275,10 +275,33 @@ class MarketDataService:
         return pyRofex.Environment.REMARKET
 
     def _configure_environment_urls(self, pyRofex: Any, environment: Any) -> None:
-        if self.settings.rofex_rest_url:
-            pyRofex._set_environment_parameter("url", self.settings.rofex_rest_url, environment)
-        if self.settings.rofex_ws_url:
-            pyRofex._set_environment_parameter("ws", self.settings.rofex_ws_url, environment)
+        rest_url, ws_url = self._normalized_api_urls()
+        pyRofex._set_environment_parameter("url", rest_url, environment)
+        pyRofex._set_environment_parameter("ws", ws_url, environment)
+
+    def _normalized_api_urls(self) -> tuple[str, str]:
+        rest_url = (self.settings.rofex_rest_url or "").strip()
+        ws_url = (self.settings.rofex_ws_url or "").strip()
+
+        if rest_url.startswith("wss://") and ws_url.startswith(("http://", "https://")):
+            rest_url, ws_url = ws_url, rest_url
+        elif rest_url.startswith("wss://") and not ws_url:
+            ws_url = rest_url
+            rest_url = "https://" + rest_url.removeprefix("wss://")
+        elif ws_url.startswith(("http://", "https://")) and not rest_url:
+            rest_url = ws_url
+            ws_url = "wss://" + ws_url.removeprefix("https://").removeprefix("http://")
+
+        if not rest_url.startswith(("http://", "https://")):
+            raise RuntimeError("ROFEX_REST_URL must start with https://")
+        if not ws_url.startswith("wss://"):
+            raise RuntimeError("ROFEX_WS_URL must start with wss://")
+
+        return self._ensure_trailing_slash(rest_url), self._ensure_trailing_slash(ws_url)
+
+    @staticmethod
+    def _ensure_trailing_slash(url: str) -> str:
+        return url if url.endswith("/") else f"{url}/"
 
     def _market(self, pyRofex: Any) -> Any:
         if self.settings.rofex_market == "ROFEX":
