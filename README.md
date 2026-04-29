@@ -99,7 +99,41 @@ Abrir http://127.0.0.1:8000
 
 - `GET /api/tickers`: universo de instrumentos.
 - `GET /api/quotes`: ultimo snapshot.
+- `GET /api/calendar/summary`: resumen del calendario cargado.
+- `GET /api/calendar/day/YYYY-MM-DD`: indica si una fecha es feriado y dia habil.
+- `GET /api/calendar/business-days?start=YYYY-MM-DD&end=YYYY-MM-DD`: dias habiles entre fechas.
+- `GET /api/bcra/catalog`: series BCRA disponibles en la app.
+- `GET /api/bcra/series?limit=700`: CER y TAMAR historico reciente.
+- `GET /api/bcra/series?refresh=true`: fuerza actualizacion desde BCRA.
+- `GET /api/bcra/series/cer?limit=0`: serie CER completa.
+- `GET /api/bcra/series/tamar_private_banks_na?limit=0`: serie TAMAR n.a. completa.
 - `WS /ws/quotes`: snapshot continuo para la UI.
+
+## Calendario y Modelos
+
+Los timestamps del backend y la UI usan `America/Argentina/Buenos_Aires`.
+
+La base de feriados esta en `data/market_holidays.csv` con el calendario 2020-2026 cargado. El motor de calendario esta en `backend/market_calendar.py`.
+
+`data/business_days.csv` queda preparado para cargar un calendario explicito de ruedas habiles. Si ese archivo tiene fechas, el sistema lo usa como fuente mandatoria; si esta vacio, calcula lunes a viernes menos feriados.
+
+La base de modelos para calculadoras esta en `backend/bond_calculators.py` y contempla:
+
+- CER
+- TAMAR
+- pesos tasa fija
+- hard dollar
+
+## Datos BCRA
+
+La solapa `Datos BCRA` consume la API publica de Estadisticas Monetarias v4 del BCRA.
+
+Series iniciales:
+
+- `idVariable=30`: CER, coeficiente de estabilizacion de referencia, base 2.2.02=1.
+- `idVariable=44`: TAMAR de bancos privados en porcentaje nominal anual.
+
+El cliente esta en `backend/bcra_client.py`, pagina hasta 3000 registros por request y guarda cache en memoria por `BCRA_CACHE_TTL_SECONDS`.
 
 ## Deploy
 

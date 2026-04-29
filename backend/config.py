@@ -29,6 +29,8 @@ class Settings:
     rofex_market: str
     rofex_settlement: str
     rofex_symbol_template: str
+    bcra_base_url: str
+    bcra_cache_ttl_seconds: int
 
 
 def get_settings() -> Settings:
@@ -46,4 +48,6 @@ def get_settings() -> Settings:
             "ROFEX_SYMBOL_TEMPLATE",
             "MERV - XMEV - {symbol} - {settlement}",
         ),
+        bcra_base_url=os.getenv("BCRA_BASE_URL", "https://api.bcra.gob.ar"),
+        bcra_cache_ttl_seconds=int(os.getenv("BCRA_CACHE_TTL_SECONDS", "21600")),
     )

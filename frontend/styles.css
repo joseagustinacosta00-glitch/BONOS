@@ -101,6 +101,20 @@ h1 {
   font-size: 1.2rem;
 }
 
+.view-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.view-panel {
+  display: none;
+}
+
+.view-panel.active {
+  display: block;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -111,6 +125,24 @@ h1 {
 
 .toolbar .form-control {
   max-width: 260px;
+}
+
+.bcra-toolbar {
+  align-items: flex-start;
+}
+
+.date-filters {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.date-filters .form-control {
+  width: 150px;
+}
+
+.bcra-summary {
+  margin-bottom: 12px;
 }
 
 .table-wrap {
@@ -162,6 +194,12 @@ tbody td {
   color: var(--muted);
 }
 
+.empty-state {
+  color: var(--muted);
+  padding: 28px 16px !important;
+  text-align: center;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     width: min(100vw - 20px, 1280px);
@@ -169,7 +207,8 @@ tbody td {
   }
 
   .topbar,
-  .toolbar {
+  .toolbar,
+  .date-filters {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -184,5 +223,10 @@ tbody td {
 
   .toolbar .form-control {
     max-width: none;
+  }
+
+  .date-filters,
+  .date-filters .form-control {
+    width: 100%;
   }
 }

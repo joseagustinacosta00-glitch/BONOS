@@ -5,11 +5,11 @@ import logging
 import math
 import random
 import threading
-from datetime import datetime
 from typing import Any
 
 from backend.bonds import BOND_TICKERS, TICKER_BY_SYMBOL, TICKER_SYMBOLS
 from backend.config import Settings
+from backend.time_utils import now_argentina_iso
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +62,12 @@ class MarketDataService:
             "status": self.status,
             "source": self.settings.market_source,
             "last_error": self.last_error,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "updated_at": now_argentina_iso(),
             "quotes": quotes,
         }
 
     def _seed_quotes(self) -> None:
-        now = datetime.now().isoformat(timespec="seconds")
+        now = now_argentina_iso()
         with self._lock:
             for ticker in BOND_TICKERS:
                 self._quotes[ticker.symbol] = {
@@ -98,7 +98,7 @@ class MarketDataService:
         }
 
         while True:
-            now = datetime.now().isoformat(timespec="seconds")
+            now = now_argentina_iso()
             with self._lock:
                 for ticker in BOND_TICKERS:
                     base = base_prices.get(ticker.family, 65.0)
@@ -230,7 +230,7 @@ class MarketDataService:
         ask = self._entry_price(market_data.get("OF"))
         last = self._entry_price(market_data.get("LA"))
         volume = self._entry_value(market_data.get("TV"))
-        now = datetime.now().isoformat(timespec="seconds")
+        now = now_argentina_iso()
 
         with self._lock:
             current = self._quotes[local_symbol]

@@ -5,8 +5,19 @@ const instrumentCount = document.querySelector("#instrumentCount");
 const connectionDot = document.querySelector("#connectionDot");
 const connectionText = document.querySelector("#connectionText");
 const searchInput = document.querySelector("#searchInput");
+const marketView = document.querySelector("#marketView");
+const bcraView = document.querySelector("#bcraView");
+const bcraBody = document.querySelector("#bcraBody");
+const bcraSeriesLabel = document.querySelector("#bcraSeriesLabel");
+const bcraLatest = document.querySelector("#bcraLatest");
+const bcraCount = document.querySelector("#bcraCount");
+const bcraFrom = document.querySelector("#bcraFrom");
+const bcraTo = document.querySelector("#bcraTo");
+const bcraRefresh = document.querySelector("#bcraRefresh");
 
 let currentCurrency = "all";
+let currentView = "market";
+let currentBcraSeries = "cer";
 const DEFAULT_QUOTES = [
   ["AO27", "AO27", "ARS"],
   ["AO27D", "AO27", "USD"],
@@ -54,7 +65,18 @@ function formatTime(value) {
   if (!value) return '<span class="empty-cell">s/d</span>';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return date.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "America/Argentina/Buenos_Aires",
+  });
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
 }
 
 function renderQuotes() {
@@ -85,6 +107,45 @@ function renderQuotes() {
   }).join("");
 }
 
+function renderBcraSeries(payload) {
+  const series = payload.series
+    ? payload.series.find((candidate) => candidate.key === currentBcraSeries)
+    : payload;
+
+  if (!series) {
+    bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">Sin datos para la serie</td></tr>';
+    return;
+  }
+
+  bcraSeriesLabel.textContent = series.label;
+  bcraLatest.textContent = series.latest
+    ? `${formatDate(series.latest.date)} - ${formatNumber(series.latest.value, { maximumFractionDigits: 4 })}`
+    : "-";
+  bcraCount.textContent = formatNumber(series.count || series.data.length);
+
+  const rows = [...series.data].reverse();
+  bcraBody.innerHTML = rows.map((point) => `
+    <tr>
+      <td>${formatDate(point.date)}</td>
+      <td class="text-end">${formatNumber(point.value, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
+      <td>${series.unit}</td>
+    </tr>
+  `).join("");
+}
+
+async function fetchBcraSeries(refresh = false) {
+  bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">Cargando datos BCRA</td></tr>';
+
+  const params = new URLSearchParams({ limit: "700" });
+  if (bcraFrom.value) params.set("desde", bcraFrom.value);
+  if (bcraTo.value) params.set("hasta", bcraTo.value);
+  if (refresh) params.set("refresh", "true");
+
+  const response = await fetch(`/api/bcra/series?${params.toString()}`);
+  if (!response.ok) throw new Error("No se pudo leer BCRA");
+  renderBcraSeries(await response.json());
+}
+
 function applySnapshot(snapshot) {
   latestQuotes = snapshot.quotes || [];
   sourceLabel.textContent = snapshot.source || "-";
@@ -96,6 +157,22 @@ function setConnection(state, message) {
   connectionDot.classList.toggle("live", state === "live");
   connectionDot.classList.toggle("error", state === "error");
   connectionText.textContent = message;
+}
+
+function setView(view) {
+  currentView = view;
+  marketView.classList.toggle("active", view === "market");
+  bcraView.classList.toggle("active", view === "bcra");
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    button.classList.toggle("btn-dark", active);
+    button.classList.toggle("btn-outline-dark", !active);
+  });
+
+  if (view === "bcra") fetchBcraSeries().catch(() => {
+    bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron cargar datos BCRA</td></tr>';
+  });
 }
 
 async function fetchSnapshot() {
@@ -135,6 +212,31 @@ document.querySelectorAll("[data-currency]").forEach((button) => {
       candidate.classList.toggle("btn-outline-dark", candidate !== button);
     });
     renderQuotes();
+  });
+});
+
+document.querySelectorAll("[data-view]").forEach((button) => {
+  button.addEventListener("click", () => setView(button.dataset.view));
+});
+
+document.querySelectorAll("[data-bcra-series]").forEach((button) => {
+  button.addEventListener("click", () => {
+    currentBcraSeries = button.dataset.bcraSeries;
+    document.querySelectorAll("[data-bcra-series]").forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle("active", active);
+      candidate.classList.toggle("btn-dark", active);
+      candidate.classList.toggle("btn-outline-dark", !active);
+    });
+    fetchBcraSeries().catch(() => {
+      bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron cargar datos BCRA</td></tr>';
+    });
+  });
+});
+
+bcraRefresh.addEventListener("click", () => {
+  fetchBcraSeries(true).catch(() => {
+    bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron actualizar datos BCRA</td></tr>';
   });
 });
 
