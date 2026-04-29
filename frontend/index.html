@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Monitor de Bonos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Bonos hard dollar - ley local</p>
+          <h1>Monitor de mercado</h1>
+        </div>
+        <div class="status-strip">
+          <span id="connectionDot" class="status-dot"></span>
+          <span id="connectionText">Conectando</span>
+        </div>
+      </header>
+
+      <section class="summary-grid" aria-label="Resumen">
+        <div class="metric-panel">
+          <span>Fuente</span>
+          <strong id="sourceLabel">-</strong>
+        </div>
+        <div class="metric-panel">
+          <span>Actualizado</span>
+          <strong id="updatedAt">-</strong>
+        </div>
+        <div class="metric-panel">
+          <span>Instrumentos</span>
+          <strong id="instrumentCount">18</strong>
+        </div>
+      </section>
+
+      <section class="toolbar" aria-label="Filtros">
+        <div class="btn-group" role="group" aria-label="Moneda">
+          <button class="btn btn-sm btn-dark active" data-currency="all" type="button">Todas</button>
+          <button class="btn btn-sm btn-outline-dark" data-currency="ARS" type="button">ARS</button>
+          <button class="btn btn-sm btn-outline-dark" data-currency="USD" type="button">USD</button>
+          <button class="btn btn-sm btn-outline-dark" data-currency="Cable" type="button">Cable</button>
+        </div>
+        <input id="searchInput" class="form-control form-control-sm" type="search" placeholder="Filtrar ticker">
+      </section>
+
+      <section class="table-wrap" aria-label="Cotizaciones">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Ticker</th>
+              <th scope="col">Familia</th>
+              <th scope="col">Moneda</th>
+              <th scope="col" class="text-end">Compra</th>
+              <th scope="col" class="text-end">Venta</th>
+              <th scope="col" class="text-end">Ultimo</th>
+              <th scope="col" class="text-end">Var %</th>
+              <th scope="col" class="text-end">Volumen</th>
+              <th scope="col" class="text-end">TIR</th>
+              <th scope="col" class="text-end">Hora</th>
+            </tr>
+          </thead>
+          <tbody id="quotesBody">
+            <tr>
+              <td class="ticker">AO27</td>
+              <td>AO27</td>
+              <td><span class="currency-pill">ARS</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+            </tr>
+            <tr>
+              <td class="ticker">AO27D</td>
+              <td>AO27</td>
+              <td><span class="currency-pill">USD</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+            </tr>
+            <tr>
+              <td class="ticker">AO27C</td>
+              <td>AO27</td>
+              <td><span class="currency-pill">Cable</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+              <td class="text-end"><span class="empty-cell">s/d</span></td>
+            </tr>
+            <tr><td class="ticker">AL29</td><td>AL29</td><td><span class="currency-pill">ARS</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL29D</td><td>AL29</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL29C</td><td>AL29</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL30</td><td>AL30</td><td><span class="currency-pill">ARS</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL30D</td><td>AL30</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL30C</td><td>AL30</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL35</td><td>AL35</td><td><span class="currency-pill">ARS</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL35D</td><td>AL35</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL35C</td><td>AL35</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AE38</td><td>AE38</td><td><span class="currency-pill">ARS</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AE38D</td><td>AE38</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AE38C</td><td>AE38</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL41</td><td>AL41</td><td><span class="currency-pill">ARS</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL41D</td><td>AL41</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            <tr><td class="ticker">AL41C</td><td>AL41</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
