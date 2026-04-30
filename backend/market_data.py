@@ -23,7 +23,7 @@ class MarketDataService:
         self.last_error: str | None = None
         self._quotes: dict[str, dict[str, Any]] = {}
         self._lecap_quotes: dict[str, dict[str, dict[str, Any]]] = {}
-        self._caucion_quote: dict[str, Any] = {}
+        self._caucion_quotes: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._mock_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
@@ -71,7 +71,18 @@ class MarketDataService:
 
     def shortest_caucion_rate(self) -> dict[str, Any]:
         with self._lock:
-            return dict(self._caucion_quote)
+            quotes = list(self._caucion_quotes.values())
+        if not quotes:
+            return {}
+        return dict(
+            sorted(
+                quotes,
+                key=lambda quote: (
+                    int(quote.get("term_days") or 999),
+                    str(quote.get("symbol") or ""),
+                ),
+            )[0]
+        )
 
     def lecap_quotes(self, settlement_type: str) -> list[dict[str, Any]]:
         settlement_key = self._normalize_lecap_settlement_type(settlement_type)
@@ -128,12 +139,12 @@ class MarketDataService:
                         "updated_at": now,
                         "raw": {},
                     }
-            if self._caucion_quote:
-                self._caucion_quote["updated_at"] = now
-            else:
+            if not self._caucion_quotes:
                 self._seed_caucion_quote("CAUCION_ARS_1D", 1, "CAUCION ARS 1D", now)
-            if self.settings.market_source == "mock" and self._caucion_quote["last"] is None:
-                self._caucion_quote["last"] = 35.0
+            for quote in self._caucion_quotes.values():
+                quote["updated_at"] = now
+                if self.settings.market_source == "mock" and quote["last"] is None:
+                    quote["last"] = 35.0 + int(quote.get("term_days") or 1) * 0.05
 
     async def _mock_loop(self) -> None:
         base_prices = {
@@ -188,13 +199,15 @@ class MarketDataService:
                                 "raw": {"mock": True},
                             }
                         )
-                self._caucion_quote.update(
-                    {
-                        "last": round(35 + random.uniform(-0.25, 0.25), 2),
-                        "updated_at": now,
-                        "raw": {"mock": True},
-                    }
-                )
+                for quote in self._caucion_quotes.values():
+                    term_days = int(quote.get("term_days") or 1)
+                    quote.update(
+                        {
+                            "last": round(35 + term_days * 0.05 + random.uniform(-0.25, 0.25), 2),
+                            "updated_at": now,
+                            "raw": {"mock": True},
+                        }
+                    )
             await asyncio.sleep(1.5)
 
     def _start_pyrofex(self) -> None:
@@ -310,7 +323,7 @@ class MarketDataService:
 
         with self._lock:
             if category == "caucion":
-                current = self._caucion_quote
+                current = self._caucion_quotes[local_symbol]
             elif category == "lecap" and settlement_type:
                 current = self._lecap_quotes[settlement_type][local_symbol]
             else:
@@ -380,13 +393,12 @@ class MarketDataService:
                 )
         for symbol in self._configured_caucion_symbols():
             self._rofex_to_quote[symbol] = ("caucion", symbol, None)
-            if not self._caucion_quote:
-                self._seed_caucion_quote(
-                    symbol=symbol,
-                    term_days=self._infer_caucion_term_days(symbol),
-                    label=symbol,
-                    updated_at=now_argentina_iso(),
-                )
+            self._seed_caucion_quote(
+                symbol=symbol,
+                term_days=self._infer_caucion_term_days(symbol),
+                label=symbol,
+                updated_at=now_argentina_iso(),
+            )
 
     def _lecap_settlements(self) -> dict[str, str]:
         return {
@@ -434,7 +446,7 @@ class MarketDataService:
         label: str,
         updated_at: str,
     ) -> None:
-        self._caucion_quote = {
+        self._caucion_quotes[symbol] = {
             "symbol": symbol,
             "provider_symbol": symbol,
             "label": label,

@@ -11,6 +11,7 @@ load_dotenv(".env.example", override=False)
 
 DEFAULT_ROFEX_REST_URL = "https://api.VETA.xoms.com.ar/"
 DEFAULT_ROFEX_WS_URL = "wss://api.VETA.xoms.com.ar/"
+DEFAULT_CAUCION_SYMBOLS = "PESOS - 1D,PESOS - 4D"
 
 
 def env_or_default(name: str, default: str) -> str:
@@ -55,7 +56,7 @@ def get_settings() -> Settings:
             "ROFEX_SYMBOL_TEMPLATE",
             "MERV - XMEV - {symbol} - {settlement}",
         ),
-        rofex_caucion_symbols=os.getenv("ROFEX_CAUCION_SYMBOLS", ""),
+        rofex_caucion_symbols=os.getenv("ROFEX_CAUCION_SYMBOLS", DEFAULT_CAUCION_SYMBOLS),
         bcra_base_url=os.getenv("BCRA_BASE_URL", "https://api.bcra.gob.ar"),
         bcra_cache_ttl_seconds=int(os.getenv("BCRA_CACHE_TTL_SECONDS", "21600")),
         app_db_path=os.getenv("APP_DB_PATH", "data/user_data.db"),
