@@ -230,7 +230,7 @@ def build_lecap_calculation(
 
     tem_emission = tem_emission_percent / 100
     effective_payment_date = calendar.next_business_day(maturity_date, include_current=True)
-    applicable_days = (effective_payment_date - issue_date).days
+    applicable_days = max((effective_payment_date - issue_date).days - 1, 0)
     final_value = face_value * (1 + tem_emission) ** (applicable_days / 30)
     interest = final_value - face_value
 

@@ -24,14 +24,14 @@ const faceValue = document.querySelector("#faceValue");
 const cashflowPreview = document.querySelector("#cashflowPreview");
 const lecapTicker = document.querySelector("#lecapTicker");
 const temEmission = document.querySelector("#temEmission");
-const priceT0 = document.querySelector("#priceT0");
-const priceT1 = document.querySelector("#priceT1");
-const lecapMetrics = document.querySelector("#lecapMetrics");
+const saveLecap = document.querySelector("#saveLecap");
+const savedLecaps = document.querySelector("#savedLecaps");
 
 let currentCurrency = "all";
 let currentView = "market";
 let currentBcraSeries = "cer";
 let currentBondModel = "pesos_fixed_rate";
+let latestLecapCalculation = null;
 const DEFAULT_QUOTES = [
   ["AO27", "AO27", "ARS"],
   ["AO27D", "AO27", "USD"],
@@ -202,6 +202,9 @@ function setView(view) {
   if (view === "bcra") fetchBcraSeries().catch(() => {
     bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron cargar datos BCRA</td></tr>';
   });
+  if (view === "calculators") fetchSavedLecaps().catch(() => {
+    savedLecaps.innerHTML = '<tr><td colspan="9" class="empty-state">No se pudieron cargar las LECAPs guardadas</td></tr>';
+  });
 }
 
 function setCalculatorStatus(state, text) {
@@ -215,7 +218,8 @@ function setBondModel(model) {
   calculatorTitle.textContent = BOND_MODEL_LABELS[model] || "Calculadora";
   setCalculatorStatus("draft", "Borrador");
   cashflowPreview.innerHTML = '<tr><td colspan="9" class="empty-state">Completa los datos iniciales</td></tr>';
-  lecapMetrics.innerHTML = '<tr><td colspan="9" class="empty-state">Carga precio T+0 o T+1 para calcular outputs</td></tr>';
+  latestLecapCalculation = null;
+  saveLecap.disabled = true;
 
   document.querySelectorAll("[data-bond-model]").forEach((button) => {
     button.classList.toggle("active", button.dataset.bondModel === model);
@@ -237,23 +241,67 @@ function renderLecapCalculation(payload) {
     </tr>
   `).join("");
 
-  lecapMetrics.innerHTML = payload.metrics.length
-    ? payload.metrics.map((metric) => `
-      <tr>
-        <td>${metric.settlement_type}</td>
-        <td>${formatDate(metric.settlement_date)}</td>
-        <td class="text-end">${formatNumber(metric.price, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatPercent(metric.tir, 2)}</td>
-        <td class="text-end">${formatPercent(metric.tna, 2)}</td>
-        <td class="text-end">${formatPercent(metric.tem, 4)}</td>
-        <td class="text-end">${formatNumber(metric.duration, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
-        <td class="text-end">${formatNumber(metric.modified_duration, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
-        <td class="text-end">${formatNumber(metric.convexity, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
-      </tr>
-    `).join("")
-    : '<tr><td colspan="9" class="empty-state">Carga precio T+0 o T+1 para calcular outputs</td></tr>';
-
+  latestLecapCalculation = payload;
+  saveLecap.disabled = false;
   setCalculatorStatus("ok", `${payload.ticker} calculada`);
+}
+
+function renderSavedLecaps(payload) {
+  const items = payload.items || [];
+  if (!items.length) {
+    savedLecaps.innerHTML = '<tr><td colspan="9" class="empty-state">Todavia no hay LECAPs guardadas</td></tr>';
+    return;
+  }
+
+  savedLecaps.innerHTML = items.map((item) => {
+    const cashflow = item.calculation.cashflows[0];
+    return `
+      <tr>
+        <td class="ticker">${item.ticker}</td>
+        <td>${formatDate(item.issue_date)}</td>
+        <td>${formatDate(item.maturity_date)}</td>
+        <td>${formatDate(cashflow.effective_payment_date)}</td>
+        <td class="text-end">${formatNumber(cashflow.applicable_days)}</td>
+        <td class="text-end">${formatNumber(item.face_value, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(item.tem_emission_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+        <td class="text-end">${formatNumber(cashflow.interest, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+        <td class="text-end">${formatNumber(cashflow.total, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function fetchSavedLecaps() {
+  const response = await fetch("/api/calculators/lecaps/saved");
+  if (!response.ok) throw new Error("No se pudieron leer LECAPs guardadas");
+  renderSavedLecaps(await response.json());
+}
+
+async function saveLatestLecap() {
+  if (!latestLecapCalculation) return;
+  saveLecap.disabled = true;
+  setCalculatorStatus("draft", "Guardando");
+
+  const response = await fetch("/api/calculators/lecaps/saved", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ticker: latestLecapCalculation.ticker,
+      issue_date: latestLecapCalculation.issue_date,
+      maturity_date: latestLecapCalculation.maturity_date,
+      face_value: latestLecapCalculation.face_value,
+      tem_emission_percent: latestLecapCalculation.tem_emission * 100,
+    }),
+  });
+
+  if (!response.ok) {
+    setCalculatorStatus("error", "No se pudo guardar");
+    saveLecap.disabled = false;
+    return;
+  }
+
+  await fetchSavedLecaps();
+  setCalculatorStatus("ok", `${latestLecapCalculation.ticker} guardada`);
 }
 
 async function submitBondDraft(event) {
@@ -269,14 +317,14 @@ async function submitBondDraft(event) {
       maturity_date: maturityDate.value,
       face_value: Number(faceValue.value),
       tem_emission_percent: Number(temEmission.value),
-      price_t0: priceT0.value ? Number(priceT0.value) : null,
-      price_t1: priceT1.value ? Number(priceT1.value) : null,
     }),
   });
 
   if (!response.ok) {
     setCalculatorStatus("error", "Revisar datos");
     cashflowPreview.innerHTML = '<tr><td colspan="9" class="empty-state">No se pudo calcular la LECAP</td></tr>';
+    latestLecapCalculation = null;
+    saveLecap.disabled = true;
     return;
   }
 
@@ -353,6 +401,12 @@ bcraRefresh.addEventListener("click", () => {
 });
 
 bondDraftForm.addEventListener("submit", submitBondDraft);
+saveLecap.addEventListener("click", () => {
+  saveLatestLecap().catch(() => {
+    setCalculatorStatus("error", "No se pudo guardar");
+    saveLecap.disabled = false;
+  });
+});
 
 searchInput.addEventListener("input", renderQuotes);
 

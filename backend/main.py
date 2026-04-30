@@ -16,6 +16,7 @@ from backend.bonds import BOND_TICKERS
 from backend.config import get_settings
 from backend.market_calendar import market_calendar, parse_date
 from backend.market_data import MarketDataService
+from backend.storage import CalculatorStorage
 from backend.time_utils import now_argentina_iso
 from backend.time_utils import now_argentina
 
@@ -26,6 +27,7 @@ FRONTEND_DIR = ROOT_DIR / "frontend"
 settings = get_settings()
 market = MarketDataService(settings)
 bcra = BcraClient(settings)
+storage = CalculatorStorage(ROOT_DIR / settings.app_db_path)
 
 app = FastAPI(title="Monitor de Bonos", version="0.1.0")
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
@@ -44,12 +46,11 @@ class LecapCalculationRequest(BaseModel):
     maturity_date: date
     face_value: float = Field(gt=0)
     tem_emission_percent: float
-    price_t0: float | None = Field(default=None, gt=0)
-    price_t1: float | None = Field(default=None, gt=0)
 
 
 @app.on_event("startup")
 async def startup() -> None:
+    storage.initialize()
     await market.start()
 
 
@@ -161,14 +162,60 @@ async def calculator_lecaps(payload: LecapCalculationRequest) -> dict:
             maturity_date=payload.maturity_date,
             face_value=payload.face_value,
             tem_emission_percent=payload.tem_emission_percent,
-            price_t0=payload.price_t0,
-            price_t1=payload.price_t1,
             calendar=market_calendar,
             today=now_argentina().date(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return calculation.to_dict()
+
+
+@app.get("/api/calculators/lecaps/saved")
+async def calculator_saved_lecaps() -> dict:
+    items = []
+    for saved in storage.list_lecaps():
+        calculation = build_lecap_calculation(
+            ticker=saved.ticker,
+            issue_date=saved.issue_date,
+            maturity_date=saved.maturity_date,
+            face_value=saved.face_value,
+            tem_emission_percent=saved.tem_emission_percent,
+            calendar=market_calendar,
+            today=now_argentina().date(),
+        )
+        items.append({**saved.to_dict(), "calculation": calculation.to_dict()})
+    return {"items": items}
+
+
+@app.post("/api/calculators/lecaps/saved")
+async def calculator_save_lecap(payload: LecapCalculationRequest) -> dict:
+    try:
+        calculation = build_lecap_calculation(
+            ticker=payload.ticker,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            tem_emission_percent=payload.tem_emission_percent,
+            calendar=market_calendar,
+            today=now_argentina().date(),
+        )
+        saved = storage.upsert_lecap(
+            ticker=payload.ticker,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            tem_emission_percent=payload.tem_emission_percent,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"item": saved.to_dict(), "calculation": calculation.to_dict()}
+
+
+@app.delete("/api/calculators/lecaps/saved/{item_id}")
+async def calculator_delete_lecap(item_id: int) -> dict:
+    if not storage.delete_lecap(item_id):
+        raise HTTPException(status_code=404, detail="LECAP no encontrada.")
+    return {"deleted": True}
 
 
 @app.get("/health")

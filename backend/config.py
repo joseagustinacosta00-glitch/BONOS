@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 
-load_dotenv(".env.example")
+load_dotenv(".env")
+load_dotenv(".env.example", override=False)
 
 DEFAULT_ROFEX_REST_URL = "https://api.VETA.xoms.com.ar/"
 DEFAULT_ROFEX_WS_URL = "wss://api.VETA.xoms.com.ar/"
@@ -31,6 +32,7 @@ class Settings:
     rofex_symbol_template: str
     bcra_base_url: str
     bcra_cache_ttl_seconds: int
+    app_db_path: str
 
 
 def get_settings() -> Settings:
@@ -50,4 +52,5 @@ def get_settings() -> Settings:
         ),
         bcra_base_url=os.getenv("BCRA_BASE_URL", "https://api.bcra.gob.ar"),
         bcra_cache_ttl_seconds=int(os.getenv("BCRA_CACHE_TTL_SECONDS", "21600")),
+        app_db_path=os.getenv("APP_DB_PATH", "data/user_data.db"),
     )

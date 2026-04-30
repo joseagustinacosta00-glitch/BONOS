@@ -236,15 +236,8 @@
                 <span>TEM emision %</span>
                 <input id="temEmission" class="form-control form-control-sm" type="number" step="0.0001" required>
               </label>
-              <label>
-                <span>Precio T+0</span>
-                <input id="priceT0" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001">
-              </label>
-              <label>
-                <span>Precio T+1</span>
-                <input id="priceT1" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001">
-              </label>
               <button class="btn btn-sm btn-dark" type="submit">Calcular</button>
+              <button id="saveLecap" class="btn btn-sm btn-outline-dark" type="button" disabled>Confirmar y guardar</button>
             </form>
 
             <section class="cashflow-preview" aria-label="Cashflow LECAP">
@@ -273,26 +266,26 @@
               </div>
             </section>
 
-            <section class="cashflow-preview" aria-label="Metricas LECAP">
-              <h3>Outputs de mercado</h3>
+            <section class="cashflow-preview" aria-label="LECAPs guardadas">
+              <h3>LECAPs guardadas</h3>
               <div class="table-wrap inner-table">
                 <table class="table table-sm align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>Settlement</th>
-                      <th>Fecha</th>
-                      <th class="text-end">Precio</th>
-                      <th class="text-end">TIR</th>
-                      <th class="text-end">TNA</th>
+                      <th>Ticker</th>
+                      <th>Emision</th>
+                      <th>Vencimiento</th>
+                      <th>Fecha efectiva</th>
+                      <th class="text-end">Dias</th>
+                      <th class="text-end">VNO</th>
                       <th class="text-end">TEM</th>
-                      <th class="text-end">Duration</th>
-                      <th class="text-end">Modified duration</th>
-                      <th class="text-end">Convexity</th>
+                      <th class="text-end">Interes</th>
+                      <th class="text-end">Total</th>
                     </tr>
                   </thead>
-                  <tbody id="lecapMetrics">
+                  <tbody id="savedLecaps">
                     <tr>
-                      <td colspan="9" class="empty-state">Carga precio T+0 o T+1 para calcular outputs</td>
+                      <td colspan="9" class="empty-state">Todavia no hay LECAPs guardadas</td>
                     </tr>
                   </tbody>
                 </table>
