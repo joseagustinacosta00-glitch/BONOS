@@ -22,6 +22,11 @@ const issueDate = document.querySelector("#issueDate");
 const maturityDate = document.querySelector("#maturityDate");
 const faceValue = document.querySelector("#faceValue");
 const cashflowPreview = document.querySelector("#cashflowPreview");
+const lecapTicker = document.querySelector("#lecapTicker");
+const temEmission = document.querySelector("#temEmission");
+const priceT0 = document.querySelector("#priceT0");
+const priceT1 = document.querySelector("#priceT1");
+const lecapMetrics = document.querySelector("#lecapMetrics");
 
 let currentCurrency = "all";
 let currentView = "market";
@@ -75,6 +80,13 @@ function formatNumber(value, options = {}) {
     return '<span class="empty-cell">s/d</span>';
   }
   return new Intl.NumberFormat("es-AR", options).format(value);
+}
+
+function formatPercent(value, fractionDigits = 2) {
+  if (value === null || value === undefined || value === "") {
+    return '<span class="empty-cell">s/d</span>';
+  }
+  return `${formatNumber(value * 100, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })}%`;
 }
 
 function formatTime(value) {
@@ -202,58 +214,73 @@ function setBondModel(model) {
   currentBondModel = model;
   calculatorTitle.textContent = BOND_MODEL_LABELS[model] || "Calculadora";
   setCalculatorStatus("draft", "Borrador");
-  cashflowPreview.innerHTML = '<tr><td class="empty-state">Completá los datos iniciales</td></tr>';
+  cashflowPreview.innerHTML = '<tr><td colspan="9" class="empty-state">Completa los datos iniciales</td></tr>';
+  lecapMetrics.innerHTML = '<tr><td colspan="9" class="empty-state">Carga precio T+0 o T+1 para calcular outputs</td></tr>';
 
   document.querySelectorAll("[data-bond-model]").forEach((button) => {
     button.classList.toggle("active", button.dataset.bondModel === model);
   });
 }
 
-function renderCashflowDraft(payload) {
-  const draft = payload.draft;
-  cashflowPreview.innerHTML = `
+function renderLecapCalculation(payload) {
+  cashflowPreview.innerHTML = payload.cashflows.map((cashflow) => `
     <tr>
-      <th>Tipo</th>
-      <td>${BOND_MODEL_LABELS[draft.model_type] || draft.model_type}</td>
+      <td>${cashflow.number}</td>
+      <td>${formatDate(cashflow.payment_date)}</td>
+      <td>${formatDate(cashflow.effective_payment_date)}</td>
+      <td class="text-end">${formatNumber(cashflow.applicable_days)}</td>
+      <td class="text-end">${formatNumber(cashflow.amortization_vn, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(cashflow.amortization_vr, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatPercent(cashflow.applicable_rate, 4)}</td>
+      <td class="text-end">${formatNumber(cashflow.interest, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+      <td class="text-end">${formatNumber(cashflow.total, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
     </tr>
-    <tr>
-      <th>Fecha de emisión</th>
-      <td>${formatDate(draft.issue_date)}</td>
-    </tr>
-    <tr>
-      <th>Fecha de vencimiento</th>
-      <td>${formatDate(draft.maturity_date)}</td>
-    </tr>
-    <tr>
-      <th>VNO</th>
-      <td>${formatNumber(draft.face_value, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-    </tr>
-  `;
-  setCalculatorStatus("ok", "Base creada");
+  `).join("");
+
+  lecapMetrics.innerHTML = payload.metrics.length
+    ? payload.metrics.map((metric) => `
+      <tr>
+        <td>${metric.settlement_type}</td>
+        <td>${formatDate(metric.settlement_date)}</td>
+        <td class="text-end">${formatNumber(metric.price, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatPercent(metric.tir, 2)}</td>
+        <td class="text-end">${formatPercent(metric.tna, 2)}</td>
+        <td class="text-end">${formatPercent(metric.tem, 4)}</td>
+        <td class="text-end">${formatNumber(metric.duration, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
+        <td class="text-end">${formatNumber(metric.modified_duration, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
+        <td class="text-end">${formatNumber(metric.convexity, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}</td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="9" class="empty-state">Carga precio T+0 o T+1 para calcular outputs</td></tr>';
+
+  setCalculatorStatus("ok", `${payload.ticker} calculada`);
 }
 
 async function submitBondDraft(event) {
   event.preventDefault();
   setCalculatorStatus("draft", "Calculando");
 
-  const response = await fetch("/api/calculators/bond-draft", {
+  const response = await fetch("/api/calculators/lecaps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model_type: currentBondModel,
+      ticker: lecapTicker.value,
       issue_date: issueDate.value,
       maturity_date: maturityDate.value,
       face_value: Number(faceValue.value),
+      tem_emission_percent: Number(temEmission.value),
+      price_t0: priceT0.value ? Number(priceT0.value) : null,
+      price_t1: priceT1.value ? Number(priceT1.value) : null,
     }),
   });
 
   if (!response.ok) {
     setCalculatorStatus("error", "Revisar datos");
-    cashflowPreview.innerHTML = '<tr><td class="empty-state">No se pudo crear la base</td></tr>';
+    cashflowPreview.innerHTML = '<tr><td colspan="9" class="empty-state">No se pudo calcular la LECAP</td></tr>';
     return;
   }
 
-  renderCashflowDraft(await response.json());
+  renderLecapCalculation(await response.json());
 }
 
 async function fetchSnapshot() {

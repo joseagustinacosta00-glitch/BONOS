@@ -108,6 +108,8 @@ Abrir http://127.0.0.1:8000
 - `GET /api/bcra/series/cer?limit=0`: serie CER completa.
 - `GET /api/bcra/series/tamar_private_banks_na?limit=0`: serie TAMAR n.a. completa.
 - `POST /api/calculators/bond-draft`: crea la base inicial de un bono para calculadoras.
+- `GET /api/calculators/lecaps/tickers`: tickers LECAP cargados.
+- `POST /api/calculators/lecaps`: calcula cashflow y outputs de mercado para una LECAP.
 - `WS /ws/quotes`: snapshot continuo para la UI.
 
 ## Calendario y Modelos
@@ -126,6 +128,14 @@ La base de modelos para calculadoras esta en `backend/bond_calculators.py` y con
 - hard dollar
 
 La solapa `Calculadoras` tiene templates separados para tasa fija, CER, TAMAR y hard dollar. El primer paso del formulario pide fecha de emision, fecha de vencimiento y VNO; con eso arma la base del futuro cashflow.
+
+Dentro de `Tasa fija` esta cargado el subtipo `LECAPs` con estos tickers: S15Y6, S29Y6, T30J6, S17L6, S31L6, S14G6, S31G6, S30S6 y S30O6.
+
+Para LECAPs se pide ticker, fecha de emision, fecha de vencimiento, VNO, TEM de emision, precio T+0 y precio T+1. El cashflow es bullet a vencimiento, ajusta fecha de pago al siguiente dia habil si hace falta y calcula interes con:
+
+```text
+VNO * (1 + TEM) ^ (dias / 30) - VNO
+```
 
 ## Datos BCRA
 

@@ -5,18 +5,19 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.bcra_client import BCRA_SERIES, BcraClient
-from backend.bond_calculators import BondModelType, build_bond_draft
+from backend.bond_calculators import LECAP_TICKERS, BondModelType, build_bond_draft, build_lecap_calculation
 from backend.bonds import BOND_TICKERS
 from backend.config import get_settings
 from backend.market_calendar import market_calendar, parse_date
 from backend.market_data import MarketDataService
 from backend.time_utils import now_argentina_iso
+from backend.time_utils import now_argentina
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -35,6 +36,16 @@ class BondDraftRequest(BaseModel):
     issue_date: date
     maturity_date: date
     face_value: float = Field(gt=0)
+
+
+class LecapCalculationRequest(BaseModel):
+    ticker: str
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
+    tem_emission_percent: float
+    price_t0: float | None = Field(default=None, gt=0)
+    price_t1: float | None = Field(default=None, gt=0)
 
 
 @app.on_event("startup")
@@ -116,12 +127,15 @@ async def bcra_catalog() -> dict:
 
 @app.post("/api/calculators/bond-draft")
 async def calculator_bond_draft(payload: BondDraftRequest) -> dict:
-    draft = build_bond_draft(
-        model_type=payload.model_type,
-        issue_date=payload.issue_date,
-        maturity_date=payload.maturity_date,
-        face_value=payload.face_value,
-    )
+    try:
+        draft = build_bond_draft(
+            model_type=payload.model_type,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "draft": draft.to_dict(),
         "cashflow_inputs": {
@@ -131,6 +145,30 @@ async def calculator_bond_draft(payload: BondDraftRequest) -> dict:
         },
         "next_questions": [],
     }
+
+
+@app.get("/api/calculators/lecaps/tickers")
+async def calculator_lecap_tickers() -> dict:
+    return {"tickers": list(LECAP_TICKERS)}
+
+
+@app.post("/api/calculators/lecaps")
+async def calculator_lecaps(payload: LecapCalculationRequest) -> dict:
+    try:
+        calculation = build_lecap_calculation(
+            ticker=payload.ticker,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            tem_emission_percent=payload.tem_emission_percent,
+            price_t0=payload.price_t0,
+            price_t1=payload.price_t1,
+            calendar=market_calendar,
+            today=now_argentina().date(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return calculation.to_dict()
 
 
 @app.get("/health")

@@ -288,6 +288,10 @@ tbody td {
   margin-bottom: 18px;
 }
 
+.calculator-form.lecap-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .calculator-form label span {
   display: block;
   color: var(--muted);
@@ -298,11 +302,22 @@ tbody td {
 .cashflow-preview {
   border-top: 1px solid var(--line);
   padding-top: 14px;
+  margin-top: 14px;
 }
 
 .cashflow-preview h3 {
   margin: 0 0 10px;
   font-size: 1rem;
+}
+
+.inner-table {
+  border-radius: 6px;
+}
+
+.subtype-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 @media (max-width: 760px) {
@@ -336,7 +351,8 @@ tbody td {
   }
 
   .calculator-layout,
-  .calculator-form {
+  .calculator-form,
+  .calculator-form.lecap-form {
     grid-template-columns: 1fr;
   }
 }

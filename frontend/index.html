@@ -176,7 +176,7 @@
           <aside class="calculator-menu" aria-label="Tipo de bono">
             <button class="calculator-option active" data-bond-model="pesos_fixed_rate" type="button">
               <span>Tasa fija</span>
-              <small>Pesos con cupón fijo</small>
+              <small>Pesos con cupon fijo</small>
             </button>
             <button class="calculator-option" data-bond-model="cer" type="button">
               <span>Bonos CER</span>
@@ -188,7 +188,7 @@
             </button>
             <button class="calculator-option" data-bond-model="hard_dollar" type="button">
               <span>Bonos Hard Dollar</span>
-              <small>Dólar linked legal hard dollar</small>
+              <small>Dolar linked legal hard dollar</small>
             </button>
           </aside>
 
@@ -201,9 +201,27 @@
               <span id="calculatorStatus" class="calc-status">Borrador</span>
             </div>
 
-            <form id="bondDraftForm" class="calculator-form">
+            <div id="fixedRateSubmenu" class="subtype-tabs">
+              <button class="btn btn-sm btn-dark active" type="button">LECAPs</button>
+            </div>
+
+            <form id="bondDraftForm" class="calculator-form lecap-form">
               <label>
-                <span>Fecha de emisión</span>
+                <span>Ticker</span>
+                <select id="lecapTicker" class="form-select form-select-sm" required>
+                  <option value="S15Y6">S15Y6</option>
+                  <option value="S29Y6">S29Y6</option>
+                  <option value="T30J6">T30J6</option>
+                  <option value="S17L6">S17L6</option>
+                  <option value="S31L6">S31L6</option>
+                  <option value="S14G6">S14G6</option>
+                  <option value="S31G6">S31G6</option>
+                  <option value="S30S6">S30S6</option>
+                  <option value="S30O6">S30O6</option>
+                </select>
+              </label>
+              <label>
+                <span>Fecha de emision</span>
                 <input id="issueDate" class="form-control form-control-sm" type="date" required>
               </label>
               <label>
@@ -214,18 +232,71 @@
                 <span>VNO</span>
                 <input id="faceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100" required>
               </label>
-              <button class="btn btn-sm btn-dark" type="submit">Crear base</button>
+              <label>
+                <span>TEM emision %</span>
+                <input id="temEmission" class="form-control form-control-sm" type="number" step="0.0001" required>
+              </label>
+              <label>
+                <span>Precio T+0</span>
+                <input id="priceT0" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001">
+              </label>
+              <label>
+                <span>Precio T+1</span>
+                <input id="priceT1" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001">
+              </label>
+              <button class="btn btn-sm btn-dark" type="submit">Calcular</button>
             </form>
 
-            <section class="cashflow-preview" aria-label="Base del cashflow">
-              <h3>Base del cashflow</h3>
-              <table class="table table-sm align-middle mb-0">
-                <tbody id="cashflowPreview">
-                  <tr>
-                    <td class="empty-state">Completá los datos iniciales</td>
-                  </tr>
-                </tbody>
-              </table>
+            <section class="cashflow-preview" aria-label="Cashflow LECAP">
+              <h3>Cashflow LECAP</h3>
+              <div class="table-wrap inner-table">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Cashflow</th>
+                      <th>Fecha de pago</th>
+                      <th>Fecha efectiva</th>
+                      <th class="text-end">Periodo dias</th>
+                      <th class="text-end">Amortizacion VN</th>
+                      <th class="text-end">Amortizacion VR</th>
+                      <th class="text-end">Tasa aplicable</th>
+                      <th class="text-end">Interes</th>
+                      <th class="text-end">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody id="cashflowPreview">
+                    <tr>
+                      <td colspan="9" class="empty-state">Completa los datos iniciales</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="cashflow-preview" aria-label="Metricas LECAP">
+              <h3>Outputs de mercado</h3>
+              <div class="table-wrap inner-table">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Settlement</th>
+                      <th>Fecha</th>
+                      <th class="text-end">Precio</th>
+                      <th class="text-end">TIR</th>
+                      <th class="text-end">TNA</th>
+                      <th class="text-end">TEM</th>
+                      <th class="text-end">Duration</th>
+                      <th class="text-end">Modified duration</th>
+                      <th class="text-end">Convexity</th>
+                    </tr>
+                  </thead>
+                  <tbody id="lecapMetrics">
+                    <tr>
+                      <td colspan="9" class="empty-state">Carga precio T+0 o T+1 para calcular outputs</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </section>
           </section>
         </section>

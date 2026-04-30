@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
+from typing import Protocol
 
 
 class BondModelType(StrEnum):
@@ -18,6 +19,24 @@ class DayCount(StrEnum):
     THIRTY_360 = "30/360"
 
 
+LECAP_TICKERS: tuple[str, ...] = (
+    "S15Y6",
+    "S29Y6",
+    "T30J6",
+    "S17L6",
+    "S31L6",
+    "S14G6",
+    "S31G6",
+    "S30S6",
+    "S30O6",
+)
+
+
+class BusinessCalendar(Protocol):
+    def next_business_day(self, value: date, include_current: bool = False) -> date:
+        ...
+
+
 @dataclass(frozen=True)
 class Cashflow:
     payment_date: date
@@ -27,6 +46,89 @@ class Cashflow:
     @property
     def total(self) -> float:
         return self.amortization + self.interest
+
+
+@dataclass(frozen=True)
+class LecapCashflow:
+    number: int
+    payment_date: date
+    effective_payment_date: date
+    applicable_days: int
+    applicable_period_360: float
+    amortization_vn: float
+    amortization_vr: float
+    applicable_rate: float
+    interest: float
+
+    @property
+    def total(self) -> float:
+        return self.amortization_vn + self.interest
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "number": self.number,
+            "payment_date": self.payment_date.isoformat(),
+            "effective_payment_date": self.effective_payment_date.isoformat(),
+            "applicable_days": self.applicable_days,
+            "applicable_period_360": self.applicable_period_360,
+            "amortization_vn": self.amortization_vn,
+            "amortization_vr": self.amortization_vr,
+            "applicable_rate": self.applicable_rate,
+            "interest": self.interest,
+            "total_amortization": self.amortization_vn,
+            "total_interest": self.interest,
+            "total": self.total,
+        }
+
+
+@dataclass(frozen=True)
+class LecapMarketMetrics:
+    settlement_type: str
+    settlement_date: date
+    price: float
+    days_to_payment: int
+    tir: float
+    modified_duration: float
+    tna: float
+    tem: float
+    duration: float
+    convexity: float
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "settlement_type": self.settlement_type,
+            "settlement_date": self.settlement_date.isoformat(),
+            "price": self.price,
+            "days_to_payment": self.days_to_payment,
+            "tir": self.tir,
+            "modified_duration": self.modified_duration,
+            "tna": self.tna,
+            "tem": self.tem,
+            "duration": self.duration,
+            "convexity": self.convexity,
+        }
+
+
+@dataclass(frozen=True)
+class LecapCalculation:
+    ticker: str
+    issue_date: date
+    maturity_date: date
+    face_value: float
+    tem_emission: float
+    cashflows: tuple[LecapCashflow, ...]
+    metrics: tuple[LecapMarketMetrics, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "ticker": self.ticker,
+            "issue_date": self.issue_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "face_value": self.face_value,
+            "tem_emission": self.tem_emission,
+            "cashflows": [cashflow.to_dict() for cashflow in self.cashflows],
+            "metrics": [metric.to_dict() for metric in self.metrics],
+        }
 
 
 @dataclass(frozen=True)
@@ -102,4 +204,105 @@ def build_bond_draft(
         issue_date=issue_date,
         maturity_date=maturity_date,
         face_value=face_value,
+    )
+
+
+def build_lecap_calculation(
+    ticker: str,
+    issue_date: date,
+    maturity_date: date,
+    face_value: float,
+    tem_emission_percent: float,
+    calendar: BusinessCalendar,
+    today: date,
+    price_t0: float | None = None,
+    price_t1: float | None = None,
+) -> LecapCalculation:
+    ticker = ticker.upper().strip()
+    if ticker not in LECAP_TICKERS:
+        raise ValueError("Ticker LECAP no soportado.")
+    if maturity_date <= issue_date:
+        raise ValueError("La fecha de vencimiento debe ser posterior a la fecha de emision.")
+    if face_value <= 0:
+        raise ValueError("El VNO debe ser mayor a cero.")
+    if tem_emission_percent < -99:
+        raise ValueError("La TEM de emision no puede ser menor a -99%.")
+
+    tem_emission = tem_emission_percent / 100
+    effective_payment_date = calendar.next_business_day(maturity_date, include_current=True)
+    applicable_days = (effective_payment_date - issue_date).days
+    final_value = face_value * (1 + tem_emission) ** (applicable_days / 30)
+    interest = final_value - face_value
+
+    cashflow = LecapCashflow(
+        number=1,
+        payment_date=maturity_date,
+        effective_payment_date=effective_payment_date,
+        applicable_days=applicable_days,
+        applicable_period_360=applicable_days / 360,
+        amortization_vn=face_value,
+        amortization_vr=0,
+        applicable_rate=tem_emission,
+        interest=interest,
+    )
+
+    metrics = tuple(
+        metric
+        for metric in (
+            _build_lecap_metrics("T+0", today, price_t0, cashflow.total, effective_payment_date),
+            _build_lecap_metrics(
+                "T+1",
+                calendar.next_business_day(today, include_current=False),
+                price_t1,
+                cashflow.total,
+                effective_payment_date,
+            ),
+        )
+        if metric is not None
+    )
+
+    return LecapCalculation(
+        ticker=ticker,
+        issue_date=issue_date,
+        maturity_date=maturity_date,
+        face_value=face_value,
+        tem_emission=tem_emission,
+        cashflows=(cashflow,),
+        metrics=metrics,
+    )
+
+
+def _build_lecap_metrics(
+    settlement_type: str,
+    settlement_date: date,
+    price: float | None,
+    final_value: float,
+    payment_date: date,
+) -> LecapMarketMetrics | None:
+    if price is None or price <= 0:
+        return None
+
+    days_to_payment = (payment_date - settlement_date).days
+    if days_to_payment <= 0:
+        return None
+
+    ratio = final_value / price
+    tir = ratio ** (365 / days_to_payment) - 1
+    tem = ratio ** (30 / days_to_payment) - 1
+    tna = tem * 12
+    duration = days_to_payment / 365
+    modified_duration = duration / (1 + tir)
+    convexity = duration * (duration + 1) / (1 + tir) ** 2
+
+    return LecapMarketMetrics(
+        settlement_type=settlement_type,
+        settlement_date=settlement_date,
+        price=price,
+        days_to_payment=days_to_payment,
+        tir=tir,
+        modified_duration=modified_duration,
+        tna=tna,
+        tem=tem,
+        duration=duration,
+        convexity=convexity,
     )
