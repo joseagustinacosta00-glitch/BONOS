@@ -114,6 +114,7 @@ Abrir http://127.0.0.1:8000
 - `GET /api/bcra/series/tamar_private_banks_na?limit=0`: serie TAMAR n.a. completa.
 - `GET /api/market/lecaps?settlement=t0|t1`: LECAPs guardadas con precios y metricas de mercado.
 - `GET /api/market/caucion/shortest`: caucion ARS de menor plazo detectada para tasa automatica.
+- `GET /api/market/cauciones`: lista de cauciones ARS configuradas o detectadas por pyRofex.
 - `POST /api/tools/tplus-conversion`: capitaliza o descuenta precios entre T+0 y T+1.
 - `POST /api/calculators/bond-draft`: crea la base inicial de un bono para calculadoras.
 - `GET /api/calculators/lecaps/tickers`: tickers LECAP cargados.

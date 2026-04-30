@@ -172,6 +172,18 @@ async def market_shortest_caucion() -> dict:
     }
 
 
+@app.get("/api/market/cauciones")
+async def market_cauciones() -> dict:
+    items = market.caucion_quotes()
+    return {
+        "status": market.status,
+        "source": market.settings.market_source,
+        "updated_at": now_argentina_iso(),
+        "items": items,
+        "shortest": items[0] if items else {},
+    }
+
+
 @app.post("/api/tools/tplus-conversion")
 async def tplus_conversion(payload: TPlusConversionRequest) -> dict:
     today = now_argentina().date()

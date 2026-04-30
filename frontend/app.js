@@ -413,7 +413,8 @@ async function fetchLecapMarket() {
 async function fetchTplusAutoRate() {
   if (!tplusAutoRate.checked) return null;
   const payload = await fetchRates();
-  const last = payload.quote ? payload.quote.last : null;
+  const quote = payload.shortest || payload.quote || {};
+  const last = quote.last;
   if (last !== null && last !== undefined && last !== "") {
     tplusRate.value = String(last);
     setTplusStatus("ok", "Tasa automatica");
@@ -424,35 +425,36 @@ async function fetchTplusAutoRate() {
 }
 
 async function fetchRates() {
-  const response = await fetch("/api/market/caucion/shortest");
-  if (!response.ok) throw new Error("No se pudo leer caucion");
+  const response = await fetch("/api/market/cauciones");
+  if (!response.ok) throw new Error("No se pudieron leer cauciones");
   const payload = await response.json();
   renderRates(payload);
   return payload;
 }
 
 function renderRates(payload) {
-  const quote = payload.quote || {};
+  const items = payload.items || [];
+  const quote = payload.shortest || payload.quote || items[0] || {};
   const last = quote.last;
   ratesLast.innerHTML = formatPercent(last !== null && last !== undefined ? last / 100 : null, 2);
   ratesTerm.textContent = quote.term_days ? `${formatNumber(quote.term_days)} dias` : "-";
   ratesUpdatedAt.innerHTML = formatTime(quote.updated_at || payload.updated_at);
 
-  if (!quote.symbol) {
-    ratesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Sin caucion detectada</td></tr>';
+  if (!items.length) {
+    ratesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Sin cauciones detectadas</td></tr>';
     return;
   }
 
-  ratesBody.innerHTML = `
+  ratesBody.innerHTML = items.map((item) => `
     <tr>
-      <td class="ticker">${quote.symbol}</td>
-      <td>${quote.label || quote.provider_symbol || "-"}</td>
-      <td class="text-end">${formatNumber(quote.bid, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(quote.ask, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(quote.last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(quote.volume)}</td>
+      <td class="ticker">${item.symbol}</td>
+      <td>${item.provider_symbol || item.label || "-"}</td>
+      <td class="text-end">${formatNumber(item.bid, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(item.ask, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(item.last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(item.volume)}</td>
     </tr>
-  `;
+  `).join("");
 }
 
 async function calculateTplus() {

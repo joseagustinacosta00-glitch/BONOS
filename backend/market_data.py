@@ -84,6 +84,20 @@ class MarketDataService:
             )[0]
         )
 
+    def caucion_quotes(self) -> list[dict[str, Any]]:
+        with self._lock:
+            quotes = list(self._caucion_quotes.values())
+        return [
+            dict(quote)
+            for quote in sorted(
+                quotes,
+                key=lambda quote: (
+                    int(quote.get("term_days") or 999),
+                    str(quote.get("symbol") or ""),
+                ),
+            )
+        ]
+
     def lecap_quotes(self, settlement_type: str) -> list[dict[str, Any]]:
         settlement_key = self._normalize_lecap_settlement_type(settlement_type)
         with self._lock:
@@ -407,9 +421,6 @@ class MarketDataService:
         }
 
     def _load_caucion_instrument(self, pyRofex: Any, environment: Any) -> None:
-        if self._configured_caucion_symbols():
-            return
-
         try:
             response = pyRofex.get_all_instruments(environment=environment)
         except Exception as exc:
@@ -417,27 +428,58 @@ class MarketDataService:
             return
 
         candidates = []
+        configured_aliases = self._configured_caucion_symbols()
+        configured_lookup = {
+            self._normalize_symbol(alias): alias for alias in configured_aliases
+        }
         for instrument in self._instrument_rows(response):
             symbol = self._instrument_symbol(instrument)
             if not symbol:
                 continue
             text = self._instrument_text(instrument, symbol)
             upper_text = text.upper()
+            alias = self._matching_configured_caucion_alias(
+                symbol,
+                text,
+                configured_lookup,
+            )
+            if alias:
+                candidates.append(
+                    (
+                        self._infer_caucion_term_days(alias),
+                        alias,
+                        symbol,
+                        text,
+                    )
+                )
+                continue
+            if configured_aliases:
+                continue
             if "CAUC" not in upper_text:
                 continue
-            if any(value in upper_text for value in ("USD", "DOLAR", "DÓLAR")):
+            if any(value in upper_text for value in ("USD", "DOLAR")):
                 continue
             if not any(value in upper_text for value in ("ARS", "PESO", "$", "CAUC")):
                 continue
-            candidates.append((self._infer_caucion_term_days(text), symbol, text))
+            candidates.append((self._infer_caucion_term_days(text), symbol, symbol, text))
 
         if not candidates:
             return
 
-        term_days, symbol, label = sorted(candidates, key=lambda item: (item[0], item[1]))[0]
         with self._lock:
-            self._rofex_to_quote[symbol] = ("caucion", symbol, None)
-            self._seed_caucion_quote(symbol, term_days, label, now_argentina_iso())
+            for term_days, symbol, provider_symbol, label in sorted(
+                candidates,
+                key=lambda item: (item[0], item[1], item[2]),
+            ):
+                self._rofex_to_quote.pop(symbol, None)
+                self._rofex_to_quote[provider_symbol] = ("caucion", symbol, None)
+                self._seed_caucion_quote(
+                    symbol,
+                    term_days,
+                    label,
+                    now_argentina_iso(),
+                    provider_symbol=provider_symbol,
+                )
 
     def _seed_caucion_quote(
         self,
@@ -445,19 +487,21 @@ class MarketDataService:
         term_days: int,
         label: str,
         updated_at: str,
+        provider_symbol: str | None = None,
     ) -> None:
+        current = self._caucion_quotes.get(symbol, {})
         self._caucion_quotes[symbol] = {
             "symbol": symbol,
-            "provider_symbol": symbol,
+            "provider_symbol": provider_symbol or current.get("provider_symbol") or symbol,
             "label": label,
             "term_days": term_days,
             "currency": "ARS",
-            "last": None,
-            "bid": None,
-            "ask": None,
-            "volume": None,
+            "last": current.get("last"),
+            "bid": current.get("bid"),
+            "ask": current.get("ask"),
+            "volume": current.get("volume"),
             "updated_at": updated_at,
-            "raw": {},
+            "raw": current.get("raw") or {},
         }
 
     def _configured_caucion_symbols(self) -> list[str]:
@@ -500,6 +544,26 @@ class MarketDataService:
             if value:
                 values.append(str(value))
         return " ".join(values)
+
+    @classmethod
+    def _matching_configured_caucion_alias(
+        cls,
+        provider_symbol: str,
+        text: str,
+        configured_lookup: dict[str, str],
+    ) -> str | None:
+        normalized_provider = cls._normalize_symbol(provider_symbol)
+        normalized_text = cls._normalize_symbol(text)
+        for normalized_alias, alias in configured_lookup.items():
+            if normalized_provider == normalized_alias:
+                return alias
+            if normalized_alias in normalized_provider or normalized_alias in normalized_text:
+                return alias
+        return None
+
+    @staticmethod
+    def _normalize_symbol(value: str) -> str:
+        return re.sub(r"[^A-Z0-9]+", "", value.upper())
 
     @staticmethod
     def _infer_caucion_term_days(text: str) -> int:
