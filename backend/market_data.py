@@ -4,6 +4,7 @@ import asyncio
 import logging
 import math
 import random
+import re
 import threading
 from typing import Any
 
@@ -22,6 +23,7 @@ class MarketDataService:
         self.last_error: str | None = None
         self._quotes: dict[str, dict[str, Any]] = {}
         self._lecap_quotes: dict[str, dict[str, dict[str, Any]]] = {}
+        self._caucion_quote: dict[str, Any] = {}
         self._lock = threading.RLock()
         self._mock_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
@@ -66,6 +68,10 @@ class MarketDataService:
             "updated_at": now_argentina_iso(),
             "quotes": quotes,
         }
+
+    def shortest_caucion_rate(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._caucion_quote)
 
     def lecap_quotes(self, settlement_type: str) -> list[dict[str, Any]]:
         settlement_key = self._normalize_lecap_settlement_type(settlement_type)
@@ -122,6 +128,12 @@ class MarketDataService:
                         "updated_at": now,
                         "raw": {},
                     }
+            if self._caucion_quote:
+                self._caucion_quote["updated_at"] = now
+            else:
+                self._seed_caucion_quote("CAUCION_ARS_1D", 1, "CAUCION ARS 1D", now)
+            if self.settings.market_source == "mock" and self._caucion_quote["last"] is None:
+                self._caucion_quote["last"] = 35.0
 
     async def _mock_loop(self) -> None:
         base_prices = {
@@ -176,6 +188,13 @@ class MarketDataService:
                                 "raw": {"mock": True},
                             }
                         )
+                self._caucion_quote.update(
+                    {
+                        "last": round(35 + random.uniform(-0.25, 0.25), 2),
+                        "updated_at": now,
+                        "raw": {"mock": True},
+                    }
+                )
             await asyncio.sleep(1.5)
 
     def _start_pyrofex(self) -> None:
@@ -200,6 +219,7 @@ class MarketDataService:
             environment=environment,
         )
 
+        self._load_caucion_instrument(pyRofex, environment)
         self._load_initial_rest_snapshot(pyRofex, entries)
         pyRofex.init_websocket_connection(
             market_data_handler=self._on_market_data,
@@ -208,7 +228,7 @@ class MarketDataService:
             environment=environment,
         )
         pyRofex.market_data_subscription(
-            tickers=list(self._rofex_to_local.keys()),
+            tickers=list(self._rofex_to_quote.keys()),
             entries=entries,
             depth=1,
             market=self._market(pyRofex),
@@ -289,7 +309,9 @@ class MarketDataService:
         now = now_argentina_iso()
 
         with self._lock:
-            if category == "lecap" and settlement_type:
+            if category == "caucion":
+                current = self._caucion_quote
+            elif category == "lecap" and settlement_type:
                 current = self._lecap_quotes[settlement_type][local_symbol]
             else:
                 current = self._quotes[local_symbol]
@@ -337,7 +359,7 @@ class MarketDataService:
         if provider_symbol in TICKER_BY_SYMBOL:
             return ("bond", provider_symbol, None)
         if provider_symbol in LECAP_TICKERS:
-            return ("lecap", provider_symbol, "t1")
+                return ("lecap", provider_symbol, "t1")
         return None
 
     def _rofex_symbol(self, symbol: str, settlement: str | None = None) -> str:
@@ -356,12 +378,130 @@ class MarketDataService:
                     ticker,
                     settlement_key,
                 )
+        for symbol in self._configured_caucion_symbols():
+            self._rofex_to_quote[symbol] = ("caucion", symbol, None)
+            if not self._caucion_quote:
+                self._seed_caucion_quote(
+                    symbol=symbol,
+                    term_days=self._infer_caucion_term_days(symbol),
+                    label=symbol,
+                    updated_at=now_argentina_iso(),
+                )
 
     def _lecap_settlements(self) -> dict[str, str]:
         return {
             "t0": self.settings.rofex_settlement_t0,
             "t1": self.settings.rofex_settlement_t1,
         }
+
+    def _load_caucion_instrument(self, pyRofex: Any, environment: Any) -> None:
+        if self._configured_caucion_symbols():
+            return
+
+        try:
+            response = pyRofex.get_all_instruments(environment=environment)
+        except Exception as exc:
+            logger.debug("Could not discover caucion instruments: %s", exc)
+            return
+
+        candidates = []
+        for instrument in self._instrument_rows(response):
+            symbol = self._instrument_symbol(instrument)
+            if not symbol:
+                continue
+            text = self._instrument_text(instrument, symbol)
+            upper_text = text.upper()
+            if "CAUC" not in upper_text:
+                continue
+            if any(value in upper_text for value in ("USD", "DOLAR", "DÓLAR")):
+                continue
+            if not any(value in upper_text for value in ("ARS", "PESO", "$", "CAUC")):
+                continue
+            candidates.append((self._infer_caucion_term_days(text), symbol, text))
+
+        if not candidates:
+            return
+
+        term_days, symbol, label = sorted(candidates, key=lambda item: (item[0], item[1]))[0]
+        with self._lock:
+            self._rofex_to_quote[symbol] = ("caucion", symbol, None)
+            self._seed_caucion_quote(symbol, term_days, label, now_argentina_iso())
+
+    def _seed_caucion_quote(
+        self,
+        symbol: str,
+        term_days: int,
+        label: str,
+        updated_at: str,
+    ) -> None:
+        self._caucion_quote = {
+            "symbol": symbol,
+            "provider_symbol": symbol,
+            "label": label,
+            "term_days": term_days,
+            "currency": "ARS",
+            "last": None,
+            "bid": None,
+            "ask": None,
+            "volume": None,
+            "updated_at": updated_at,
+            "raw": {},
+        }
+
+    def _configured_caucion_symbols(self) -> list[str]:
+        return [
+            value.strip()
+            for value in self.settings.rofex_caucion_symbols.split(",")
+            if value.strip()
+        ]
+
+    @classmethod
+    def _instrument_rows(cls, response: Any) -> list[Any]:
+        if isinstance(response, dict):
+            rows = response.get("instruments") or response.get("data") or response.get("items")
+            if isinstance(rows, list):
+                return rows
+        return response if isinstance(response, list) else []
+
+    @classmethod
+    def _instrument_symbol(cls, instrument: Any) -> str | None:
+        if isinstance(instrument, str):
+            return instrument
+        if not isinstance(instrument, dict):
+            return None
+
+        instrument_id = instrument.get("instrumentId") or instrument.get("instrument") or {}
+        if isinstance(instrument_id, dict):
+            value = instrument_id.get("symbol") or instrument_id.get("ticker")
+            if value:
+                return str(value)
+        value = instrument.get("symbol") or instrument.get("ticker")
+        return str(value) if value else None
+
+    @classmethod
+    def _instrument_text(cls, instrument: Any, symbol: str) -> str:
+        if not isinstance(instrument, dict):
+            return symbol
+        values = [symbol]
+        for key in ("description", "securityDescription", "instrumentDescription", "maturityDate"):
+            value = instrument.get(key)
+            if value:
+                values.append(str(value))
+        return " ".join(values)
+
+    @staticmethod
+    def _infer_caucion_term_days(text: str) -> int:
+        upper_text = text.upper()
+        for pattern in (
+            r"(\d+)\s*(?:D|DIA|DIAS|DÍAS)\b",
+            r"\b(\d+)\s*(?:HS|H)\b",
+            r"\b(\d{1,3})\b",
+        ):
+            match = re.search(pattern, upper_text)
+            if match:
+                value = int(match.group(1))
+                return max(1, value // 24 if "H" in match.group(0) and value > 23 else value)
+        return 999
 
     @staticmethod
     def _normalize_lecap_settlement_type(value: str) -> str:

@@ -39,6 +39,7 @@
         <button class="btn btn-sm btn-dark active" data-view="market" type="button">Mercado</button>
         <button class="btn btn-sm btn-outline-dark" data-view="bcra" type="button">Datos BCRA</button>
         <button class="btn btn-sm btn-outline-dark" data-view="calculators" type="button">Calculadoras</button>
+        <button class="btn btn-sm btn-outline-dark" data-view="tplus" type="button">T+0 / T+1</button>
       </nav>
 
       <section id="marketView" class="view-panel active">
@@ -301,6 +302,55 @@
                 </table>
               </div>
             </section>
+          </section>
+        </section>
+      </section>
+
+      <section id="tplusView" class="view-panel" aria-label="T+0 / T+1">
+        <section class="calculator-panel tplus-panel">
+          <div class="calculator-heading">
+            <div>
+              <p class="eyebrow">Caucion</p>
+              <h2>T+0 / T+1</h2>
+            </div>
+            <span id="tplusStatus" class="calc-status">Listo</span>
+          </div>
+
+          <form id="tplusForm" class="calculator-form tplus-form">
+            <label>
+              <span>Direccion</span>
+              <select id="tplusDirection" class="form-select form-select-sm">
+                <option value="t0_to_t1">T+0 a T+1</option>
+                <option value="t1_to_t0">T+1 a T+0</option>
+              </select>
+            </label>
+            <label>
+              <span>Tasa caucion %</span>
+              <input id="tplusRate" class="form-control form-control-sm" type="number" step="0.0001">
+            </label>
+            <label>
+              <span>Precio</span>
+              <input id="tplusPrice" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001">
+            </label>
+            <label class="toggle-label">
+              <input id="tplusAutoRate" class="form-check-input" type="checkbox" checked>
+              <span>Tasa automatica</span>
+            </label>
+          </form>
+
+          <section class="summary-grid tplus-summary" aria-label="Resultado T+0 T+1">
+            <div class="metric-panel">
+              <span>Dias</span>
+              <strong id="tplusDays">-</strong>
+            </div>
+            <div class="metric-panel">
+              <span>Proximo habil</span>
+              <strong id="tplusNextBusinessDay">-</strong>
+            </div>
+            <div class="metric-panel">
+              <span>Resultado</span>
+              <strong id="tplusOutput">-</strong>
+            </div>
           </section>
         </section>
       </section>

@@ -54,6 +54,13 @@ class LecapCalculationRequest(BaseModel):
     tem_emission_percent: float
 
 
+class TPlusConversionRequest(BaseModel):
+    direction: str = Field(pattern="^(t0_to_t1|t1_to_t0)$")
+    price: float = Field(gt=0)
+    rate_percent: float | None = None
+    use_auto_rate: bool = True
+
+
 @app.on_event("startup")
 async def startup() -> None:
     storage.initialize()
@@ -151,6 +158,57 @@ async def market_lecaps(settlement: str = "t1") -> dict:
         "settlement_date": settlement_date.isoformat(),
         "updated_at": now_argentina_iso(),
         "items": rows,
+    }
+
+
+@app.get("/api/market/caucion/shortest")
+async def market_shortest_caucion() -> dict:
+    quote = market.shortest_caucion_rate()
+    return {
+        "status": market.status,
+        "source": market.settings.market_source,
+        "updated_at": now_argentina_iso(),
+        "quote": quote,
+    }
+
+
+@app.post("/api/tools/tplus-conversion")
+async def tplus_conversion(payload: TPlusConversionRequest) -> dict:
+    today = now_argentina().date()
+    next_business_day = market_calendar.next_business_day(today, include_current=False)
+    calendar_days = (next_business_day - today).days
+    caucion_quote = market.shortest_caucion_rate()
+
+    rate_percent = (
+        _coerce_optional_float(caucion_quote.get("last"))
+        if payload.use_auto_rate
+        else payload.rate_percent
+    )
+    if rate_percent is None:
+        raise HTTPException(status_code=422, detail="No hay tasa de caucion disponible.")
+
+    rate_decimal = rate_percent / 100
+    factor = 1 + rate_decimal * calendar_days / 365
+    if factor <= 0:
+        raise HTTPException(status_code=422, detail="La tasa genera un factor invalido.")
+
+    converted_price = (
+        payload.price * factor
+        if payload.direction == "t0_to_t1"
+        else payload.price / factor
+    )
+
+    return {
+        "direction": payload.direction,
+        "today": today.isoformat(),
+        "next_business_day": next_business_day.isoformat(),
+        "calendar_days": calendar_days,
+        "rate_percent": rate_percent,
+        "rate_source": "auto" if payload.use_auto_rate else "manual",
+        "caucion": caucion_quote,
+        "input_price": payload.price,
+        "factor": factor,
+        "converted_price": converted_price,
     }
 
 

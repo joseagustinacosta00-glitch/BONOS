@@ -306,11 +306,34 @@ tbody td {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.calculator-form.tplus-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+}
+
 .calculator-form label span {
   display: block;
   color: var(--muted);
   font-size: 0.82rem;
   margin-bottom: 5px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 31px;
+}
+
+.toggle-label span {
+  margin-bottom: 0 !important;
+}
+
+.tplus-panel {
+  max-width: 980px;
+}
+
+.tplus-summary {
+  margin: 0;
 }
 
 .cashflow-preview {
@@ -367,7 +390,8 @@ tbody td {
 
   .calculator-layout,
   .calculator-form,
-  .calculator-form.lecap-form {
+  .calculator-form.lecap-form,
+  .calculator-form.tplus-form {
     grid-template-columns: 1fr;
   }
 }

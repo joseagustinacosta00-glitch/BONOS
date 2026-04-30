@@ -11,6 +11,7 @@ const lecapSettlementFilter = document.querySelector("#lecapSettlementFilter");
 const marketView = document.querySelector("#marketView");
 const bcraView = document.querySelector("#bcraView");
 const calculatorsView = document.querySelector("#calculatorsView");
+const tplusView = document.querySelector("#tplusView");
 const bcraBody = document.querySelector("#bcraBody");
 const bcraSeriesLabel = document.querySelector("#bcraSeriesLabel");
 const bcraLatest = document.querySelector("#bcraLatest");
@@ -29,6 +30,15 @@ const lecapTicker = document.querySelector("#lecapTicker");
 const temEmission = document.querySelector("#temEmission");
 const saveLecap = document.querySelector("#saveLecap");
 const savedLecaps = document.querySelector("#savedLecaps");
+const tplusForm = document.querySelector("#tplusForm");
+const tplusDirection = document.querySelector("#tplusDirection");
+const tplusRate = document.querySelector("#tplusRate");
+const tplusPrice = document.querySelector("#tplusPrice");
+const tplusAutoRate = document.querySelector("#tplusAutoRate");
+const tplusStatus = document.querySelector("#tplusStatus");
+const tplusDays = document.querySelector("#tplusDays");
+const tplusNextBusinessDay = document.querySelector("#tplusNextBusinessDay");
+const tplusOutput = document.querySelector("#tplusOutput");
 
 let currentCurrency = "all";
 let currentMarketList = "bonds";
@@ -275,6 +285,7 @@ function setView(view) {
   marketView.classList.toggle("active", view === "market");
   bcraView.classList.toggle("active", view === "bcra");
   calculatorsView.classList.toggle("active", view === "calculators");
+  tplusView.classList.toggle("active", view === "tplus");
   document.querySelectorAll("[data-view]").forEach((button) => {
     const active = button.dataset.view === view;
     button.classList.toggle("active", active);
@@ -288,12 +299,23 @@ function setView(view) {
   if (view === "calculators") fetchSavedLecaps().catch(() => {
     savedLecaps.innerHTML = '<tr><td colspan="9" class="empty-state">No se pudieron cargar las LECAPs guardadas</td></tr>';
   });
+  if (view === "tplus") {
+    fetchTplusAutoRate().then(calculateTplus).catch(() => {
+      setTplusStatus("error", "Sin caucion");
+    });
+  }
 }
 
 function setCalculatorStatus(state, text) {
   calculatorStatus.classList.toggle("ok", state === "ok");
   calculatorStatus.classList.toggle("error", state === "error");
   calculatorStatus.textContent = text;
+}
+
+function setTplusStatus(state, text) {
+  tplusStatus.classList.toggle("ok", state === "ok");
+  tplusStatus.classList.toggle("error", state === "error");
+  tplusStatus.textContent = text;
 }
 
 function setBondModel(model) {
@@ -376,6 +398,66 @@ async function fetchLecapMarket() {
   } finally {
     lecapMarketLoading = false;
   }
+}
+
+async function fetchTplusAutoRate() {
+  if (!tplusAutoRate.checked) return;
+  const response = await fetch("/api/market/caucion/shortest");
+  if (!response.ok) throw new Error("No se pudo leer caucion");
+  const payload = await response.json();
+  const last = payload.quote ? payload.quote.last : null;
+  if (last !== null && last !== undefined && last !== "") {
+    tplusRate.value = String(last);
+    setTplusStatus("ok", "Tasa automatica");
+  } else {
+    setTplusStatus("error", "Sin caucion");
+  }
+}
+
+async function calculateTplus() {
+  const price = Number(tplusPrice.value);
+  const rate = Number(tplusRate.value);
+  tplusRate.disabled = tplusAutoRate.checked;
+
+  if (!price || price <= 0) {
+    tplusDays.textContent = "-";
+    tplusNextBusinessDay.textContent = "-";
+    tplusOutput.textContent = "-";
+    return;
+  }
+
+  const body = {
+    direction: tplusDirection.value,
+    price,
+    use_auto_rate: tplusAutoRate.checked,
+    rate_percent: tplusAutoRate.checked ? null : rate,
+  };
+
+  if (!body.use_auto_rate && (!Number.isFinite(rate) || rate === 0)) {
+    setTplusStatus("error", "Revisar tasa");
+    return;
+  }
+
+  const response = await fetch("/api/tools/tplus-conversion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    setTplusStatus("error", "Sin calculo");
+    return;
+  }
+
+  const payload = await response.json();
+  tplusDays.textContent = formatNumber(payload.calendar_days);
+  tplusNextBusinessDay.textContent = formatDate(payload.next_business_day);
+  tplusOutput.innerHTML = formatNumber(payload.converted_price, {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
+  tplusRate.value = String(payload.rate_percent);
+  setTplusStatus("ok", payload.rate_source === "auto" ? "Tasa automatica" : "Manual");
 }
 
 async function saveLatestLecap() {
@@ -509,6 +591,20 @@ document.querySelectorAll("[data-view]").forEach((button) => {
   button.addEventListener("click", () => setView(button.dataset.view));
 });
 
+tplusForm.addEventListener("submit", (event) => event.preventDefault());
+tplusDirection.addEventListener("change", () => calculateTplus().catch(() => setTplusStatus("error", "Sin calculo")));
+tplusPrice.addEventListener("input", () => calculateTplus().catch(() => setTplusStatus("error", "Sin calculo")));
+tplusRate.addEventListener("input", () => {
+  if (!tplusAutoRate.checked) {
+    calculateTplus().catch(() => setTplusStatus("error", "Sin calculo"));
+  }
+});
+tplusAutoRate.addEventListener("change", () => {
+  tplusRate.disabled = tplusAutoRate.checked;
+  const next = tplusAutoRate.checked ? fetchTplusAutoRate().then(calculateTplus) : calculateTplus();
+  next.catch(() => setTplusStatus("error", "Sin caucion"));
+});
+
 document.querySelectorAll("[data-bcra-series]").forEach((button) => {
   button.addEventListener("click", () => {
     currentBcraSeries = button.dataset.bcraSeries;
@@ -553,4 +649,5 @@ fetchSnapshot()
     setConnection("error", "Sin backend");
   });
 
+tplusRate.disabled = tplusAutoRate.checked;
 renderQuotes();
