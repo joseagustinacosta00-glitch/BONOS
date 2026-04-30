@@ -43,18 +43,28 @@
 
       <section id="marketView" class="view-panel active">
         <section class="toolbar" aria-label="Filtros">
-          <div class="btn-group" role="group" aria-label="Moneda">
-            <button class="btn btn-sm btn-dark active" data-currency="all" type="button">Todas</button>
-            <button class="btn btn-sm btn-outline-dark" data-currency="ARS" type="button">ARS</button>
-            <button class="btn btn-sm btn-outline-dark" data-currency="USD" type="button">USD</button>
-            <button class="btn btn-sm btn-outline-dark" data-currency="Cable" type="button">Cable</button>
+          <div class="market-controls">
+            <div class="btn-group" role="group" aria-label="Lista de mercado">
+              <button class="btn btn-sm btn-dark active" data-market-list="bonds" type="button">Bonos</button>
+              <button class="btn btn-sm btn-outline-dark" data-market-list="lecaps" type="button">LECAPs</button>
+            </div>
+            <div id="currencyFilter" class="btn-group" role="group" aria-label="Moneda">
+              <button class="btn btn-sm btn-dark active" data-currency="all" type="button">Todas</button>
+              <button class="btn btn-sm btn-outline-dark" data-currency="ARS" type="button">ARS</button>
+              <button class="btn btn-sm btn-outline-dark" data-currency="USD" type="button">USD</button>
+              <button class="btn btn-sm btn-outline-dark" data-currency="Cable" type="button">Cable</button>
+            </div>
+            <div id="lecapSettlementFilter" class="btn-group settlement-filter" role="group" aria-label="Settlement LECAP">
+              <button class="btn btn-sm btn-dark active" data-lecap-settlement="t1" type="button">T+1</button>
+              <button class="btn btn-sm btn-outline-dark" data-lecap-settlement="t0" type="button">T+0</button>
+            </div>
           </div>
           <input id="searchInput" class="form-control form-control-sm" type="search" placeholder="Filtrar ticker">
         </section>
 
         <section class="table-wrap" aria-label="Cotizaciones">
           <table class="table table-hover align-middle mb-0">
-            <thead>
+            <thead id="marketTableHead">
               <tr>
                 <th scope="col">Ticker</th>
                 <th scope="col">Familia</th>

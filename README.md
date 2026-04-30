@@ -51,6 +51,8 @@ ROFEX_PASSWORD=tu_password
 ROFEX_ACCOUNT=tu_cuenta
 ROFEX_MARKET=ROFEX
 ROFEX_SETTLEMENT=24hs
+ROFEX_SETTLEMENT_T0=CI
+ROFEX_SETTLEMENT_T1=24hs
 ROFEX_SYMBOL_TEMPLATE=MERV - XMEV - {symbol} - {settlement}
 APP_DB_PATH=data/user_data.db
 ```
@@ -109,6 +111,7 @@ Abrir http://127.0.0.1:8000
 - `GET /api/bcra/series?refresh=true`: fuerza actualizacion desde BCRA.
 - `GET /api/bcra/series/cer?limit=0`: serie CER completa.
 - `GET /api/bcra/series/tamar_private_banks_na?limit=0`: serie TAMAR n.a. completa.
+- `GET /api/market/lecaps?settlement=t0|t1`: LECAPs guardadas con precios y metricas de mercado.
 - `POST /api/calculators/bond-draft`: crea la base inicial de un bono para calculadoras.
 - `GET /api/calculators/lecaps/tickers`: tickers LECAP cargados.
 - `POST /api/calculators/lecaps`: calcula el cashflow fijo de emision para una LECAP.
@@ -142,6 +145,8 @@ VNO * (1 + TEM) ^ (dias / 30) - VNO
 ```
 
 La solapa permite confirmar y guardar cada LECAP. Esos datos se guardan en SQLite en `APP_DB_PATH` y no forman parte del codigo, asi podes actualizar archivos del proyecto sin perder las calculadoras cargadas.
+
+En la solapa `Mercado`, el selector `LECAPs` muestra las LECAPs guardadas con precios T+0 o T+1. La TNA se calcula para bid, offer y last; TIR, TEM, duration, modified duration y convexity se calculan contra last.
 
 ## Datos BCRA
 

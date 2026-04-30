@@ -1,10 +1,13 @@
 const quotesBody = document.querySelector("#quotesBody");
+const marketTableHead = document.querySelector("#marketTableHead");
 const sourceLabel = document.querySelector("#sourceLabel");
 const updatedAt = document.querySelector("#updatedAt");
 const instrumentCount = document.querySelector("#instrumentCount");
 const connectionDot = document.querySelector("#connectionDot");
 const connectionText = document.querySelector("#connectionText");
 const searchInput = document.querySelector("#searchInput");
+const currencyFilter = document.querySelector("#currencyFilter");
+const lecapSettlementFilter = document.querySelector("#lecapSettlementFilter");
 const marketView = document.querySelector("#marketView");
 const bcraView = document.querySelector("#bcraView");
 const calculatorsView = document.querySelector("#calculatorsView");
@@ -28,10 +31,14 @@ const saveLecap = document.querySelector("#saveLecap");
 const savedLecaps = document.querySelector("#savedLecaps");
 
 let currentCurrency = "all";
+let currentMarketList = "bonds";
+let currentLecapSettlement = "t1";
 let currentView = "market";
 let currentBcraSeries = "cer";
 let currentBondModel = "pesos_fixed_rate";
 let latestLecapCalculation = null;
+let latestLecapMarket = [];
+let lecapMarketLoading = false;
 const DEFAULT_QUOTES = [
   ["AO27", "AO27", "ARS"],
   ["AO27D", "AO27", "USD"],
@@ -108,6 +115,26 @@ function formatDate(value) {
 }
 
 function renderQuotes() {
+  if (currentMarketList === "lecaps") {
+    renderLecapMarket();
+    return;
+  }
+
+  marketTableHead.innerHTML = `
+    <tr>
+      <th scope="col">Ticker</th>
+      <th scope="col">Familia</th>
+      <th scope="col">Moneda</th>
+      <th scope="col" class="text-end">Compra</th>
+      <th scope="col" class="text-end">Venta</th>
+      <th scope="col" class="text-end">Ultimo</th>
+      <th scope="col" class="text-end">Var %</th>
+      <th scope="col" class="text-end">Volumen</th>
+      <th scope="col" class="text-end">TIR</th>
+      <th scope="col" class="text-end">Hora</th>
+    </tr>
+  `;
+
   const text = searchInput.value.trim().toUpperCase();
   const rows = latestQuotes.filter((quote) => {
     const currencyMatch = currentCurrency === "all" || quote.currency === currentCurrency;
@@ -133,6 +160,59 @@ function renderQuotes() {
       </tr>
     `;
   }).join("");
+}
+
+function renderLecapMarket() {
+  marketTableHead.innerHTML = `
+    <tr>
+      <th scope="col">Ticker</th>
+      <th scope="col">Vencimiento</th>
+      <th scope="col">Pago</th>
+      <th scope="col" class="text-end">Dias</th>
+      <th scope="col" class="text-end">Bid</th>
+      <th scope="col" class="text-end">Offer</th>
+      <th scope="col" class="text-end">Last</th>
+      <th scope="col" class="text-end">TNA Bid</th>
+      <th scope="col" class="text-end">TNA Offer</th>
+      <th scope="col" class="text-end">TNA Last</th>
+      <th scope="col" class="text-end">TIR Last</th>
+      <th scope="col" class="text-end">TEM Last</th>
+      <th scope="col" class="text-end">Duration</th>
+      <th scope="col" class="text-end">Mod Dur</th>
+      <th scope="col" class="text-end">Convexity</th>
+      <th scope="col" class="text-end">Hora</th>
+    </tr>
+  `;
+
+  const text = searchInput.value.trim().toUpperCase();
+  const rows = latestLecapMarket.filter((item) => !text || item.ticker.includes(text));
+  instrumentCount.textContent = rows.length;
+
+  if (!rows.length) {
+    quotesBody.innerHTML = '<tr><td colspan="16" class="empty-state">Sin LECAPs guardadas para mostrar</td></tr>';
+    return;
+  }
+
+  quotesBody.innerHTML = rows.map((item) => `
+    <tr>
+      <td class="ticker">${item.ticker}</td>
+      <td>${formatDate(item.maturity_date)}</td>
+      <td>${formatDate(item.effective_payment_date)}</td>
+      <td class="text-end">${formatNumber(item.days_to_payment)}</td>
+      <td class="text-end">${formatNumber(item.bid, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+      <td class="text-end">${formatNumber(item.offer, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+      <td class="text-end">${formatNumber(item.last, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+      <td class="text-end">${formatPercent(item.tna_bid, 2)}</td>
+      <td class="text-end">${formatPercent(item.tna_offer, 2)}</td>
+      <td class="text-end">${formatPercent(item.tna_last, 2)}</td>
+      <td class="text-end">${formatPercent(item.tir_last, 2)}</td>
+      <td class="text-end">${formatPercent(item.tem_last, 2)}</td>
+      <td class="text-end">${formatNumber(item.duration, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(item.modified_duration, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(item.convexity, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatTime(item.updated_at)}</td>
+    </tr>
+  `).join("");
 }
 
 function renderBcraSeries(payload) {
@@ -179,6 +259,9 @@ function applySnapshot(snapshot) {
   sourceLabel.textContent = snapshot.source || "-";
   updatedAt.textContent = formatTime(snapshot.updated_at);
   renderQuotes();
+  if (currentMarketList === "lecaps") {
+    fetchLecapMarket();
+  }
 }
 
 function setConnection(state, message) {
@@ -277,6 +360,24 @@ async function fetchSavedLecaps() {
   renderSavedLecaps(await response.json());
 }
 
+async function fetchLecapMarket() {
+  if (lecapMarketLoading) return;
+  lecapMarketLoading = true;
+  try {
+    const response = await fetch(`/api/market/lecaps?settlement=${currentLecapSettlement}`);
+    if (!response.ok) throw new Error("No se pudieron leer LECAPs de mercado");
+    const payload = await response.json();
+    latestLecapMarket = payload.items || [];
+    sourceLabel.textContent = payload.source || "-";
+    updatedAt.textContent = formatTime(payload.updated_at);
+    renderLecapMarket();
+  } catch {
+    quotesBody.innerHTML = '<tr><td colspan="16" class="empty-state">No se pudieron cargar las LECAPs</td></tr>';
+  } finally {
+    lecapMarketLoading = false;
+  }
+}
+
 async function saveLatestLecap() {
   if (!latestLecapCalculation) return;
   saveLecap.disabled = true;
@@ -368,6 +469,39 @@ document.querySelectorAll("[data-currency]").forEach((button) => {
       candidate.classList.toggle("btn-outline-dark", candidate !== button);
     });
     renderQuotes();
+  });
+});
+
+document.querySelectorAll("[data-market-list]").forEach((button) => {
+  button.addEventListener("click", () => {
+    currentMarketList = button.dataset.marketList;
+    document.querySelectorAll("[data-market-list]").forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle("active", active);
+      candidate.classList.toggle("btn-dark", active);
+      candidate.classList.toggle("btn-outline-dark", !active);
+    });
+    currencyFilter.classList.toggle("d-none", currentMarketList === "lecaps");
+    lecapSettlementFilter.classList.toggle("active", currentMarketList === "lecaps");
+    if (currentMarketList === "lecaps") {
+      quotesBody.innerHTML = '<tr><td colspan="16" class="empty-state">Cargando LECAPs</td></tr>';
+      fetchLecapMarket();
+    } else {
+      renderQuotes();
+    }
+  });
+});
+
+document.querySelectorAll("[data-lecap-settlement]").forEach((button) => {
+  button.addEventListener("click", () => {
+    currentLecapSettlement = button.dataset.lecapSettlement;
+    document.querySelectorAll("[data-lecap-settlement]").forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle("active", active);
+      candidate.classList.toggle("btn-dark", active);
+      candidate.classList.toggle("btn-outline-dark", !active);
+    });
+    fetchLecapMarket();
   });
 });
 

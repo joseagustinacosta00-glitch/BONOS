@@ -11,7 +11,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.bcra_client import BCRA_SERIES, BcraClient
-from backend.bond_calculators import LECAP_TICKERS, BondModelType, build_bond_draft, build_lecap_calculation
+from backend.bond_calculators import (
+    LECAP_TICKERS,
+    BondModelType,
+    build_bond_draft,
+    build_lecap_calculation,
+    build_lecap_market_row,
+)
 from backend.bonds import BOND_TICKERS
 from backend.config import get_settings
 from backend.market_calendar import market_calendar, parse_date
@@ -72,6 +78,80 @@ async def tickers() -> list[dict[str, str]]:
 @app.get("/api/quotes")
 async def quotes() -> dict:
     return market.snapshot()
+
+
+@app.get("/api/market/lecaps")
+async def market_lecaps(settlement: str = "t1") -> dict:
+    settlement_type = _normalize_lecap_settlement(settlement)
+    today = now_argentina().date()
+    settlement_date = (
+        today
+        if settlement_type == "t0"
+        else market_calendar.next_business_day(today, include_current=False)
+    )
+    quote_by_ticker = {
+        quote["symbol"]: quote for quote in market.lecap_quotes(settlement_type)
+    }
+
+    rows = []
+    saved_by_ticker = {saved.ticker: saved for saved in storage.list_lecaps()}
+    for ticker in LECAP_TICKERS:
+        saved = saved_by_ticker.get(ticker)
+        quote = quote_by_ticker.get(ticker, {})
+        if saved is None:
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "settlement_type": settlement_type.upper().replace("T", "T+"),
+                    "settlement_date": settlement_date.isoformat(),
+                    "maturity_date": None,
+                    "effective_payment_date": None,
+                    "final_value": None,
+                    "days_to_payment": None,
+                    "bid": _coerce_optional_float(quote.get("bid")),
+                    "offer": _coerce_optional_float(quote.get("ask")),
+                    "last": _coerce_optional_float(quote.get("last")),
+                    "tna_bid": None,
+                    "tna_offer": None,
+                    "tna_last": None,
+                    "tir_last": None,
+                    "tem_last": None,
+                    "duration": None,
+                    "modified_duration": None,
+                    "convexity": None,
+                    "updated_at": quote.get("updated_at"),
+                }
+            )
+            continue
+
+        calculation = build_lecap_calculation(
+            ticker=saved.ticker,
+            issue_date=saved.issue_date,
+            maturity_date=saved.maturity_date,
+            face_value=saved.face_value,
+            tem_emission_percent=saved.tem_emission_percent,
+            calendar=market_calendar,
+            today=today,
+        )
+        row = build_lecap_market_row(
+            calculation=calculation,
+            settlement_type=settlement_type.upper().replace("T", "T+"),
+            settlement_date=settlement_date,
+            bid=_coerce_optional_float(quote.get("bid")),
+            offer=_coerce_optional_float(quote.get("ask")),
+            last=_coerce_optional_float(quote.get("last")),
+            updated_at=quote.get("updated_at"),
+        )
+        rows.append(row.to_dict())
+
+    return {
+        "status": market.status,
+        "source": market.settings.market_source,
+        "settlement_type": settlement_type,
+        "settlement_date": settlement_date.isoformat(),
+        "updated_at": now_argentina_iso(),
+        "items": rows,
+    }
 
 
 @app.get("/api/calendar/summary")
@@ -237,3 +317,14 @@ async def websocket_quotes(websocket: WebSocket) -> None:
             await asyncio.sleep(1)
     except (WebSocketDisconnect, RuntimeError):
         return
+
+
+def _normalize_lecap_settlement(value: str) -> str:
+    normalized = value.lower().replace("+", "").replace(" ", "")
+    return "t0" if normalized in {"t0", "0", "ci"} else "t1"
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)

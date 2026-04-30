@@ -29,6 +29,8 @@ class Settings:
     rofex_account: str | None
     rofex_market: str
     rofex_settlement: str
+    rofex_settlement_t0: str
+    rofex_settlement_t1: str
     rofex_symbol_template: str
     bcra_base_url: str
     bcra_cache_ttl_seconds: int
@@ -46,6 +48,8 @@ def get_settings() -> Settings:
         rofex_account=os.getenv("ROFEX_ACCOUNT"),
         rofex_market=os.getenv("ROFEX_MARKET", "ROFEX").upper(),
         rofex_settlement=os.getenv("ROFEX_SETTLEMENT", "24hs"),
+        rofex_settlement_t0=os.getenv("ROFEX_SETTLEMENT_T0", "CI"),
+        rofex_settlement_t1=os.getenv("ROFEX_SETTLEMENT_T1", os.getenv("ROFEX_SETTLEMENT", "24hs")),
         rofex_symbol_template=os.getenv(
             "ROFEX_SYMBOL_TEMPLATE",
             "MERV - XMEV - {symbol} - {settlement}",

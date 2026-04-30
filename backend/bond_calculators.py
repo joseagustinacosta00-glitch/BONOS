@@ -110,6 +110,52 @@ class LecapMarketMetrics:
 
 
 @dataclass(frozen=True)
+class LecapMarketRow:
+    ticker: str
+    settlement_type: str
+    settlement_date: date
+    maturity_date: date
+    effective_payment_date: date
+    final_value: float
+    days_to_payment: int
+    bid: float | None
+    offer: float | None
+    last: float | None
+    tna_bid: float | None
+    tna_offer: float | None
+    tna_last: float | None
+    tir_last: float | None
+    tem_last: float | None
+    duration: float | None
+    modified_duration: float | None
+    convexity: float | None
+    updated_at: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "ticker": self.ticker,
+            "settlement_type": self.settlement_type,
+            "settlement_date": self.settlement_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "effective_payment_date": self.effective_payment_date.isoformat(),
+            "final_value": self.final_value,
+            "days_to_payment": self.days_to_payment,
+            "bid": self.bid,
+            "offer": self.offer,
+            "last": self.last,
+            "tna_bid": self.tna_bid,
+            "tna_offer": self.tna_offer,
+            "tna_last": self.tna_last,
+            "tir_last": self.tir_last,
+            "tem_last": self.tem_last,
+            "duration": self.duration,
+            "modified_duration": self.modified_duration,
+            "convexity": self.convexity,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
 class LecapCalculation:
     ticker: str
     issue_date: date
@@ -269,6 +315,53 @@ def build_lecap_calculation(
         tem_emission=tem_emission,
         cashflows=(cashflow,),
         metrics=metrics,
+    )
+
+
+def build_lecap_market_row(
+    calculation: LecapCalculation,
+    settlement_type: str,
+    settlement_date: date,
+    bid: float | None,
+    offer: float | None,
+    last: float | None,
+    updated_at: str | None = None,
+) -> LecapMarketRow:
+    cashflow = calculation.cashflows[0]
+    final_value = cashflow.total
+    payment_date = cashflow.effective_payment_date
+    days_to_payment = (payment_date - settlement_date).days
+
+    bid_metrics = _build_lecap_metrics(
+        settlement_type, settlement_date, bid, final_value, payment_date
+    )
+    offer_metrics = _build_lecap_metrics(
+        settlement_type, settlement_date, offer, final_value, payment_date
+    )
+    last_metrics = _build_lecap_metrics(
+        settlement_type, settlement_date, last, final_value, payment_date
+    )
+
+    return LecapMarketRow(
+        ticker=calculation.ticker,
+        settlement_type=settlement_type,
+        settlement_date=settlement_date,
+        maturity_date=calculation.maturity_date,
+        effective_payment_date=payment_date,
+        final_value=final_value,
+        days_to_payment=days_to_payment,
+        bid=bid,
+        offer=offer,
+        last=last,
+        tna_bid=bid_metrics.tna if bid_metrics else None,
+        tna_offer=offer_metrics.tna if offer_metrics else None,
+        tna_last=last_metrics.tna if last_metrics else None,
+        tir_last=last_metrics.tir if last_metrics else None,
+        tem_last=last_metrics.tem if last_metrics else None,
+        duration=last_metrics.duration if last_metrics else None,
+        modified_duration=last_metrics.modified_duration if last_metrics else None,
+        convexity=last_metrics.convexity if last_metrics else None,
+        updated_at=updated_at,
     )
 
 

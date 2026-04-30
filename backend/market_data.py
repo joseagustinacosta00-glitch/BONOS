@@ -7,6 +7,7 @@ import random
 import threading
 from typing import Any
 
+from backend.bond_calculators import LECAP_TICKERS
 from backend.bonds import BOND_TICKERS, TICKER_BY_SYMBOL, TICKER_SYMBOLS
 from backend.config import Settings
 from backend.time_utils import now_argentina_iso
@@ -20,12 +21,12 @@ class MarketDataService:
         self.status = "stopped"
         self.last_error: str | None = None
         self._quotes: dict[str, dict[str, Any]] = {}
+        self._lecap_quotes: dict[str, dict[str, dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self._mock_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
-        self._rofex_to_local: dict[str, str] = {
-            self._rofex_symbol(symbol): symbol for symbol in TICKER_SYMBOLS
-        }
+        self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
+        self._build_provider_symbol_map()
 
     async def start(self) -> None:
         self._seed_quotes()
@@ -66,6 +67,23 @@ class MarketDataService:
             "quotes": quotes,
         }
 
+    def lecap_quotes(self, settlement_type: str) -> list[dict[str, Any]]:
+        settlement_key = self._normalize_lecap_settlement_type(settlement_type)
+        with self._lock:
+            rows = [
+                self._lecap_quotes[settlement_key][ticker]
+                for ticker in LECAP_TICKERS
+                if ticker in self._lecap_quotes.get(settlement_key, {})
+            ]
+
+        return [dict(row) for row in rows]
+
+    def lecap_quote(self, ticker: str, settlement_type: str) -> dict[str, Any] | None:
+        settlement_key = self._normalize_lecap_settlement_type(settlement_type)
+        with self._lock:
+            quote = self._lecap_quotes.get(settlement_key, {}).get(ticker.upper().strip())
+        return dict(quote) if quote else None
+
     def _seed_quotes(self) -> None:
         now = now_argentina_iso()
         with self._lock:
@@ -86,6 +104,24 @@ class MarketDataService:
                     "updated_at": now,
                     "raw": {},
                 }
+            for settlement_key, settlement_label in self._lecap_settlements().items():
+                self._lecap_quotes[settlement_key] = {}
+                for ticker in LECAP_TICKERS:
+                    self._lecap_quotes[settlement_key][ticker] = {
+                        "symbol": ticker,
+                        "provider_symbol": self._rofex_symbol(ticker, settlement_label),
+                        "family": "LECAP",
+                        "currency": "ARS",
+                        "settlement_type": settlement_key,
+                        "settlement": settlement_label,
+                        "last": None,
+                        "bid": None,
+                        "ask": None,
+                        "change": None,
+                        "volume": None,
+                        "updated_at": now,
+                        "raw": {},
+                    }
 
     async def _mock_loop(self) -> None:
         base_prices = {
@@ -121,6 +157,25 @@ class MarketDataService:
                             "raw": {"mock": True},
                         }
                     )
+                for settlement_key, rows in self._lecap_quotes.items():
+                    for index, ticker in enumerate(LECAP_TICKERS):
+                        base = 108 + index * 1.15
+                        if settlement_key == "t1":
+                            base *= 1.0015
+                        move = random.uniform(-0.08, 0.08)
+                        last = max(base + move, 0.01)
+                        spread = max(last * random.uniform(0.0004, 0.0012), 0.01)
+                        rows[ticker].update(
+                            {
+                                "last": round(last, 3),
+                                "bid": round(last - spread, 3),
+                                "ask": round(last + spread, 3),
+                                "change": round(random.uniform(-0.25, 0.25), 3),
+                                "volume": random.randint(5_000, 500_000),
+                                "updated_at": now,
+                                "raw": {"mock": True},
+                            }
+                        )
             await asyncio.sleep(1.5)
 
     def _start_pyrofex(self) -> None:
@@ -170,7 +225,7 @@ class MarketDataService:
             logger.debug("Could not disconnect pyRofex websocket: %s", exc)
 
     def _load_initial_rest_snapshot(self, pyRofex: Any, entries: list[Any]) -> None:
-        for provider_symbol in self._rofex_to_local:
+        for provider_symbol in self._rofex_to_quote:
             try:
                 response = pyRofex.get_market_data(
                     ticker=provider_symbol,
@@ -221,9 +276,10 @@ class MarketDataService:
         provider_symbol_override: str | None = None,
     ) -> None:
         provider_symbol = provider_symbol_override or self._provider_symbol_from_message(message)
-        local_symbol = self._local_symbol(provider_symbol)
-        if local_symbol is None:
+        quote_ref = self._quote_ref(provider_symbol)
+        if quote_ref is None:
             return
+        category, local_symbol, settlement_type = quote_ref
 
         market_data = message.get("marketData") or message.get("market_data") or {}
         bid = self._entry_price(market_data.get("BI"))
@@ -233,7 +289,10 @@ class MarketDataService:
         now = now_argentina_iso()
 
         with self._lock:
-            current = self._quotes[local_symbol]
+            if category == "lecap" and settlement_type:
+                current = self._lecap_quotes[settlement_type][local_symbol]
+            else:
+                current = self._quotes[local_symbol]
             current.update(
                 {
                     "bid": bid if bid is not None else current["bid"],
@@ -255,24 +314,59 @@ class MarketDataService:
         symbol = message.get("symbol") or message.get("ticker")
         return str(symbol) if symbol else None
 
-    def _local_symbol(self, provider_symbol: str | None) -> str | None:
+    def _quote_ref(self, provider_symbol: str | None) -> tuple[str, str, str | None] | None:
         if not provider_symbol:
             return None
 
-        if provider_symbol in self._rofex_to_local:
-            return self._rofex_to_local[provider_symbol]
+        if provider_symbol in self._rofex_to_quote:
+            return self._rofex_to_quote[provider_symbol]
 
         parts = {part.strip().upper() for part in provider_symbol.split("-")}
+        settlement_by_label = {
+            label.upper(): key for key, label in self._lecap_settlements().items()
+        }
+        for ticker in LECAP_TICKERS:
+            if ticker in parts:
+                for label, key in settlement_by_label.items():
+                    if label in parts:
+                        return ("lecap", ticker, key)
+                return ("lecap", ticker, "t1")
         for symbol in TICKER_SYMBOLS:
             if symbol in parts:
-                return symbol
-        return provider_symbol if provider_symbol in TICKER_BY_SYMBOL else None
+                return ("bond", symbol, None)
+        if provider_symbol in TICKER_BY_SYMBOL:
+            return ("bond", provider_symbol, None)
+        if provider_symbol in LECAP_TICKERS:
+            return ("lecap", provider_symbol, "t1")
+        return None
 
-    def _rofex_symbol(self, symbol: str) -> str:
+    def _rofex_symbol(self, symbol: str, settlement: str | None = None) -> str:
         return self.settings.rofex_symbol_template.format(
             symbol=symbol,
-            settlement=self.settings.rofex_settlement,
+            settlement=settlement or self.settings.rofex_settlement,
         )
+
+    def _build_provider_symbol_map(self) -> None:
+        for symbol in TICKER_SYMBOLS:
+            self._rofex_to_quote[self._rofex_symbol(symbol)] = ("bond", symbol, None)
+        for settlement_key, settlement_label in self._lecap_settlements().items():
+            for ticker in LECAP_TICKERS:
+                self._rofex_to_quote[self._rofex_symbol(ticker, settlement_label)] = (
+                    "lecap",
+                    ticker,
+                    settlement_key,
+                )
+
+    def _lecap_settlements(self) -> dict[str, str]:
+        return {
+            "t0": self.settings.rofex_settlement_t0,
+            "t1": self.settings.rofex_settlement_t1,
+        }
+
+    @staticmethod
+    def _normalize_lecap_settlement_type(value: str) -> str:
+        normalized = value.lower().replace("+", "").replace(" ", "")
+        return "t0" if normalized in {"t0", "0", "ci"} else "t1"
 
     def _environment(self, pyRofex: Any) -> Any:
         if self.settings.rofex_environment == "LIVE":

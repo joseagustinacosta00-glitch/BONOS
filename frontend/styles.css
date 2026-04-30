@@ -123,6 +123,20 @@ h1 {
   margin-bottom: 12px;
 }
 
+.market-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settlement-filter {
+  display: none;
+}
+
+.settlement-filter.active {
+  display: inline-flex;
+}
+
 .toolbar .form-control {
   max-width: 260px;
 }
@@ -328,6 +342,7 @@ tbody td {
 
   .topbar,
   .toolbar,
+  .market-controls,
   .date-filters {
     align-items: flex-start;
     flex-direction: column;
