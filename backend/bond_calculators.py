@@ -382,7 +382,7 @@ def _build_lecap_metrics(
     ratio = final_value / price
     tir = ratio ** (365 / days_to_payment) - 1
     tem = ratio ** (30 / days_to_payment) - 1
-    tna = tem * 12
+    tna = (ratio - 1) / days_to_payment * 365
     duration = days_to_payment / 365
     modified_duration = duration / (1 + tir)
     convexity = duration * (duration + 1) / (1 + tir) ** 2
