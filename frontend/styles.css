@@ -159,6 +159,10 @@ h1 {
   margin-bottom: 12px;
 }
 
+.rates-summary {
+  margin-bottom: 12px;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);

@@ -37,6 +37,7 @@
 
       <nav class="view-tabs" aria-label="Vistas">
         <button class="btn btn-sm btn-dark active" data-view="market" type="button">Mercado</button>
+        <button class="btn btn-sm btn-outline-dark" data-view="rates" type="button">Tasas</button>
         <button class="btn btn-sm btn-outline-dark" data-view="bcra" type="button">Datos BCRA</button>
         <button class="btn btn-sm btn-outline-dark" data-view="calculators" type="button">Calculadoras</button>
         <button class="btn btn-sm btn-outline-dark" data-view="tplus" type="button">T+0 / T+1</button>
@@ -131,6 +132,52 @@
             <tr><td class="ticker">AL41</td><td>AL41</td><td><span class="currency-pill">ARS</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
             <tr><td class="ticker">AL41D</td><td>AL41</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
             <tr><td class="ticker">AL41C</td><td>AL41</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section id="ratesView" class="view-panel" aria-label="Tasas">
+        <section class="toolbar" aria-label="Tasas toolbar">
+          <div class="market-controls">
+            <div class="btn-group" role="group" aria-label="Tipo de tasa">
+              <button class="btn btn-sm btn-dark active" type="button">Caucion ARS</button>
+            </div>
+          </div>
+          <button id="ratesRefresh" class="btn btn-sm btn-outline-dark" type="button">Actualizar</button>
+        </section>
+
+        <section class="summary-grid rates-summary" aria-label="Resumen de tasas">
+          <div class="metric-panel">
+            <span>Tasa corta</span>
+            <strong id="ratesLast">-</strong>
+          </div>
+          <div class="metric-panel">
+            <span>Plazo</span>
+            <strong id="ratesTerm">-</strong>
+          </div>
+          <div class="metric-panel">
+            <span>Actualizado</span>
+            <strong id="ratesUpdatedAt">-</strong>
+          </div>
+        </section>
+
+        <section class="table-wrap" aria-label="Caucion ARS">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Instrumento</th>
+                <th scope="col">Descripcion</th>
+                <th scope="col" class="text-end">Bid</th>
+                <th scope="col" class="text-end">Offer</th>
+                <th scope="col" class="text-end">Last</th>
+                <th scope="col" class="text-end">Volumen</th>
+              </tr>
+            </thead>
+            <tbody id="ratesBody">
+              <tr>
+                <td colspan="6" class="empty-state">Cargando tasas</td>
+              </tr>
             </tbody>
           </table>
         </section>

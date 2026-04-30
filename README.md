@@ -151,6 +151,8 @@ La solapa permite confirmar y guardar cada LECAP. Esos datos se guardan en SQLit
 
 En la solapa `Mercado`, el selector `LECAPs` muestra las LECAPs guardadas con precios T+0 o T+1. La TNA se calcula para bid, offer y last; TIR, TEM, duration, modified duration y convexity se calculan contra last.
 
+La solapa `Tasas` muestra automaticamente la caucion ARS de plazo mas corto detectada por pyRofex. Esa misma tasa se usa por defecto en `T+0 / T+1`.
+
 La solapa `T+0 / T+1` usa la caucion ARS de plazo mas corto por `last` como tasa automatica. Si tu ambiente usa nombres especiales, carga `ROFEX_CAUCION_SYMBOLS` con uno o mas simbolos separados por coma.
 
 ## Datos BCRA

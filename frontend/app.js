@@ -9,6 +9,7 @@ const searchInput = document.querySelector("#searchInput");
 const currencyFilter = document.querySelector("#currencyFilter");
 const lecapSettlementFilter = document.querySelector("#lecapSettlementFilter");
 const marketView = document.querySelector("#marketView");
+const ratesView = document.querySelector("#ratesView");
 const bcraView = document.querySelector("#bcraView");
 const calculatorsView = document.querySelector("#calculatorsView");
 const tplusView = document.querySelector("#tplusView");
@@ -19,6 +20,11 @@ const bcraCount = document.querySelector("#bcraCount");
 const bcraFrom = document.querySelector("#bcraFrom");
 const bcraTo = document.querySelector("#bcraTo");
 const bcraRefresh = document.querySelector("#bcraRefresh");
+const ratesRefresh = document.querySelector("#ratesRefresh");
+const ratesLast = document.querySelector("#ratesLast");
+const ratesTerm = document.querySelector("#ratesTerm");
+const ratesUpdatedAt = document.querySelector("#ratesUpdatedAt");
+const ratesBody = document.querySelector("#ratesBody");
 const calculatorTitle = document.querySelector("#calculatorTitle");
 const calculatorStatus = document.querySelector("#calculatorStatus");
 const bondDraftForm = document.querySelector("#bondDraftForm");
@@ -283,6 +289,7 @@ function setConnection(state, message) {
 function setView(view) {
   currentView = view;
   marketView.classList.toggle("active", view === "market");
+  ratesView.classList.toggle("active", view === "rates");
   bcraView.classList.toggle("active", view === "bcra");
   calculatorsView.classList.toggle("active", view === "calculators");
   tplusView.classList.toggle("active", view === "tplus");
@@ -295,6 +302,9 @@ function setView(view) {
 
   if (view === "bcra") fetchBcraSeries().catch(() => {
     bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron cargar datos BCRA</td></tr>';
+  });
+  if (view === "rates") fetchRates().catch(() => {
+    ratesBody.innerHTML = '<tr><td colspan="6" class="empty-state">No se pudo cargar caucion</td></tr>';
   });
   if (view === "calculators") fetchSavedLecaps().catch(() => {
     savedLecaps.innerHTML = '<tr><td colspan="9" class="empty-state">No se pudieron cargar las LECAPs guardadas</td></tr>';
@@ -401,10 +411,8 @@ async function fetchLecapMarket() {
 }
 
 async function fetchTplusAutoRate() {
-  if (!tplusAutoRate.checked) return;
-  const response = await fetch("/api/market/caucion/shortest");
-  if (!response.ok) throw new Error("No se pudo leer caucion");
-  const payload = await response.json();
+  if (!tplusAutoRate.checked) return null;
+  const payload = await fetchRates();
   const last = payload.quote ? payload.quote.last : null;
   if (last !== null && last !== undefined && last !== "") {
     tplusRate.value = String(last);
@@ -412,6 +420,39 @@ async function fetchTplusAutoRate() {
   } else {
     setTplusStatus("error", "Sin caucion");
   }
+  return payload;
+}
+
+async function fetchRates() {
+  const response = await fetch("/api/market/caucion/shortest");
+  if (!response.ok) throw new Error("No se pudo leer caucion");
+  const payload = await response.json();
+  renderRates(payload);
+  return payload;
+}
+
+function renderRates(payload) {
+  const quote = payload.quote || {};
+  const last = quote.last;
+  ratesLast.innerHTML = formatPercent(last !== null && last !== undefined ? last / 100 : null, 2);
+  ratesTerm.textContent = quote.term_days ? `${formatNumber(quote.term_days)} dias` : "-";
+  ratesUpdatedAt.innerHTML = formatTime(quote.updated_at || payload.updated_at);
+
+  if (!quote.symbol) {
+    ratesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Sin caucion detectada</td></tr>';
+    return;
+  }
+
+  ratesBody.innerHTML = `
+    <tr>
+      <td class="ticker">${quote.symbol}</td>
+      <td>${quote.label || quote.provider_symbol || "-"}</td>
+      <td class="text-end">${formatNumber(quote.bid, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(quote.ask, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(quote.last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(quote.volume)}</td>
+    </tr>
+  `;
 }
 
 async function calculateTplus() {
@@ -627,6 +668,12 @@ document.querySelectorAll("[data-bond-model]").forEach((button) => {
 bcraRefresh.addEventListener("click", () => {
   fetchBcraSeries(true).catch(() => {
     bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron actualizar datos BCRA</td></tr>';
+  });
+});
+
+ratesRefresh.addEventListener("click", () => {
+  fetchRates().catch(() => {
+    ratesBody.innerHTML = '<tr><td colspan="6" class="empty-state">No se pudo actualizar caucion</td></tr>';
   });
 });
 
