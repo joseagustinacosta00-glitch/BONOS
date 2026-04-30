@@ -28,7 +28,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Por pedido del proyecto, las variables se leen desde `.env.example`.
+Las variables reales se leen desde `.env`. El archivo `.env.example` queda solo como plantilla para subir a GitHub sin secretos.
 
 ## Variables
 
@@ -36,6 +36,7 @@ Modo demo local:
 
 ```env
 MARKET_SOURCE=mock
+APP_DB_PATH=data/user_data.db
 ```
 
 Modo real o remarket con pyRofex:
@@ -51,6 +52,7 @@ ROFEX_ACCOUNT=tu_cuenta
 ROFEX_MARKET=ROFEX
 ROFEX_SETTLEMENT=24hs
 ROFEX_SYMBOL_TEMPLATE=MERV - XMEV - {symbol} - {settlement}
+APP_DB_PATH=data/user_data.db
 ```
 
 Para VETA, usar `ROFEX_ENVIRONMENT=LIVE` junto con `ROFEX_REST_URL` y `ROFEX_WS_URL`. La app pisa esas URLs en `pyRofex.Environment.LIVE` antes de llamar a `pyRofex.initialize(...)`.
@@ -109,7 +111,9 @@ Abrir http://127.0.0.1:8000
 - `GET /api/bcra/series/tamar_private_banks_na?limit=0`: serie TAMAR n.a. completa.
 - `POST /api/calculators/bond-draft`: crea la base inicial de un bono para calculadoras.
 - `GET /api/calculators/lecaps/tickers`: tickers LECAP cargados.
-- `POST /api/calculators/lecaps`: calcula cashflow y outputs de mercado para una LECAP.
+- `POST /api/calculators/lecaps`: calcula el cashflow fijo de emision para una LECAP.
+- `GET /api/calculators/lecaps/saved`: lista LECAPs guardadas por vencimiento.
+- `POST /api/calculators/lecaps/saved`: confirma y guarda una LECAP.
 - `WS /ws/quotes`: snapshot continuo para la UI.
 
 ## Calendario y Modelos
@@ -131,11 +135,13 @@ La solapa `Calculadoras` tiene templates separados para tasa fija, CER, TAMAR y 
 
 Dentro de `Tasa fija` esta cargado el subtipo `LECAPs` con estos tickers: S15Y6, S29Y6, T30J6, S17L6, S31L6, S14G6, S31G6, S30S6 y S30O6.
 
-Para LECAPs se pide ticker, fecha de emision, fecha de vencimiento, VNO, TEM de emision, precio T+0 y precio T+1. El cashflow es bullet a vencimiento, ajusta fecha de pago al siguiente dia habil si hace falta y calcula interes con:
+Para LECAPs se pide ticker, fecha de emision, fecha de vencimiento, VNO y TEM de emision. El cashflow es bullet a vencimiento, ajusta fecha de pago al siguiente dia habil si hace falta y calcula interes con:
 
 ```text
 VNO * (1 + TEM) ^ (dias / 30) - VNO
 ```
+
+La solapa permite confirmar y guardar cada LECAP. Esos datos se guardan en SQLite en `APP_DB_PATH` y no forman parte del codigo, asi podes actualizar archivos del proyecto sin perder las calculadoras cargadas.
 
 ## Datos BCRA
 
@@ -169,7 +175,7 @@ docker run --rm -p 8000:8000 -e MARKET_SOURCE=mock monitor-bonos
 Run pyRofex:
 
 ```powershell
-docker run --rm -p 8000:8000 --env-file .env.example monitor-bonos
+docker run --rm -p 8000:8000 --env-file .env monitor-bonos
 ```
 
 ### PaaS tipo Render/Railway/Fly
@@ -180,6 +186,8 @@ Usa cualquiera de estas dos formas:
 - Python web service: usa el `Procfile` o el comando `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
 
 Configura las variables de entorno en el panel del proveedor. Si vas a usar `MARKET_SOURCE=pyrofex`, elegi un servicio siempre encendido o con auto-sleep desactivado, porque si la instancia duerme se corta el stream.
+
+Para que las LECAPs guardadas sobrevivan redeploys en Render/Railway/Fly, configura un disco persistente y apunta `APP_DB_PATH` a ese volumen. En local queda en `data/user_data.db`.
 
 ## TIR
 

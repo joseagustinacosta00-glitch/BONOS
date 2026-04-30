@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -38,7 +39,7 @@ class CalculatorStorage:
 
     def initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS lecap_calculators (
@@ -55,7 +56,7 @@ class CalculatorStorage:
             )
 
     def list_lecaps(self) -> list[SavedLecap]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
                 SELECT id, ticker, issue_date, maturity_date, face_value,
@@ -76,7 +77,7 @@ class CalculatorStorage:
     ) -> SavedLecap:
         now = now_argentina_iso()
         ticker = ticker.upper().strip()
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO lecap_calculators (
@@ -115,7 +116,7 @@ class CalculatorStorage:
         return self._row_to_lecap(row)
 
     def delete_lecap(self, item_id: int) -> bool:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 "DELETE FROM lecap_calculators WHERE id = ?",
                 (item_id,),
