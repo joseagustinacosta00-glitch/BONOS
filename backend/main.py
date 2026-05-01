@@ -20,6 +20,7 @@ from backend.bond_calculators import (
 )
 from backend.bonds import BOND_TICKERS
 from backend.config import get_settings
+from backend.hard_dollar import calculate_hard_dollar_ytm, hard_dollar_bond
 from backend.market_calendar import market_calendar, parse_date
 from backend.market_data import MarketDataService
 from backend.storage import CalculatorStorage
@@ -85,6 +86,32 @@ async def tickers() -> list[dict[str, str]]:
 @app.get("/api/quotes")
 async def quotes() -> dict:
     return market.snapshot()
+
+
+@app.get("/api/bonds/{family}/cashflows")
+async def bond_cashflows(family: str, settlement_date: date | None = None) -> dict:
+    bond = hard_dollar_bond(family)
+    if bond is None:
+        raise HTTPException(status_code=404, detail="Bono no soportado.")
+    target_date = settlement_date or now_argentina().date()
+    return {
+        "settlement_date": target_date.isoformat(),
+        "bond": bond.to_dict(target_date),
+    }
+
+
+@app.get("/api/bonds/{family}/ytm")
+async def bond_ytm(family: str, price: Annotated[float, Query(gt=0)]) -> dict:
+    settlement_date = now_argentina().date()
+    ytm = calculate_hard_dollar_ytm(family, price, settlement_date)
+    if ytm is None:
+        raise HTTPException(status_code=422, detail="No se pudo calcular TIR para ese bono/precio.")
+    return {
+        "family": family.upper().strip(),
+        "settlement_date": settlement_date.isoformat(),
+        "price": price,
+        "ytm": ytm,
+    }
 
 
 @app.get("/api/market/lecaps")

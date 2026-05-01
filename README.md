@@ -104,6 +104,8 @@ Abrir http://127.0.0.1:8000
 
 - `GET /api/tickers`: universo de instrumentos.
 - `GET /api/quotes`: ultimo snapshot.
+- `GET /api/bonds/{family}/cashflows`: flujos futuros hard dollar para AO27, AL29, AL30, AL35, AE38 y AL41.
+- `GET /api/bonds/{family}/ytm?price=80`: calcula TIR anual efectiva hard dollar para un precio en USD/CCL.
 - `GET /api/calendar/summary`: resumen del calendario cargado.
 - `GET /api/calendar/day/YYYY-MM-DD`: indica si una fecha es feriado y dia habil.
 - `GET /api/calendar/business-days?start=YYYY-MM-DD&end=YYYY-MM-DD`: dias habiles entre fechas.
@@ -202,6 +204,6 @@ Configura las variables de entorno en el panel del proveedor. Si vas a usar `MAR
 
 Para que las LECAPs guardadas sobrevivan redeploys en Render/Railway/Fly, configura un disco persistente y apunta `APP_DB_PATH` a ese volumen. En local queda en `data/user_data.db`.
 
-## TIR
+## TIR Hard Dollar
 
-La pantalla ya deja la columna `TIR`, pero por ahora queda sin dato porque para calcularla bien hacen falta los flujos de cada bono, fechas de amortizacion, cupones y convencion de precio. El siguiente paso natural es cargar esos cashflows y calcular TIR desde el ultimo precio recibido.
+La pantalla calcula `TIR` para las especies hard dollar cotizadas en USD o Cable usando cashflows futuros cargados para AO27, AL29, AL30, AL35, AE38 y AL41. Las especies en ARS quedan sin TIR porque hace falta convertir el precio a moneda de flujo con un tipo de cambio consistente antes de descontar.

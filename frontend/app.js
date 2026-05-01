@@ -171,7 +171,7 @@ function renderQuotes() {
         <td class="text-end">${formatNumber(quote.last, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td class="text-end ${changeClass}">${formatNumber(quote.change, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td class="text-end">${formatNumber(quote.volume)}</td>
-        <td class="text-end">${formatNumber(quote.ytm, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td class="text-end">${formatPercent(quote.ytm, 2)}</td>
         <td class="text-end">${formatTime(quote.updated_at)}</td>
       </tr>
     `;

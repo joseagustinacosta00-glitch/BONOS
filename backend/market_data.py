@@ -11,6 +11,8 @@ from typing import Any
 from backend.bond_calculators import LECAP_TICKERS
 from backend.bonds import BOND_TICKERS, TICKER_BY_SYMBOL, TICKER_SYMBOLS
 from backend.config import Settings
+from backend.hard_dollar import calculate_hard_dollar_ytm
+from backend.time_utils import now_argentina
 from backend.time_utils import now_argentina_iso
 
 logger = logging.getLogger(__name__)
@@ -58,8 +60,18 @@ class MarketDataService:
         self.status = "stopped"
 
     def snapshot(self) -> dict[str, Any]:
+        today = now_argentina().date()
         with self._lock:
-            quotes = [self._quotes[symbol] for symbol in TICKER_SYMBOLS]
+            quotes = []
+            for symbol in TICKER_SYMBOLS:
+                quote = dict(self._quotes[symbol])
+                price = quote.get("last") if quote.get("currency") != "ARS" else None
+                quote["ytm"] = calculate_hard_dollar_ytm(
+                    str(quote.get("family") or ""),
+                    self._coerce_number(price),
+                    today,
+                )
+                quotes.append(quote)
 
         return {
             "status": self.status,
