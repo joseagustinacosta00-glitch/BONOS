@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Graficos - Monitor de Bonos</title>
+    <link rel="stylesheet" href="/static/charts.css">
+  </head>
+  <body>
+    <main class="charts-shell">
+      <header class="charts-topbar">
+        <div>
+          <p class="charts-eyebrow">Modulo demo</p>
+          <h1>Graficos de bonos</h1>
+        </div>
+        <a class="charts-link" href="/">Volver al monitor</a>
+      </header>
+
+      <section class="charts-panel">
+        <div class="chart-controls">
+          <label>
+            <span>Ticker A</span>
+            <select id="chartTickerA"></select>
+          </label>
+          <label>
+            <span>Ticker B</span>
+            <select id="chartTickerB"></select>
+          </label>
+          <label>
+            <span>Dato</span>
+            <select id="chartMetric">
+              <option value="parity">Paridad</option>
+              <option value="dirty_price">Precio dirty</option>
+              <option value="clean_price">Precio clean</option>
+              <option value="ytm">TIR</option>
+              <option value="tem">TEM</option>
+              <option value="tna">TNA</option>
+              <option value="volume">Volumen</option>
+            </select>
+          </label>
+          <label>
+            <span>Mercado</span>
+            <select id="chartMarket">
+              <option value="pesos">PESOS</option>
+              <option value="cable">CABLE</option>
+              <option value="mep">MEP</option>
+            </select>
+          </label>
+          <label>
+            <span>Liquidacion</span>
+            <select id="chartSettlement">
+              <option value="t0">T+0</option>
+              <option value="t1">T+1</option>
+            </select>
+          </label>
+          <label>
+            <span>Ventana z-score</span>
+            <input id="zscoreWindow" type="number" min="2" max="252" step="1" value="20">
+          </label>
+          <button id="drawCharts" type="button">Graficar</button>
+        </div>
+        <p id="chartStatus" class="chart-status">Listo</p>
+      </section>
+
+      <section class="charts-grid">
+        <article class="chart-card chart-card-wide">
+          <div class="chart-heading">
+            <div>
+              <p class="charts-eyebrow">Serie historica</p>
+              <h2 id="lineTitle">Serie A</h2>
+            </div>
+            <span id="lineSource">mock</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="lineChart"></canvas>
+          </div>
+        </article>
+
+        <article class="chart-card">
+          <div class="chart-heading">
+            <div>
+              <p class="charts-eyebrow">Relativo</p>
+              <h2>Spread A - B</h2>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="spreadChart"></canvas>
+          </div>
+        </article>
+
+        <article class="chart-card">
+          <div class="chart-heading">
+            <div>
+              <p class="charts-eyebrow">Rolling</p>
+              <h2>Z-score del spread</h2>
+            </div>
+            <span id="latestZScore">-</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="zscoreChart"></canvas>
+          </div>
+        </article>
+
+        <article class="chart-card chart-card-wide">
+          <div class="chart-heading">
+            <div>
+              <p class="charts-eyebrow">Curva</p>
+              <h2>TIR vs MD</h2>
+            </div>
+            <span>mock</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="curveChart"></canvas>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="/static/charts.js"></script>
+  </body>
+</html>

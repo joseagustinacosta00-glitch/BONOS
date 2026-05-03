@@ -92,6 +92,11 @@ async def index() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/charts-demo")
+async def charts_demo() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "charts-demo.html")
+
+
 @app.get("/api/tickers")
 async def tickers() -> list[dict[str, str]]:
     return [ticker.__dict__ for ticker in BOND_TICKERS]
