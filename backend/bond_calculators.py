@@ -7,10 +7,12 @@ from typing import Protocol
 
 
 class BondModelType(StrEnum):
+    LECAP = "lecap"
     CER = "cer"
     TAMAR = "tamar"
     PESOS_FIXED_RATE = "pesos_fixed_rate"
     HARD_DOLLAR = "hard_dollar"
+    DUAL = "dual"
 
 
 class DayCount(StrEnum):

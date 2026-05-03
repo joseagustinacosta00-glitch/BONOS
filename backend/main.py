@@ -23,7 +23,7 @@ from backend.config import get_settings
 from backend.hard_dollar import calculate_hard_dollar_ytm, hard_dollar_bond
 from backend.market_calendar import market_calendar, parse_date
 from backend.market_data import MarketDataService
-from backend.storage import CalculatorStorage
+from backend.storage import HISTORICAL_METRIC_TYPES, CalculatorStorage
 from backend.time_utils import now_argentina_iso
 from backend.time_utils import now_argentina
 
@@ -60,6 +60,13 @@ class TPlusConversionRequest(BaseModel):
     price: float = Field(gt=0)
     rate_percent: float | None = None
     use_auto_rate: bool = True
+
+
+class HistoricalDataRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=20)
+    metric_type: str = Field(pattern="^(dirty_price|ytm|parity)$")
+    value_date: date
+    value: float
 
 
 @app.on_event("startup")
@@ -383,6 +390,11 @@ async def calculator_save_lecap(payload: LecapCalculationRequest) -> dict:
             face_value=payload.face_value,
             tem_emission_percent=payload.tem_emission_percent,
         )
+        storage.upsert_cashflows(
+            calculator_type="lecap",
+            ticker=payload.ticker,
+            cashflows=calculation.to_dict()["cashflows"],
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"item": saved.to_dict(), "calculation": calculation.to_dict()}
@@ -393,6 +405,60 @@ async def calculator_delete_lecap(item_id: int) -> dict:
     if not storage.delete_lecap(item_id):
         raise HTTPException(status_code=404, detail="LECAP no encontrada.")
     return {"deleted": True}
+
+
+@app.get("/api/calculators/cashflows")
+async def calculator_cashflows(calculator_type: str | None = None, ticker: str | None = None) -> dict:
+    return {
+        "items": [
+            cashflow.to_dict()
+            for cashflow in storage.list_cashflows(calculator_type=calculator_type, ticker=ticker)
+        ]
+    }
+
+
+@app.get("/api/data/tickers")
+async def data_tickers() -> dict:
+    tickers = sorted({ticker.symbol for ticker in BOND_TICKERS} | set(LECAP_TICKERS) | set(storage.list_tickers()))
+    return {"tickers": tickers}
+
+
+@app.get("/api/historical-data/types")
+async def historical_data_types() -> dict:
+    return {
+        "types": [
+            {"key": "dirty_price", "label": "Precio dirty"},
+            {"key": "ytm", "label": "TIR"},
+            {"key": "parity", "label": "Paridad"},
+        ],
+        "supported": list(HISTORICAL_METRIC_TYPES),
+    }
+
+
+@app.get("/api/historical-data")
+async def historical_data(ticker: str | None = None, metric_type: str | None = None) -> dict:
+    if metric_type is not None and metric_type not in HISTORICAL_METRIC_TYPES:
+        raise HTTPException(status_code=422, detail="Tipo de dato historico no soportado.")
+    return {
+        "items": [
+            point.to_dict()
+            for point in storage.list_historical_data(ticker=ticker, metric_type=metric_type)
+        ]
+    }
+
+
+@app.post("/api/historical-data")
+async def save_historical_data(payload: HistoricalDataRequest) -> dict:
+    try:
+        point = storage.upsert_historical_data(
+            ticker=payload.ticker,
+            metric_type=payload.metric_type,
+            value_date=payload.value_date,
+            value=payload.value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"item": point.to_dict()}
 
 
 @app.get("/health")

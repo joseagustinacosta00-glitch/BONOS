@@ -123,6 +123,10 @@ Abrir http://127.0.0.1:8000
 - `POST /api/calculators/lecaps`: calcula el cashflow fijo de emision para una LECAP.
 - `GET /api/calculators/lecaps/saved`: lista LECAPs guardadas por vencimiento.
 - `POST /api/calculators/lecaps/saved`: confirma y guarda una LECAP.
+- `GET /api/calculators/cashflows`: lista flujos fijos guardados por calculadora/ticker.
+- `GET /api/data/tickers`: lista tickers conocidos y cargados por el usuario.
+- `GET /api/historical-data`: lista datos historicos cargados por ticker/tipo.
+- `POST /api/historical-data`: guarda un dato historico de precio dirty, TIR o paridad.
 - `WS /ws/quotes`: snapshot continuo para la UI.
 
 ## Calendario y Modelos
@@ -133,16 +137,18 @@ La base de feriados esta en `data/market_holidays.csv` con el calendario 2020-20
 
 `data/business_days.csv` queda preparado para cargar un calendario explicito de ruedas habiles. Si ese archivo tiene fechas, el sistema lo usa como fuente mandatoria; si esta vacio, calcula lunes a viernes menos feriados.
 
-La base de modelos para calculadoras esta en `backend/bond_calculators.py` y contempla:
+La base de modelos para calculadoras esta en `backend/bond_calculators.py` y el menu contempla:
 
+- LECAP
+- bono HD
 - CER
 - TAMAR
-- pesos tasa fija
-- hard dollar
+- tasa fija
+- DUAL, con subtipos CER, TAMAR y FIJA
 
-La solapa `Calculadoras` tiene templates separados para tasa fija, CER, TAMAR y hard dollar. El primer paso del formulario pide fecha de emision, fecha de vencimiento y VNO; con eso arma la base del futuro cashflow.
+El template operativo de carga esta disponible solo dentro de `LECAP`. Las otras calculadoras quedan separadas en el menu para no reutilizar el formulario de LECAP donde no corresponde.
 
-Dentro de `Tasa fija` esta cargado el subtipo `LECAPs` con estos tickers: S15Y6, S29Y6, T30J6, S17L6, S31L6, S14G6, S31G6, S30S6 y S30O6.
+Dentro de `LECAP` esta cargado el subtipo `LECAPs` con estos tickers: S15Y6, S29Y6, T30J6, S17L6, S31L6, S14G6, S31G6, S30S6 y S30O6.
 
 Para LECAPs se pide ticker, fecha de emision, fecha de vencimiento, VNO y TEM de emision. El cashflow es bullet a vencimiento, ajusta fecha de pago al siguiente dia habil si hace falta y calcula interes con:
 
@@ -150,7 +156,15 @@ Para LECAPs se pide ticker, fecha de emision, fecha de vencimiento, VNO y TEM de
 VNO * (1 + TEM) ^ (dias / 30) - VNO
 ```
 
-La solapa permite confirmar y guardar cada LECAP. Esos datos se guardan en SQLite en `APP_DB_PATH` y no forman parte del codigo ni del repo, asi podes actualizar archivos del proyecto sin perder las calculadoras cargadas. En local, `data/user_data.db` queda ignorado por Git.
+La solapa permite confirmar y guardar cada LECAP. Esos datos y el flujo fijo calculado se guardan en SQLite en `APP_DB_PATH` y no forman parte del codigo ni del repo, asi podes actualizar archivos del proyecto sin perder las calculadoras cargadas. En local, `data/user_data.db` queda ignorado por Git.
+
+La solapa `Datos historicos` permite cargar por ticker un valor de:
+
+- Precio dirty
+- TIR
+- Paridad
+
+El ticker se puede elegir desde el listado de instrumentos conocidos o escribir manualmente. Los historicos tambien quedan guardados en SQLite en `APP_DB_PATH`.
 
 En la solapa `Mercado`, el selector `LECAPs` muestra las LECAPs guardadas con precios T+0 o T+1. La TNA se calcula para bid, offer y last; TIR, TEM, duration, modified duration y convexity se calculan contra last.
 

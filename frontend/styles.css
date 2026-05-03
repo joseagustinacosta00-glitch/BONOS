@@ -314,6 +314,10 @@ tbody td {
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
 }
 
+.calculator-form.historical-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+}
+
 .calculator-form label span {
   display: block;
   color: var(--muted);
@@ -357,8 +361,16 @@ tbody td {
 
 .subtype-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.calculator-empty {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  margin: 0;
 }
 
 @media (max-width: 760px) {
@@ -395,6 +407,7 @@ tbody td {
   .calculator-layout,
   .calculator-form,
   .calculator-form.lecap-form,
+  .calculator-form.historical-form,
   .calculator-form.tplus-form {
     grid-template-columns: 1fr;
   }

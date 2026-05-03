@@ -12,6 +12,7 @@ const marketView = document.querySelector("#marketView");
 const ratesView = document.querySelector("#ratesView");
 const bcraView = document.querySelector("#bcraView");
 const calculatorsView = document.querySelector("#calculatorsView");
+const historicalView = document.querySelector("#historicalView");
 const tplusView = document.querySelector("#tplusView");
 const bcraBody = document.querySelector("#bcraBody");
 const bcraSeriesLabel = document.querySelector("#bcraSeriesLabel");
@@ -36,6 +37,18 @@ const lecapTicker = document.querySelector("#lecapTicker");
 const temEmission = document.querySelector("#temEmission");
 const saveLecap = document.querySelector("#saveLecap");
 const savedLecaps = document.querySelector("#savedLecaps");
+const lecapTemplate = document.querySelector("#lecapTemplate");
+const lecapSubmenu = document.querySelector("#lecapSubmenu");
+const dualSubmenu = document.querySelector("#dualSubmenu");
+const calculatorPlaceholder = document.querySelector("#calculatorPlaceholder");
+const historicalForm = document.querySelector("#historicalForm");
+const historicalTicker = document.querySelector("#historicalTicker");
+const historicalTickerOptions = document.querySelector("#historicalTickerOptions");
+const historicalMetricType = document.querySelector("#historicalMetricType");
+const historicalDate = document.querySelector("#historicalDate");
+const historicalValue = document.querySelector("#historicalValue");
+const historicalStatus = document.querySelector("#historicalStatus");
+const historicalBody = document.querySelector("#historicalBody");
 const tplusForm = document.querySelector("#tplusForm");
 const tplusDirection = document.querySelector("#tplusDirection");
 const tplusRate = document.querySelector("#tplusRate");
@@ -51,7 +64,7 @@ let currentMarketList = "bonds";
 let currentLecapSettlement = "t1";
 let currentView = "market";
 let currentBcraSeries = "cer";
-let currentBondModel = "pesos_fixed_rate";
+let currentBondModel = "lecap";
 let latestLecapCalculation = null;
 let latestLecapMarket = [];
 let lecapMarketLoading = false;
@@ -92,10 +105,18 @@ let latestQuotes = [...DEFAULT_QUOTES];
 let ws;
 
 const BOND_MODEL_LABELS = {
+  lecap: "Lecap",
+  hard_dollar: "Bono HD",
+  cer: "CER",
+  tamar: "TAMAR",
   pesos_fixed_rate: "Tasa fija",
-  cer: "Bonos CER",
-  tamar: "Bonos TAMAR",
-  hard_dollar: "Bonos Hard Dollar",
+  dual: "DUAL",
+};
+
+const HISTORICAL_TYPE_LABELS = {
+  dirty_price: "Precio dirty",
+  ytm: "TIR",
+  parity: "Paridad",
 };
 
 function formatNumber(value, options = {}) {
@@ -292,6 +313,7 @@ function setView(view) {
   ratesView.classList.toggle("active", view === "rates");
   bcraView.classList.toggle("active", view === "bcra");
   calculatorsView.classList.toggle("active", view === "calculators");
+  historicalView.classList.toggle("active", view === "historical");
   tplusView.classList.toggle("active", view === "tplus");
   document.querySelectorAll("[data-view]").forEach((button) => {
     const active = button.dataset.view === view;
@@ -309,6 +331,12 @@ function setView(view) {
   if (view === "calculators") fetchSavedLecaps().catch(() => {
     savedLecaps.innerHTML = '<tr><td colspan="9" class="empty-state">No se pudieron cargar las LECAPs guardadas</td></tr>';
   });
+  if (view === "historical") {
+    fetchHistoricalTickers().catch(() => {});
+    fetchHistoricalData().catch(() => {
+      historicalBody.innerHTML = '<tr><td colspan="5" class="empty-state">No se pudieron cargar los datos historicos</td></tr>';
+    });
+  }
   if (view === "tplus") {
     fetchTplusAutoRate().then(calculateTplus).catch(() => {
       setTplusStatus("error", "Sin caucion");
@@ -320,6 +348,12 @@ function setCalculatorStatus(state, text) {
   calculatorStatus.classList.toggle("ok", state === "ok");
   calculatorStatus.classList.toggle("error", state === "error");
   calculatorStatus.textContent = text;
+}
+
+function setHistoricalStatus(state, text) {
+  historicalStatus.classList.toggle("ok", state === "ok");
+  historicalStatus.classList.toggle("error", state === "error");
+  historicalStatus.textContent = text;
 }
 
 function setTplusStatus(state, text) {
@@ -335,6 +369,20 @@ function setBondModel(model) {
   cashflowPreview.innerHTML = '<tr><td colspan="9" class="empty-state">Completa los datos iniciales</td></tr>';
   latestLecapCalculation = null;
   saveLecap.disabled = true;
+
+  const isLecap = model === "lecap";
+  const isDual = model === "dual";
+  lecapTemplate.classList.toggle("d-none", !isLecap);
+  lecapSubmenu.classList.toggle("d-none", !isLecap);
+  dualSubmenu.classList.toggle("d-none", !isDual);
+  calculatorPlaceholder.classList.toggle("d-none", isLecap);
+  if (isLecap) {
+    calculatorPlaceholder.textContent = "";
+  } else if (isDual) {
+    calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
+  } else {
+    calculatorPlaceholder.textContent = "Template seleccionado. El formulario cargable queda pendiente; por ahora el alta con flujo fijo esta disponible solo para LECAPs.";
+  }
 
   document.querySelectorAll("[data-bond-model]").forEach((button) => {
     button.classList.toggle("active", button.dataset.bondModel === model);
@@ -390,6 +438,64 @@ async function fetchSavedLecaps() {
   const response = await fetch("/api/calculators/lecaps/saved");
   if (!response.ok) throw new Error("No se pudieron leer LECAPs guardadas");
   renderSavedLecaps(await response.json());
+}
+
+async function fetchHistoricalTickers() {
+  const response = await fetch("/api/data/tickers");
+  if (!response.ok) throw new Error("No se pudieron leer tickers");
+  const payload = await response.json();
+  historicalTickerOptions.innerHTML = (payload.tickers || [])
+    .map((ticker) => `<option value="${ticker}"></option>`)
+    .join("");
+}
+
+async function fetchHistoricalData() {
+  const response = await fetch("/api/historical-data");
+  if (!response.ok) throw new Error("No se pudieron leer historicos");
+  renderHistoricalData(await response.json());
+}
+
+function renderHistoricalData(payload) {
+  const items = payload.items || [];
+  if (!items.length) {
+    historicalBody.innerHTML = '<tr><td colspan="5" class="empty-state">Todavia no hay datos historicos guardados</td></tr>';
+    return;
+  }
+
+  historicalBody.innerHTML = items.map((item) => `
+    <tr>
+      <td class="ticker">${item.ticker}</td>
+      <td>${HISTORICAL_TYPE_LABELS[item.metric_type] || item.metric_type}</td>
+      <td>${formatDate(item.value_date)}</td>
+      <td class="text-end">${formatNumber(item.value, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+      <td class="text-end">${formatTime(item.updated_at)}</td>
+    </tr>
+  `).join("");
+}
+
+async function saveHistoricalData(event) {
+  event.preventDefault();
+  setHistoricalStatus("draft", "Guardando");
+  const response = await fetch("/api/historical-data", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ticker: historicalTicker.value.trim().toUpperCase(),
+      metric_type: historicalMetricType.value,
+      value_date: historicalDate.value,
+      value: Number(historicalValue.value),
+    }),
+  });
+
+  if (!response.ok) {
+    setHistoricalStatus("error", "Revisar datos");
+    return;
+  }
+
+  historicalValue.value = "";
+  await fetchHistoricalTickers();
+  await fetchHistoricalData();
+  setHistoricalStatus("ok", "Dato guardado");
 }
 
 async function fetchLecapMarket() {
@@ -532,6 +638,7 @@ async function saveLatestLecap() {
 
 async function submitBondDraft(event) {
   event.preventDefault();
+  if (currentBondModel !== "lecap") return;
   setCalculatorStatus("draft", "Calculando");
 
   const response = await fetch("/api/calculators/lecaps", {
@@ -667,6 +774,18 @@ document.querySelectorAll("[data-bond-model]").forEach((button) => {
   button.addEventListener("click", () => setBondModel(button.dataset.bondModel));
 });
 
+document.querySelectorAll("[data-dual-model]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-dual-model]").forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle("active", active);
+      candidate.classList.toggle("btn-dark", active);
+      candidate.classList.toggle("btn-outline-dark", !active);
+    });
+    setCalculatorStatus("draft", `DUAL ${button.textContent.trim()}`);
+  });
+});
+
 bcraRefresh.addEventListener("click", () => {
   fetchBcraSeries(true).catch(() => {
     bcraBody.innerHTML = '<tr><td colspan="3" class="empty-state">No se pudieron actualizar datos BCRA</td></tr>';
@@ -680,6 +799,7 @@ ratesRefresh.addEventListener("click", () => {
 });
 
 bondDraftForm.addEventListener("submit", submitBondDraft);
+historicalForm.addEventListener("submit", saveHistoricalData);
 saveLecap.addEventListener("click", () => {
   saveLatestLecap().catch(() => {
     setCalculatorStatus("error", "No se pudo guardar");

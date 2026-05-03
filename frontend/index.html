@@ -40,6 +40,7 @@
         <button class="btn btn-sm btn-outline-dark" data-view="rates" type="button">Tasas</button>
         <button class="btn btn-sm btn-outline-dark" data-view="bcra" type="button">Datos BCRA</button>
         <button class="btn btn-sm btn-outline-dark" data-view="calculators" type="button">Calculadoras</button>
+        <button class="btn btn-sm btn-outline-dark" data-view="historical" type="button">Datos historicos</button>
         <button class="btn btn-sm btn-outline-dark" data-view="tplus" type="button">T+0 / T+1</button>
       </nav>
 
@@ -232,21 +233,29 @@
       <section id="calculatorsView" class="view-panel" aria-label="Calculadoras">
         <section class="calculator-layout">
           <aside class="calculator-menu" aria-label="Tipo de bono">
-            <button class="calculator-option active" data-bond-model="pesos_fixed_rate" type="button">
-              <span>Tasa fija</span>
-              <small>Pesos con cupon fijo</small>
+            <button class="calculator-option active" data-bond-model="lecap" type="button">
+              <span>Lecap</span>
+              <small>Template bullet capitalizable</small>
+            </button>
+            <button class="calculator-option" data-bond-model="hard_dollar" type="button">
+              <span>Bono HD</span>
+              <small>Hard dollar</small>
             </button>
             <button class="calculator-option" data-bond-model="cer" type="button">
-              <span>Bonos CER</span>
+              <span>CER</span>
               <small>Ajuste por CER</small>
             </button>
             <button class="calculator-option" data-bond-model="tamar" type="button">
-              <span>Bonos TAMAR</span>
+              <span>TAMAR</span>
               <small>Floating rate</small>
             </button>
-            <button class="calculator-option" data-bond-model="hard_dollar" type="button">
-              <span>Bonos Hard Dollar</span>
-              <small>Dolar linked legal hard dollar</small>
+            <button class="calculator-option" data-bond-model="pesos_fixed_rate" type="button">
+              <span>Tasa fija</span>
+              <small>Pesos con cupon fijo</small>
+            </button>
+            <button class="calculator-option" data-bond-model="dual" type="button">
+              <span>DUAL</span>
+              <small>CER, TAMAR o fija</small>
             </button>
           </aside>
 
@@ -254,15 +263,26 @@
             <div class="calculator-heading">
               <div>
                 <p class="eyebrow">Template</p>
-                <h2 id="calculatorTitle">Tasa fija</h2>
+                <h2 id="calculatorTitle">Lecap</h2>
               </div>
               <span id="calculatorStatus" class="calc-status">Borrador</span>
             </div>
 
-            <div id="fixedRateSubmenu" class="subtype-tabs">
+            <div id="dualSubmenu" class="subtype-tabs d-none" aria-label="Dualidades">
+              <button class="btn btn-sm btn-dark active" data-dual-model="cer" type="button">CER</button>
+              <button class="btn btn-sm btn-outline-dark" data-dual-model="tamar" type="button">TAMAR</button>
+              <button class="btn btn-sm btn-outline-dark" data-dual-model="fixed" type="button">FIJA</button>
+            </div>
+
+            <div id="lecapSubmenu" class="subtype-tabs">
               <button class="btn btn-sm btn-dark active" type="button">LECAPs</button>
             </div>
 
+            <section id="calculatorPlaceholder" class="empty-state calculator-empty d-none">
+              Selecciona un subtipo para preparar el template. Por ahora el formulario cargable esta disponible solo para LECAPs.
+            </section>
+
+            <div id="lecapTemplate">
             <form id="bondDraftForm" class="calculator-form lecap-form">
               <label>
                 <span>Ticker</span>
@@ -349,6 +369,63 @@
                 </table>
               </div>
             </section>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section id="historicalView" class="view-panel" aria-label="Datos historicos">
+        <section class="calculator-panel">
+          <div class="calculator-heading">
+            <div>
+              <p class="eyebrow">Base de datos</p>
+              <h2>Datos historicos</h2>
+            </div>
+            <span id="historicalStatus" class="calc-status">Listo</span>
+          </div>
+
+          <form id="historicalForm" class="calculator-form historical-form">
+            <label>
+              <span>Ticker</span>
+              <input id="historicalTicker" class="form-control form-control-sm" list="historicalTickerOptions" type="text" placeholder="Ej. AL30D" required>
+              <datalist id="historicalTickerOptions"></datalist>
+            </label>
+            <label>
+              <span>Dato</span>
+              <select id="historicalMetricType" class="form-select form-select-sm" required>
+                <option value="dirty_price">Precio dirty</option>
+                <option value="ytm">TIR</option>
+                <option value="parity">Paridad</option>
+              </select>
+            </label>
+            <label>
+              <span>Fecha</span>
+              <input id="historicalDate" class="form-control form-control-sm" type="date" required>
+            </label>
+            <label>
+              <span>Valor</span>
+              <input id="historicalValue" class="form-control form-control-sm" type="number" step="0.000001" required>
+            </label>
+            <button class="btn btn-sm btn-dark" type="submit">Guardar</button>
+          </form>
+
+          <section class="table-wrap" aria-label="Historicos guardados">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th scope="col">Ticker</th>
+                  <th scope="col">Dato</th>
+                  <th scope="col">Fecha</th>
+                  <th scope="col" class="text-end">Valor</th>
+                  <th scope="col" class="text-end">Actualizado</th>
+                </tr>
+              </thead>
+              <tbody id="historicalBody">
+                <tr>
+                  <td colspan="5" class="empty-state">Todavia no hay datos historicos guardados</td>
+                </tr>
+              </tbody>
+            </table>
           </section>
         </section>
       </section>
