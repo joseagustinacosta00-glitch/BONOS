@@ -126,7 +126,8 @@ Abrir http://127.0.0.1:8000
 - `GET /api/calculators/cashflows`: lista flujos fijos guardados por calculadora/ticker.
 - `GET /api/data/tickers`: lista tickers conocidos y cargados por el usuario.
 - `GET /api/historical-data`: lista datos historicos cargados por ticker/tipo.
-- `POST /api/historical-data`: guarda un dato historico de precio dirty, TIR o paridad.
+- `POST /api/historical-data`: guarda un dato historico manual.
+- `POST /api/historical-data/upload`: importa datos historicos desde CSV/TXT/XLSX.
 - `WS /ws/quotes`: snapshot continuo para la UI.
 
 ## Calendario y Modelos
@@ -160,11 +161,17 @@ La solapa permite confirmar y guardar cada LECAP. Esos datos y el flujo fijo cal
 
 La solapa `Datos historicos` permite cargar por ticker un valor de:
 
-- Precio dirty
-- TIR
 - Paridad
+- Precio dirty
+- Precio clean
+- TIR
+- TEM
+- TNA
+- Volumen
 
-El ticker se puede elegir desde el listado de instrumentos conocidos o escribir manualmente. Los historicos tambien quedan guardados en SQLite en `APP_DB_PATH`.
+El ticker se puede elegir desde el listado de instrumentos conocidos o escribir manualmente. Tambien se pueden subir archivos CSV, TXT o XLSX. El formato recomendado es una fila por fecha con columna `Fecha` en `DD/MM/AAAA` y columnas de valores disponibles: `Paridad`, `Precio dirty`, `Precio clean`, `TIR`, `TEM`, `TNA` y `Volumen`. Tambien acepta formato largo con columnas `Fecha`, `Tipo` y `Valor`. Los historicos quedan guardados en SQLite en `APP_DB_PATH`.
+
+El template de `Bono HD` queda preparado con inputs de fecha de emision, fecha de vencimiento, frecuencia y tipo de cupon. Si el cupon es fijo se carga un solo valor anual; si es step-up, la UI abre una lista de anios segun emision y vencimiento para cargar el cupon de cada anio.
 
 En la solapa `Mercado`, el selector `LECAPs` muestra las LECAPs guardadas con precios T+0 o T+1. La TNA se calcula para bid, offer y last; TIR, TEM, duration, modified duration y convexity se calculan contra last.
 

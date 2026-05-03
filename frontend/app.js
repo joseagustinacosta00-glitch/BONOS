@@ -38,17 +38,29 @@ const temEmission = document.querySelector("#temEmission");
 const saveLecap = document.querySelector("#saveLecap");
 const savedLecaps = document.querySelector("#savedLecaps");
 const lecapTemplate = document.querySelector("#lecapTemplate");
+const hardDollarTemplate = document.querySelector("#hardDollarTemplate");
 const lecapSubmenu = document.querySelector("#lecapSubmenu");
 const dualSubmenu = document.querySelector("#dualSubmenu");
 const calculatorPlaceholder = document.querySelector("#calculatorPlaceholder");
 const historicalForm = document.querySelector("#historicalForm");
+const historicalUploadForm = document.querySelector("#historicalUploadForm");
 const historicalTicker = document.querySelector("#historicalTicker");
+const historicalUploadTicker = document.querySelector("#historicalUploadTicker");
 const historicalTickerOptions = document.querySelector("#historicalTickerOptions");
 const historicalMetricType = document.querySelector("#historicalMetricType");
 const historicalDate = document.querySelector("#historicalDate");
 const historicalValue = document.querySelector("#historicalValue");
+const historicalFile = document.querySelector("#historicalFile");
 const historicalStatus = document.querySelector("#historicalStatus");
 const historicalBody = document.querySelector("#historicalBody");
+const historicalSeries = document.querySelector("#historicalSeries");
+const hardDollarForm = document.querySelector("#hardDollarForm");
+const hdIssueDate = document.querySelector("#hdIssueDate");
+const hdMaturityDate = document.querySelector("#hdMaturityDate");
+const hdCouponType = document.querySelector("#hdCouponType");
+const hdFixedCouponWrap = document.querySelector("#hdFixedCouponWrap");
+const hdStepUpSection = document.querySelector("#hdStepUpSection");
+const hdStepUpRows = document.querySelector("#hdStepUpRows");
 const tplusForm = document.querySelector("#tplusForm");
 const tplusDirection = document.querySelector("#tplusDirection");
 const tplusRate = document.querySelector("#tplusRate");
@@ -114,9 +126,13 @@ const BOND_MODEL_LABELS = {
 };
 
 const HISTORICAL_TYPE_LABELS = {
-  dirty_price: "Precio dirty",
-  ytm: "TIR",
   parity: "Paridad",
+  dirty_price: "Precio dirty",
+  clean_price: "Precio clean",
+  ytm: "TIR",
+  tem: "TEM",
+  tna: "TNA",
+  volume: "Volumen",
 };
 
 function formatNumber(value, options = {}) {
@@ -371,13 +387,17 @@ function setBondModel(model) {
   saveLecap.disabled = true;
 
   const isLecap = model === "lecap";
+  const isHardDollar = model === "hard_dollar";
   const isDual = model === "dual";
   lecapTemplate.classList.toggle("d-none", !isLecap);
+  hardDollarTemplate.classList.toggle("d-none", !isHardDollar);
   lecapSubmenu.classList.toggle("d-none", !isLecap);
   dualSubmenu.classList.toggle("d-none", !isDual);
-  calculatorPlaceholder.classList.toggle("d-none", isLecap);
+  calculatorPlaceholder.classList.toggle("d-none", isLecap || isHardDollar);
   if (isLecap) {
     calculatorPlaceholder.textContent = "";
+  } else if (isHardDollar) {
+    renderHardDollarCouponInputs();
   } else if (isDual) {
     calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
   } else {
@@ -457,6 +477,7 @@ async function fetchHistoricalData() {
 
 function renderHistoricalData(payload) {
   const items = payload.items || [];
+  renderHistoricalSeries(payload.series || []);
   if (!items.length) {
     historicalBody.innerHTML = '<tr><td colspan="5" class="empty-state">Todavia no hay datos historicos guardados</td></tr>';
     return;
@@ -470,6 +491,19 @@ function renderHistoricalData(payload) {
       <td class="text-end">${formatNumber(item.value, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
       <td class="text-end">${formatTime(item.updated_at)}</td>
     </tr>
+  `).join("");
+}
+
+function renderHistoricalSeries(series) {
+  if (!series.length) {
+    historicalSeries.innerHTML = '<span class="empty-cell">Sin series cargadas</span>';
+    return;
+  }
+
+  historicalSeries.innerHTML = series.map((item) => `
+    <span class="series-pill">
+      ${item.ticker} - ${HISTORICAL_TYPE_LABELS[item.metric_type] || item.metric_type} - ${formatNumber(item.count)} datos
+    </span>
   `).join("");
 }
 
@@ -496,6 +530,71 @@ async function saveHistoricalData(event) {
   await fetchHistoricalTickers();
   await fetchHistoricalData();
   setHistoricalStatus("ok", "Dato guardado");
+}
+
+async function uploadHistoricalData(event) {
+  event.preventDefault();
+  if (!historicalFile.files.length) return;
+  setHistoricalStatus("draft", "Subiendo archivo");
+
+  const body = new FormData();
+  body.append("ticker", historicalUploadTicker.value.trim().toUpperCase());
+  body.append("file", historicalFile.files[0]);
+
+  const response = await fetch("/api/historical-data/upload", {
+    method: "POST",
+    body,
+  });
+
+  if (!response.ok) {
+    setHistoricalStatus("error", "No se pudo importar");
+    return;
+  }
+
+  const payload = await response.json();
+  historicalFile.value = "";
+  await fetchHistoricalTickers();
+  await fetchHistoricalData();
+  setHistoricalStatus("ok", `${payload.imported} datos importados`);
+}
+
+function renderHardDollarCouponInputs() {
+  const isStepUp = hdCouponType.value === "step_up";
+  hdFixedCouponWrap.classList.toggle("d-none", isStepUp);
+  hdStepUpSection.classList.toggle("d-none", !isStepUp);
+
+  if (!isStepUp) {
+    hdStepUpRows.innerHTML = "";
+    return;
+  }
+
+  const years = hardDollarYearLabels();
+  if (!years.length) {
+    hdStepUpRows.innerHTML = '<span class="empty-cell">Completa emision y vencimiento para abrir los anios.</span>';
+    return;
+  }
+
+  hdStepUpRows.innerHTML = years.map((year) => `
+    <label>
+      <span>${year}</span>
+      <input class="form-control form-control-sm" type="number" step="0.0001" data-hd-step-year="${year}">
+    </label>
+  `).join("");
+}
+
+function hardDollarYearLabels() {
+  if (!hdIssueDate.value || !hdMaturityDate.value) return [];
+  const start = new Date(`${hdIssueDate.value}T00:00:00`);
+  const end = new Date(`${hdMaturityDate.value}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return [];
+
+  const labels = [];
+  let cursor = start.getFullYear();
+  while (cursor <= end.getFullYear()) {
+    labels.push(String(cursor));
+    cursor += 1;
+  }
+  return labels;
 }
 
 async function fetchLecapMarket() {
@@ -800,6 +899,11 @@ ratesRefresh.addEventListener("click", () => {
 
 bondDraftForm.addEventListener("submit", submitBondDraft);
 historicalForm.addEventListener("submit", saveHistoricalData);
+historicalUploadForm.addEventListener("submit", uploadHistoricalData);
+hardDollarForm.addEventListener("submit", (event) => event.preventDefault());
+hdIssueDate.addEventListener("change", renderHardDollarCouponInputs);
+hdMaturityDate.addEventListener("change", renderHardDollarCouponInputs);
+hdCouponType.addEventListener("change", renderHardDollarCouponInputs);
 saveLecap.addEventListener("click", () => {
   saveLatestLecap().catch(() => {
     setCalculatorStatus("error", "No se pudo guardar");

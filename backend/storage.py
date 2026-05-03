@@ -9,7 +9,15 @@ from pathlib import Path
 from backend.time_utils import now_argentina_iso
 
 
-HISTORICAL_METRIC_TYPES = ("dirty_price", "ytm", "parity")
+HISTORICAL_METRIC_TYPES = (
+    "parity",
+    "dirty_price",
+    "clean_price",
+    "ytm",
+    "tem",
+    "tna",
+    "volume",
+)
 
 
 @dataclass(frozen=True)
@@ -361,6 +369,29 @@ class CalculatorStorage:
                 params,
             ).fetchall()
         return [self._row_to_historical_data(row) for row in rows]
+
+    def list_historical_series(self) -> list[dict[str, object]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT ticker, metric_type, COUNT(*) AS count,
+                       MIN(value_date) AS first_date,
+                       MAX(value_date) AS last_date
+                FROM historical_data
+                GROUP BY ticker, metric_type
+                ORDER BY ticker ASC, metric_type ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "ticker": str(row["ticker"]),
+                "metric_type": str(row["metric_type"]),
+                "count": int(row["count"]),
+                "first_date": str(row["first_date"]),
+                "last_date": str(row["last_date"]),
+            }
+            for row in rows
+        ]
 
     def delete_lecap(self, item_id: int) -> bool:
         with closing(self._connect()) as connection, connection:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+import csv
+import io
+import unicodedata
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,7 +67,7 @@ class TPlusConversionRequest(BaseModel):
 
 class HistoricalDataRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=20)
-    metric_type: str = Field(pattern="^(dirty_price|ytm|parity)$")
+    metric_type: str = Field(pattern="^(parity|dirty_price|clean_price|ytm|tem|tna|volume)$")
     value_date: date
     value: float
 
@@ -427,9 +430,13 @@ async def data_tickers() -> dict:
 async def historical_data_types() -> dict:
     return {
         "types": [
-            {"key": "dirty_price", "label": "Precio dirty"},
-            {"key": "ytm", "label": "TIR"},
             {"key": "parity", "label": "Paridad"},
+            {"key": "dirty_price", "label": "Precio dirty"},
+            {"key": "clean_price", "label": "Precio clean"},
+            {"key": "ytm", "label": "TIR"},
+            {"key": "tem", "label": "TEM"},
+            {"key": "tna", "label": "TNA"},
+            {"key": "volume", "label": "Volumen"},
         ],
         "supported": list(HISTORICAL_METRIC_TYPES),
     }
@@ -443,7 +450,8 @@ async def historical_data(ticker: str | None = None, metric_type: str | None = N
         "items": [
             point.to_dict()
             for point in storage.list_historical_data(ticker=ticker, metric_type=metric_type)
-        ]
+        ],
+        "series": storage.list_historical_series(),
     }
 
 
@@ -459,6 +467,37 @@ async def save_historical_data(payload: HistoricalDataRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"item": point.to_dict()}
+
+
+@app.post("/api/historical-data/upload")
+async def upload_historical_data(
+    ticker: Annotated[str, Form(min_length=1, max_length=20)],
+    file: UploadFile = File(...),
+) -> dict:
+    rows = await _read_historical_upload(file)
+    imported = 0
+    errors = []
+    for index, row in enumerate(rows, start=2):
+        try:
+            for metric_type, value in _historical_points_from_row(row):
+                storage.upsert_historical_data(
+                    ticker=ticker,
+                    metric_type=metric_type,
+                    value_date=_parse_historical_date(row),
+                    value=value,
+                )
+                imported += 1
+        except ValueError as exc:
+            errors.append({"row": index, "detail": str(exc)})
+
+    if imported == 0 and errors:
+        raise HTTPException(status_code=422, detail=errors[:20])
+
+    return {
+        "ticker": ticker.upper().strip(),
+        "imported": imported,
+        "errors": errors[:20],
+    }
 
 
 @app.get("/health")
@@ -491,3 +530,132 @@ def _coerce_optional_float(value: object) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+async def _read_historical_upload(file: UploadFile) -> list[dict[str, object]]:
+    name = (file.filename or "").lower()
+    content = await file.read()
+    if name.endswith((".xlsx", ".xlsm")):
+        return _read_excel_upload(content)
+    if name.endswith(".xls"):
+        raise HTTPException(status_code=422, detail="Formato .xls no soportado. Guardalo como .xlsx o CSV.")
+    return _read_csv_upload(content)
+
+
+def _read_csv_upload(content: bytes) -> list[dict[str, object]]:
+    text = content.decode("utf-8-sig")
+    sample = text[:2048]
+    delimiter = ";" if sample.count(";") > sample.count(",") else ","
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    return [dict(row) for row in reader]
+
+
+def _read_excel_upload(content: bytes) -> list[dict[str, object]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise HTTPException(status_code=422, detail="Falta openpyxl para leer Excel.") from exc
+
+    workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    sheet = workbook.active
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [str(value or "").strip() for value in rows[0]]
+    return [
+        {headers[index]: value for index, value in enumerate(row) if index < len(headers)}
+        for row in rows[1:]
+        if any(value is not None and value != "" for value in row)
+    ]
+
+
+def _parse_historical_date(row: dict[str, object]) -> date:
+    raw = _pick_value(row, ("fecha", "date", "value_date"))
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    value = str(raw or "").strip()
+    for separator in ("/", "-"):
+        parts = value.split(separator)
+        if len(parts) == 3:
+            first, second, third = parts
+            if len(first) == 4:
+                return date(int(first), int(second), int(third))
+            return date(int(third), int(second), int(first))
+    raise ValueError("Fecha invalida. Usa DD/MM/AAAA.")
+
+
+def _historical_points_from_row(row: dict[str, object]) -> list[tuple[str, float]]:
+    metric = _normalize_historical_metric(_pick_value(row, ("tipo", "dato", "metric_type", "metric")))
+    if metric:
+        return [(metric, _parse_float(_pick_value(row, ("valor", "value"))))]
+
+    points = []
+    for metric_type, aliases in _HISTORICAL_UPLOAD_COLUMNS.items():
+        raw = _pick_value(row, aliases)
+        if raw is not None and str(raw).strip() != "":
+            points.append((metric_type, _parse_float(raw)))
+    if not points:
+        raise ValueError("No se encontro ningun valor historico en la fila.")
+    return points
+
+
+def _pick_value(row: dict[str, object], aliases: tuple[str, ...]) -> object | None:
+    normalized = {_normalize_header(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(_normalize_header(alias))
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
+
+def _normalize_historical_metric(value: object | None) -> str | None:
+    if value is None:
+        return None
+    normalized = _normalize_header(str(value))
+    alias_map = {
+        "paridad": "parity",
+        "parity": "parity",
+        "precio dirty": "dirty_price",
+        "dirty price": "dirty_price",
+        "dirty": "dirty_price",
+        "precio clean": "clean_price",
+        "clean price": "clean_price",
+        "clean": "clean_price",
+        "tir": "ytm",
+        "ytm": "ytm",
+        "tem": "tem",
+        "tna": "tna",
+        "volumen": "volume",
+        "volume": "volume",
+    }
+    return alias_map.get(normalized)
+
+
+def _normalize_header(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.strip().lower())
+    ascii_value = "".join(char for char in normalized if not unicodedata.combining(char))
+    return ascii_value.replace("_", " ").replace("-", " ")
+
+
+def _parse_float(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace("%", "")
+    if "," in text and "." in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "," in text:
+        text = text.replace(",", ".")
+    return float(text)
+
+
+_HISTORICAL_UPLOAD_COLUMNS = {
+    "parity": ("paridad", "parity"),
+    "dirty_price": ("precio dirty", "dirty price", "dirty"),
+    "clean_price": ("precio clean", "clean price", "clean"),
+    "ytm": ("tir", "ytm"),
+    "tem": ("tem",),
+    "tna": ("tna",),
+    "volume": ("volumen", "volume"),
+}
