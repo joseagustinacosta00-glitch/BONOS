@@ -441,6 +441,21 @@
               </select>
             </label>
             <label>
+              <span>Mercado</span>
+              <select id="historicalPriceMarket" class="form-select form-select-sm" required>
+                <option value="pesos">PESOS</option>
+                <option value="cable">CABLE</option>
+                <option value="mep">MEP</option>
+              </select>
+            </label>
+            <label>
+              <span>Liquidacion</span>
+              <select id="historicalSettlement" class="form-select form-select-sm" required>
+                <option value="t0">T+0</option>
+                <option value="t1">T+1</option>
+              </select>
+            </label>
+            <label>
               <span>Fecha</span>
               <input id="historicalDate" class="form-control form-control-sm" type="date" required>
             </label>
@@ -457,6 +472,21 @@
               <input id="historicalUploadTicker" class="form-control form-control-sm" list="historicalTickerOptions" type="text" placeholder="Ej. AL30D" required>
             </label>
             <label>
+              <span>Mercado archivo</span>
+              <select id="historicalUploadPriceMarket" class="form-select form-select-sm" required>
+                <option value="pesos">PESOS</option>
+                <option value="cable">CABLE</option>
+                <option value="mep">MEP</option>
+              </select>
+            </label>
+            <label>
+              <span>Liquidacion archivo</span>
+              <select id="historicalUploadSettlement" class="form-select form-select-sm" required>
+                <option value="t0">T+0</option>
+                <option value="t1">T+1</option>
+              </select>
+            </label>
+            <label>
               <span>Archivo</span>
               <input id="historicalFile" class="form-control form-control-sm" type="file" accept=".csv,.txt,.xlsx,.xlsm" required>
             </label>
@@ -465,6 +495,10 @@
 
           <section class="cashflow-preview" aria-label="Series historicas disponibles">
             <h3>Series disponibles</h3>
+            <section class="toolbar historical-series-toolbar" aria-label="Filtro de series historicas">
+              <input id="historicalSeriesSearch" class="form-control form-control-sm" type="search" placeholder="Buscar familia o ticker">
+              <button id="historicalDownload" class="btn btn-sm btn-outline-dark" type="button" disabled>Descargar</button>
+            </section>
             <div id="historicalSeries" class="series-list">
               <span class="empty-cell">Sin series cargadas</span>
             </div>
@@ -475,6 +509,8 @@
               <thead>
                 <tr>
                   <th scope="col">Ticker</th>
+                  <th scope="col">Mercado</th>
+                  <th scope="col">Liquidacion</th>
                   <th scope="col">Dato</th>
                   <th scope="col">Fecha</th>
                   <th scope="col" class="text-end">Valor</th>
@@ -483,7 +519,7 @@
               </thead>
               <tbody id="historicalBody">
                 <tr>
-                  <td colspan="5" class="empty-state">Todavia no hay datos historicos guardados</td>
+                  <td colspan="7" class="empty-state">Todavia no hay datos historicos guardados</td>
                 </tr>
               </tbody>
             </table>

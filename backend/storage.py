@@ -85,6 +85,8 @@ class HistoricalDataPoint:
     id: int
     ticker: str
     metric_type: str
+    price_market: str
+    settlement_type: str
     value_date: date
     value: float
     created_at: str
@@ -95,6 +97,8 @@ class HistoricalDataPoint:
             "id": self.id,
             "ticker": self.ticker,
             "metric_type": self.metric_type,
+            "price_market": self.price_market,
+            "settlement_type": self.settlement_type,
             "value_date": self.value_date.isoformat(),
             "value": self.value,
             "created_at": self.created_at,
@@ -150,14 +154,17 @@ class CalculatorStorage:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT NOT NULL,
                     metric_type TEXT NOT NULL,
+                    price_market TEXT NOT NULL DEFAULT 'unspecified',
+                    settlement_type TEXT NOT NULL DEFAULT 'unspecified',
                     value_date TEXT NOT NULL,
                     value REAL NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    UNIQUE(ticker, metric_type, value_date)
+                    UNIQUE(ticker, metric_type, price_market, settlement_type, value_date)
                 )
                 """
             )
+            self._migrate_historical_data(connection)
 
     def list_lecaps(self) -> list[SavedLecap]:
         with closing(self._connect()) as connection:
@@ -312,32 +319,39 @@ class CalculatorStorage:
         metric_type: str,
         value_date: date,
         value: float,
+        price_market: str = "unspecified",
+        settlement_type: str = "unspecified",
     ) -> HistoricalDataPoint:
         now = now_argentina_iso()
         ticker = ticker.upper().strip()
         metric_type = metric_type.lower().strip()
+        price_market = price_market.lower().strip()
+        settlement_type = settlement_type.lower().replace("+", "").strip()
         if metric_type not in HISTORICAL_METRIC_TYPES:
             raise ValueError("Tipo de dato historico no soportado.")
         with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO historical_data (
-                    ticker, metric_type, value_date, value, created_at, updated_at
+                    ticker, metric_type, price_market, settlement_type,
+                    value_date, value, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(ticker, metric_type, value_date) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker, metric_type, price_market, settlement_type, value_date) DO UPDATE SET
                     value = excluded.value,
                     updated_at = excluded.updated_at
                 """,
-                (ticker, metric_type, value_date.isoformat(), value, now, now),
+                (ticker, metric_type, price_market, settlement_type, value_date.isoformat(), value, now, now),
             )
             row = connection.execute(
                 """
-                SELECT id, ticker, metric_type, value_date, value, created_at, updated_at
+                SELECT id, ticker, metric_type, price_market, settlement_type,
+                       value_date, value, created_at, updated_at
                 FROM historical_data
-                WHERE ticker = ? AND metric_type = ? AND value_date = ?
+                WHERE ticker = ? AND metric_type = ? AND price_market = ?
+                  AND settlement_type = ? AND value_date = ?
                 """,
-                (ticker, metric_type, value_date.isoformat()),
+                (ticker, metric_type, price_market, settlement_type, value_date.isoformat()),
             ).fetchone()
         if row is None:
             raise RuntimeError("No se pudo guardar el dato historico.")
@@ -347,6 +361,9 @@ class CalculatorStorage:
         self,
         ticker: str | None = None,
         metric_type: str | None = None,
+        price_market: str | None = None,
+        settlement_type: str | None = None,
+        limit: int = 500,
     ) -> list[HistoricalDataPoint]:
         filters = []
         params: list[object] = []
@@ -356,17 +373,24 @@ class CalculatorStorage:
         if metric_type:
             filters.append("metric_type = ?")
             params.append(metric_type.lower().strip())
+        if price_market:
+            filters.append("price_market = ?")
+            params.append(price_market.lower().strip())
+        if settlement_type:
+            filters.append("settlement_type = ?")
+            params.append(settlement_type.lower().replace("+", "").strip())
         where = f"WHERE {' AND '.join(filters)}" if filters else ""
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 f"""
-                SELECT id, ticker, metric_type, value_date, value, created_at, updated_at
+                SELECT id, ticker, metric_type, price_market, settlement_type,
+                       value_date, value, created_at, updated_at
                 FROM historical_data
                 {where}
                 ORDER BY value_date DESC, ticker ASC, metric_type ASC
-                LIMIT 500
+                LIMIT ?
                 """,
-                params,
+                [*params, limit],
             ).fetchall()
         return [self._row_to_historical_data(row) for row in rows]
 
@@ -374,18 +398,20 @@ class CalculatorStorage:
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
-                SELECT ticker, metric_type, COUNT(*) AS count,
+                SELECT ticker, metric_type, price_market, settlement_type, COUNT(*) AS count,
                        MIN(value_date) AS first_date,
                        MAX(value_date) AS last_date
                 FROM historical_data
-                GROUP BY ticker, metric_type
-                ORDER BY ticker ASC, metric_type ASC
+                GROUP BY ticker, metric_type, price_market, settlement_type
+                ORDER BY ticker ASC, metric_type ASC, price_market ASC, settlement_type ASC
                 """
             ).fetchall()
         return [
             {
                 "ticker": str(row["ticker"]),
                 "metric_type": str(row["metric_type"]),
+                "price_market": str(row["price_market"]),
+                "settlement_type": str(row["settlement_type"]),
                 "count": int(row["count"]),
                 "first_date": str(row["first_date"]),
                 "last_date": str(row["last_date"]),
@@ -405,6 +431,45 @@ class CalculatorStorage:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    @staticmethod
+    def _migrate_historical_data(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(historical_data)").fetchall()
+        }
+        if {"price_market", "settlement_type"}.issubset(columns):
+            return
+
+        connection.execute(
+            """
+            CREATE TABLE historical_data_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                metric_type TEXT NOT NULL,
+                price_market TEXT NOT NULL DEFAULT 'unspecified',
+                settlement_type TEXT NOT NULL DEFAULT 'unspecified',
+                value_date TEXT NOT NULL,
+                value REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(ticker, metric_type, price_market, settlement_type, value_date)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO historical_data_new (
+                id, ticker, metric_type, price_market, settlement_type,
+                value_date, value, created_at, updated_at
+            )
+            SELECT id, ticker, metric_type, 'unspecified', 'unspecified',
+                   value_date, value, created_at, updated_at
+            FROM historical_data
+            """
+        )
+        connection.execute("DROP TABLE historical_data")
+        connection.execute("ALTER TABLE historical_data_new RENAME TO historical_data")
 
     @staticmethod
     def _row_to_lecap(row: sqlite3.Row) -> SavedLecap:
@@ -444,6 +509,8 @@ class CalculatorStorage:
             id=int(row["id"]),
             ticker=str(row["ticker"]),
             metric_type=str(row["metric_type"]),
+            price_market=str(row["price_market"]),
+            settlement_type=str(row["settlement_type"]),
             value_date=date.fromisoformat(str(row["value_date"])),
             value=float(row["value"]),
             created_at=str(row["created_at"]),

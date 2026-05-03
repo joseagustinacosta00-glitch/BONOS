@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.bcra_client import BCRA_SERIES, BcraClient
@@ -33,6 +33,8 @@ from backend.time_utils import now_argentina
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT_DIR / "frontend"
+PRICE_MARKET_TYPES = ("pesos", "cable", "mep")
+SETTLEMENT_TYPES = ("t0", "t1")
 
 settings = get_settings()
 market = MarketDataService(settings)
@@ -68,6 +70,8 @@ class TPlusConversionRequest(BaseModel):
 class HistoricalDataRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=20)
     metric_type: str = Field(pattern="^(parity|dirty_price|clean_price|ytm|tem|tna|volume)$")
+    price_market: str = Field(pattern="^(pesos|cable|mep)$")
+    settlement_type: str = Field(pattern="^(t0|t1)$")
     value_date: date
     value: float
 
@@ -438,18 +442,44 @@ async def historical_data_types() -> dict:
             {"key": "tna", "label": "TNA"},
             {"key": "volume", "label": "Volumen"},
         ],
+        "price_markets": [
+            {"key": "pesos", "label": "PESOS"},
+            {"key": "cable", "label": "CABLE"},
+            {"key": "mep", "label": "MEP"},
+        ],
+        "settlements": [
+            {"key": "t0", "label": "T+0"},
+            {"key": "t1", "label": "T+1"},
+        ],
         "supported": list(HISTORICAL_METRIC_TYPES),
     }
 
 
 @app.get("/api/historical-data")
-async def historical_data(ticker: str | None = None, metric_type: str | None = None) -> dict:
+async def historical_data(
+    ticker: str | None = None,
+    metric_type: str | None = None,
+    price_market: str | None = None,
+    settlement_type: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 500,
+) -> dict:
     if metric_type is not None and metric_type not in HISTORICAL_METRIC_TYPES:
         raise HTTPException(status_code=422, detail="Tipo de dato historico no soportado.")
+    try:
+        normalized_market = _normalize_price_market(price_market) if price_market else None
+        normalized_settlement = _normalize_settlement_type(settlement_type) if settlement_type else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "items": [
             point.to_dict()
-            for point in storage.list_historical_data(ticker=ticker, metric_type=metric_type)
+            for point in storage.list_historical_data(
+                ticker=ticker,
+                metric_type=metric_type,
+                price_market=normalized_market,
+                settlement_type=normalized_settlement,
+                limit=limit,
+            )
         ],
         "series": storage.list_historical_series(),
     }
@@ -461,6 +491,8 @@ async def save_historical_data(payload: HistoricalDataRequest) -> dict:
         point = storage.upsert_historical_data(
             ticker=payload.ticker,
             metric_type=payload.metric_type,
+            price_market=_normalize_price_market(payload.price_market),
+            settlement_type=_normalize_settlement_type(payload.settlement_type),
             value_date=payload.value_date,
             value=payload.value,
         )
@@ -472,9 +504,16 @@ async def save_historical_data(payload: HistoricalDataRequest) -> dict:
 @app.post("/api/historical-data/upload")
 async def upload_historical_data(
     ticker: Annotated[str, Form(min_length=1, max_length=20)],
+    price_market: Annotated[str, Form()],
+    settlement_type: Annotated[str, Form()],
     file: UploadFile = File(...),
 ) -> dict:
     rows = await _read_historical_upload(file)
+    try:
+        normalized_market = _normalize_price_market(price_market)
+        normalized_settlement = _normalize_settlement_type(settlement_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     imported = 0
     errors = []
     for index, row in enumerate(rows, start=2):
@@ -483,6 +522,12 @@ async def upload_historical_data(
                 storage.upsert_historical_data(
                     ticker=ticker,
                     metric_type=metric_type,
+                    price_market=_normalize_price_market(
+                        _pick_value(row, ("mercado", "market", "price_market")) or normalized_market
+                    ),
+                    settlement_type=_normalize_settlement_type(
+                        _pick_value(row, ("liquidacion", "settlement", "settlement_type")) or normalized_settlement
+                    ),
                     value_date=_parse_historical_date(row),
                     value=value,
                 )
@@ -490,14 +535,58 @@ async def upload_historical_data(
         except ValueError as exc:
             errors.append({"row": index, "detail": str(exc)})
 
-    if imported == 0 and errors:
-        raise HTTPException(status_code=422, detail=errors[:20])
+    if imported == 0:
+        detail = errors[:20] if errors else "No se encontraron filas importables en el archivo."
+        raise HTTPException(status_code=422, detail=detail)
 
     return {
         "ticker": ticker.upper().strip(),
+        "price_market": normalized_market,
+        "settlement_type": normalized_settlement,
         "imported": imported,
         "errors": errors[:20],
     }
+
+
+@app.get("/api/historical-data/export")
+async def export_historical_data(
+    ticker: str,
+    metric_type: str,
+    price_market: str,
+    settlement_type: str,
+) -> StreamingResponse:
+    if metric_type not in HISTORICAL_METRIC_TYPES:
+        raise HTTPException(status_code=422, detail="Tipo de dato historico no soportado.")
+    try:
+        normalized_market = _normalize_price_market(price_market)
+        normalized_settlement = _normalize_settlement_type(settlement_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    items = storage.list_historical_data(
+        ticker=ticker,
+        metric_type=metric_type,
+        price_market=normalized_market,
+        settlement_type=normalized_settlement,
+        limit=5000,
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fecha", "Ticker", "Mercado", "Liquidacion", "Dato", "Valor"])
+    for item in reversed(items):
+        writer.writerow([
+            item.value_date.strftime("%d/%m/%Y"),
+            item.ticker,
+            item.price_market.upper(),
+            item.settlement_type.upper().replace("T", "T+"),
+            item.metric_type,
+            item.value,
+        ])
+    filename = f"{ticker.upper()}_{metric_type}_{normalized_market}_{normalized_settlement}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/health")
@@ -543,9 +632,13 @@ async def _read_historical_upload(file: UploadFile) -> list[dict[str, object]]:
 
 
 def _read_csv_upload(content: bytes) -> list[dict[str, object]]:
-    text = content.decode("utf-8-sig")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
     sample = text[:2048]
-    delimiter = ";" if sample.count(";") > sample.count(",") else ","
+    delimiter_counts = {candidate: sample.count(candidate) for candidate in (";", ",", "\t")}
+    delimiter = max(delimiter_counts, key=delimiter_counts.get)
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     return [dict(row) for row in reader]
 
@@ -631,6 +724,40 @@ def _normalize_historical_metric(value: object | None) -> str | None:
         "volume": "volume",
     }
     return alias_map.get(normalized)
+
+
+def _normalize_price_market(value: object | None) -> str:
+    normalized = _normalize_header(str(value or ""))
+    if "pesos" in normalized or normalized == "ars":
+        return "pesos"
+    if "cable" in normalized:
+        return "cable"
+    if "mep" in normalized:
+        return "mep"
+    alias_map = {
+        "pesos": "pesos",
+        "peso": "pesos",
+        "ars": "pesos",
+        "$": "pesos",
+        "cable": "cable",
+        "c": "cable",
+        "mep": "mep",
+        "dolar mep": "mep",
+        "usd": "mep",
+    }
+    result = alias_map.get(normalized)
+    if result not in PRICE_MARKET_TYPES:
+        raise ValueError("Mercado invalido. Usa PESOS, CABLE o MEP.")
+    return result
+
+
+def _normalize_settlement_type(value: object | None) -> str:
+    normalized = str(value or "").lower().replace("+", "").replace(" ", "").strip()
+    if normalized in {"t0", "0", "ci"} or "t0" in normalized:
+        return "t0"
+    if normalized in {"t1", "1", "24hs", "24h"} or "t1" in normalized:
+        return "t1"
+    raise ValueError("Liquidacion invalida. Usa T+0 o T+1.")
 
 
 def _normalize_header(value: str) -> str:

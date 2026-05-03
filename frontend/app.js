@@ -48,12 +48,18 @@ const historicalTicker = document.querySelector("#historicalTicker");
 const historicalUploadTicker = document.querySelector("#historicalUploadTicker");
 const historicalTickerOptions = document.querySelector("#historicalTickerOptions");
 const historicalMetricType = document.querySelector("#historicalMetricType");
+const historicalPriceMarket = document.querySelector("#historicalPriceMarket");
+const historicalSettlement = document.querySelector("#historicalSettlement");
+const historicalUploadPriceMarket = document.querySelector("#historicalUploadPriceMarket");
+const historicalUploadSettlement = document.querySelector("#historicalUploadSettlement");
 const historicalDate = document.querySelector("#historicalDate");
 const historicalValue = document.querySelector("#historicalValue");
 const historicalFile = document.querySelector("#historicalFile");
 const historicalStatus = document.querySelector("#historicalStatus");
 const historicalBody = document.querySelector("#historicalBody");
 const historicalSeries = document.querySelector("#historicalSeries");
+const historicalSeriesSearch = document.querySelector("#historicalSeriesSearch");
+const historicalDownload = document.querySelector("#historicalDownload");
 const hardDollarForm = document.querySelector("#hardDollarForm");
 const hdIssueDate = document.querySelector("#hdIssueDate");
 const hdMaturityDate = document.querySelector("#hdMaturityDate");
@@ -80,6 +86,8 @@ let currentBondModel = "lecap";
 let latestLecapCalculation = null;
 let latestLecapMarket = [];
 let lecapMarketLoading = false;
+let latestHistoricalSeries = [];
+let activeHistoricalSeries = null;
 const DEFAULT_QUOTES = [
   ["AO27", "AO27", "ARS"],
   ["AO27D", "AO27", "USD"],
@@ -133,6 +141,19 @@ const HISTORICAL_TYPE_LABELS = {
   tem: "TEM",
   tna: "TNA",
   volume: "Volumen",
+};
+
+const PRICE_MARKET_LABELS = {
+  pesos: "PESOS",
+  cable: "CABLE",
+  mep: "MEP",
+  unspecified: "Sin mercado",
+};
+
+const SETTLEMENT_LABELS = {
+  t0: "T+0",
+  t1: "T+1",
+  unspecified: "Sin liquidacion",
 };
 
 function formatNumber(value, options = {}) {
@@ -350,7 +371,7 @@ function setView(view) {
   if (view === "historical") {
     fetchHistoricalTickers().catch(() => {});
     fetchHistoricalData().catch(() => {
-      historicalBody.innerHTML = '<tr><td colspan="5" class="empty-state">No se pudieron cargar los datos historicos</td></tr>';
+      historicalBody.innerHTML = '<tr><td colspan="7" class="empty-state">No se pudieron cargar los datos historicos</td></tr>';
     });
   }
   if (view === "tplus") {
@@ -469,23 +490,30 @@ async function fetchHistoricalTickers() {
     .join("");
 }
 
-async function fetchHistoricalData() {
-  const response = await fetch("/api/historical-data");
+async function fetchHistoricalData(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const response = await fetch(params.toString() ? `/api/historical-data?${params.toString()}` : "/api/historical-data");
   if (!response.ok) throw new Error("No se pudieron leer historicos");
   renderHistoricalData(await response.json());
 }
 
 function renderHistoricalData(payload) {
   const items = payload.items || [];
-  renderHistoricalSeries(payload.series || []);
+  latestHistoricalSeries = payload.series || latestHistoricalSeries;
+  renderHistoricalSeries();
   if (!items.length) {
-    historicalBody.innerHTML = '<tr><td colspan="5" class="empty-state">Todavia no hay datos historicos guardados</td></tr>';
+    historicalBody.innerHTML = '<tr><td colspan="7" class="empty-state">Todavia no hay datos historicos guardados</td></tr>';
     return;
   }
 
   historicalBody.innerHTML = items.map((item) => `
     <tr>
       <td class="ticker">${item.ticker}</td>
+      <td>${PRICE_MARKET_LABELS[item.price_market] || item.price_market}</td>
+      <td>${SETTLEMENT_LABELS[item.settlement_type] || item.settlement_type}</td>
       <td>${HISTORICAL_TYPE_LABELS[item.metric_type] || item.metric_type}</td>
       <td>${formatDate(item.value_date)}</td>
       <td class="text-end">${formatNumber(item.value, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
@@ -494,17 +522,77 @@ function renderHistoricalData(payload) {
   `).join("");
 }
 
-function renderHistoricalSeries(series) {
+function renderHistoricalSeries() {
+  const text = historicalSeriesSearch.value.trim().toUpperCase();
+  const series = latestHistoricalSeries.filter((item) => {
+    const family = familyFromTicker(item.ticker);
+    return !text || item.ticker.includes(text) || family.includes(text);
+  });
   if (!series.length) {
     historicalSeries.innerHTML = '<span class="empty-cell">Sin series cargadas</span>';
     return;
   }
 
-  historicalSeries.innerHTML = series.map((item) => `
-    <span class="series-pill">
-      ${item.ticker} - ${HISTORICAL_TYPE_LABELS[item.metric_type] || item.metric_type} - ${formatNumber(item.count)} datos
-    </span>
-  `).join("");
+  historicalSeries.innerHTML = series.map((item) => {
+    const key = historicalSeriesKey(item);
+    const active = activeHistoricalSeries === key;
+    return `
+      <article class="series-card ${active ? "active" : ""}">
+        <div>
+          <strong>${familyFromTicker(item.ticker)} / ${item.ticker}</strong>
+          <span>${HISTORICAL_TYPE_LABELS[item.metric_type] || item.metric_type} - ${PRICE_MARKET_LABELS[item.price_market] || item.price_market} - ${SETTLEMENT_LABELS[item.settlement_type] || item.settlement_type}</span>
+          <small>${formatNumber(item.count)} datos - ${formatDate(item.first_date)} a ${formatDate(item.last_date)}</small>
+        </div>
+        <button class="btn btn-sm ${active ? "btn-dark" : "btn-outline-dark"}" data-historical-series="${key}" type="button">${active ? "Ocultar" : "Ver"}</button>
+      </article>
+    `;
+  }).join("");
+}
+
+async function toggleHistoricalSeries(item) {
+  const key = historicalSeriesKey(item);
+  if (activeHistoricalSeries === key) {
+    activeHistoricalSeries = null;
+    historicalDownload.disabled = true;
+    historicalBody.innerHTML = '<tr><td colspan="7" class="empty-state">Selecciona una serie para ver la base</td></tr>';
+    renderHistoricalSeries();
+    return;
+  }
+
+  activeHistoricalSeries = key;
+  historicalDownload.disabled = false;
+  await fetchHistoricalData({
+    ticker: item.ticker,
+    metric_type: item.metric_type,
+    price_market: item.price_market,
+    settlement_type: item.settlement_type,
+    limit: "5000",
+  });
+}
+
+function historicalSeriesKey(item) {
+  return [item.ticker, item.metric_type, item.price_market, item.settlement_type].join("|");
+}
+
+function historicalSeriesFromKey(key) {
+  return latestHistoricalSeries.find((item) => historicalSeriesKey(item) === key);
+}
+
+function familyFromTicker(ticker) {
+  return ticker.replace(/[DC]$/, "");
+}
+
+function downloadActiveHistoricalSeries() {
+  if (!activeHistoricalSeries) return;
+  const item = historicalSeriesFromKey(activeHistoricalSeries);
+  if (!item) return;
+  const params = new URLSearchParams({
+    ticker: item.ticker,
+    metric_type: item.metric_type,
+    price_market: item.price_market,
+    settlement_type: item.settlement_type,
+  });
+  window.location.href = `/api/historical-data/export?${params.toString()}`;
 }
 
 async function saveHistoricalData(event) {
@@ -516,6 +604,8 @@ async function saveHistoricalData(event) {
     body: JSON.stringify({
       ticker: historicalTicker.value.trim().toUpperCase(),
       metric_type: historicalMetricType.value,
+      price_market: historicalPriceMarket.value,
+      settlement_type: historicalSettlement.value,
       value_date: historicalDate.value,
       value: Number(historicalValue.value),
     }),
@@ -539,6 +629,8 @@ async function uploadHistoricalData(event) {
 
   const body = new FormData();
   body.append("ticker", historicalUploadTicker.value.trim().toUpperCase());
+  body.append("price_market", historicalUploadPriceMarket.value);
+  body.append("settlement_type", historicalUploadSettlement.value);
   body.append("file", historicalFile.files[0]);
 
   const response = await fetch("/api/historical-data/upload", {
@@ -547,7 +639,11 @@ async function uploadHistoricalData(event) {
   });
 
   if (!response.ok) {
-    setHistoricalStatus("error", "No se pudo importar");
+    const error = await response.json().catch(() => ({}));
+    const detail = Array.isArray(error.detail)
+      ? error.detail.map((item) => `Fila ${item.row}: ${item.detail}`).join(" | ")
+      : error.detail;
+    setHistoricalStatus("error", detail || "No se pudo importar");
     return;
   }
 
@@ -884,6 +980,17 @@ document.querySelectorAll("[data-dual-model]").forEach((button) => {
     setCalculatorStatus("draft", `DUAL ${button.textContent.trim()}`);
   });
 });
+
+historicalSeries.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-historical-series]");
+  if (!button) return;
+  const item = historicalSeriesFromKey(button.dataset.historicalSeries);
+  if (!item) return;
+  toggleHistoricalSeries(item).catch(() => setHistoricalStatus("error", "No se pudo leer la serie"));
+});
+
+historicalSeriesSearch.addEventListener("input", renderHistoricalSeries);
+historicalDownload.addEventListener("click", downloadActiveHistoricalSeries);
 
 bcraRefresh.addEventListener("click", () => {
   fetchBcraSeries(true).catch(() => {

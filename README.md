@@ -169,7 +169,11 @@ La solapa `Datos historicos` permite cargar por ticker un valor de:
 - TNA
 - Volumen
 
-El ticker se puede elegir desde el listado de instrumentos conocidos o escribir manualmente. Tambien se pueden subir archivos CSV, TXT o XLSX. El formato recomendado es una fila por fecha con columna `Fecha` en `DD/MM/AAAA` y columnas de valores disponibles: `Paridad`, `Precio dirty`, `Precio clean`, `TIR`, `TEM`, `TNA` y `Volumen`. Tambien acepta formato largo con columnas `Fecha`, `Tipo` y `Valor`. Los historicos quedan guardados en SQLite en `APP_DB_PATH`.
+El ticker se puede elegir desde el listado de instrumentos conocidos o escribir manualmente. Cada carga identifica mercado (`PESOS`, `CABLE`, `MEP`) y liquidacion (`T+0`, `T+1`) para que las bases no se mezclen entre si.
+
+Tambien se pueden subir archivos CSV, TXT o XLSX. El formato recomendado es una fila por fecha con columna `Fecha` en `DD/MM/AAAA` y columnas de valores disponibles: `Paridad`, `Precio dirty`, `Precio clean`, `TIR`, `TEM`, `TNA` y `Volumen`. Tambien acepta formato largo con columnas `Fecha`, `Tipo` y `Valor`; si el archivo trae columnas `Mercado` o `Liquidacion`, esas columnas pisan el selector de la pantalla fila por fila. Los historicos quedan guardados en SQLite en `APP_DB_PATH`.
+
+Debajo de la carga, la UI muestra las series disponibles por familia/ticker, dato, mercado y liquidacion. Cada serie se puede ver u ocultar, buscar por familia o ticker y descargar como CSV.
 
 El template de `Bono HD` queda preparado con inputs de fecha de emision, fecha de vencimiento, frecuencia y tipo de cupon. Si el cupon es fijo se carga un solo valor anual; si es step-up, la UI abre una lista de anios segun emision y vencimiento para cargar el cupon de cada anio.
 
