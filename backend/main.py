@@ -152,6 +152,11 @@ async def ai_demo() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "ai-demo.html")
 
 
+@app.get("/tradingview")
+async def tradingview() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "tradingview.html")
+
+
 @app.get("/api/tickers")
 async def tickers() -> list[dict[str, str]]:
     return [ticker.__dict__ for ticker in BOND_TICKERS]

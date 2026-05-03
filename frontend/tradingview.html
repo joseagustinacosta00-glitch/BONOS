@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bonos | TradingView</title>
+  <link rel="stylesheet" href="/static/tradingview.css">
+</head>
+<body>
+  <main class="tv-shell">
+    <header class="tv-header">
+      <div>
+        <p class="tv-kicker">Bonos</p>
+        <h1>TradingView</h1>
+      </div>
+      <nav class="tv-actions" aria-label="Accesos">
+        <a href="/">Inicio</a>
+        <a href="/charts-demo">Graficos</a>
+        <a href="/ai-demo">IA</a>
+      </nav>
+    </header>
+
+    <section class="tv-card">
+      <div class="tv-toolbar">
+        <label>
+          Simbolo
+          <select id="tvSymbolSelect">
+            <option value="BCBA:AL30">AL30</option>
+            <option value="BCBA:AL30D">AL30D</option>
+            <option value="BCBA:GD30">GD30</option>
+            <option value="BCBA:GD30D">GD30D</option>
+            <option value="BCBA:AL35">AL35</option>
+            <option value="BCBA:GD35">GD35</option>
+            <option value="BCBA:AE38">AE38</option>
+            <option value="BCBA:AL41">AL41</option>
+            <option value="BCBA:IMV">Merval</option>
+          </select>
+        </label>
+        <label>
+          Buscar en TradingView
+          <input id="tvSymbolInput" type="text" placeholder="Ej. BCBA:AL30 o NASDAQ:QQQ">
+        </label>
+        <button id="tvLoadButton" type="button">Cargar</button>
+      </div>
+      <div id="tradingviewChart" class="tv-chart"></div>
+    </section>
+  </main>
+
+  <script src="https://s3.tradingview.com/tv.js"></script>
+  <script src="/static/tradingview.js"></script>
+</body>
+</html>
