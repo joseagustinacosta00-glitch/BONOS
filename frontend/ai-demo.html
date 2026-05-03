@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bonos | IA demo</title>
+  <link rel="stylesheet" href="/static/ai-demo.css">
+</head>
+<body>
+  <main class="ai-shell">
+    <header class="ai-header">
+      <div>
+        <p class="ai-kicker">Bonos</p>
+        <h1>Asistente IA</h1>
+      </div>
+      <a href="/" class="ai-link">Volver</a>
+    </header>
+
+    <section class="ai-grid">
+      <article class="ai-card">
+        <h2>Memoria tecnica</h2>
+        <form id="memory-form" class="ai-form">
+          <input id="memory-title" name="title" placeholder="Titulo" required>
+          <select id="memory-category" name="category" required>
+            <option value="market_concept">Concepto de mercado</option>
+            <option value="calculation_rule">Regla de calculo</option>
+            <option value="interpretation_rule">Regla de interpretacion</option>
+            <option value="study_template">Template de estudio</option>
+            <option value="app_behavior">Comportamiento de la app</option>
+            <option value="personal_note">Nota personal</option>
+          </select>
+          <input id="memory-tags" name="tags" placeholder="Tags separados por coma">
+          <textarea id="memory-content" name="content" rows="5" placeholder="Contenido" required></textarea>
+          <button type="submit">Guardar nota</button>
+        </form>
+      </article>
+
+      <article class="ai-card">
+        <div class="ai-card-title">
+          <h2>Notas guardadas</h2>
+          <button id="refresh-memory" type="button">Actualizar</button>
+        </div>
+        <div id="memory-list" class="ai-list"></div>
+      </article>
+
+      <article class="ai-card ai-wide">
+        <h2>Pregunta al asistente</h2>
+        <form id="assistant-form" class="ai-form">
+          <textarea id="assistant-message" rows="4" placeholder="Ej: Explicame como leer un z-score del spread de TIR AL30 vs GD30" required></textarea>
+          <button type="submit">Preguntar</button>
+        </form>
+        <pre id="assistant-output" class="ai-output"></pre>
+      </article>
+
+      <article class="ai-card ai-wide">
+        <h2>Estudio directo: spread + z-score</h2>
+        <form id="study-form" class="ai-controls">
+          <input id="study-ticker-a" value="GD30" aria-label="Ticker A">
+          <input id="study-ticker-b" value="AL30" aria-label="Ticker B">
+          <select id="study-dato" aria-label="Dato">
+            <option value="ytm">TIR</option>
+            <option value="parity">Paridad</option>
+            <option value="dirty_price">Precio dirty</option>
+            <option value="clean_price">Precio clean</option>
+            <option value="tem">TEM</option>
+            <option value="tna">TNA</option>
+            <option value="volume">Volumen</option>
+          </select>
+          <select id="study-mercado" aria-label="Mercado">
+            <option value="cable">CABLE</option>
+            <option value="mep">MEP</option>
+            <option value="pesos">PESOS</option>
+          </select>
+          <select id="study-liquidacion" aria-label="Liquidacion">
+            <option value="t1">T+1</option>
+            <option value="t0">T+0</option>
+          </select>
+          <input id="study-window" type="number" min="2" max="500" value="20" aria-label="Ventana z-score">
+          <button type="submit">Calcular</button>
+        </form>
+        <pre id="study-output" class="ai-output"></pre>
+      </article>
+    </section>
+  </main>
+  <script src="/static/ai-demo.js"></script>
+</body>
+</html>

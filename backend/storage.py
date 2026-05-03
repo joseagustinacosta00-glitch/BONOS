@@ -106,6 +106,30 @@ class HistoricalDataPoint:
         }
 
 
+@dataclass(frozen=True)
+class AiMemoryNote:
+    id: int
+    title: str
+    category: str
+    content: str
+    tags: str
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "category": self.category,
+            "content": self.content,
+            "tags": self.tags,
+            "is_active": self.is_active,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class CalculatorStorage:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
@@ -113,15 +137,6 @@ class CalculatorStorage:
     def initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as connection, connection:
-            exists = connection.execute(
-                """
-                SELECT 1
-                FROM historical_data
-                WHERE ticker = ? AND metric_type = ? AND price_market = ?
-                  AND settlement_type = ? AND value_date = ?
-                """,
-                (ticker, metric_type, price_market, settlement_type, value_date.isoformat()),
-            ).fetchone() is not None
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS lecap_calculators (
@@ -170,6 +185,20 @@ class CalculatorStorage:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(ticker, metric_type, price_market, settlement_type, value_date)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_memory_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tags TEXT,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -339,6 +368,15 @@ class CalculatorStorage:
         if metric_type not in HISTORICAL_METRIC_TYPES:
             raise ValueError("Tipo de dato historico no soportado.")
         with closing(self._connect()) as connection, connection:
+            exists = connection.execute(
+                """
+                SELECT 1
+                FROM historical_data
+                WHERE ticker = ? AND metric_type = ? AND price_market = ?
+                  AND settlement_type = ? AND value_date = ?
+                """,
+                (ticker, metric_type, price_market, settlement_type, value_date.isoformat()),
+            ).fetchone() is not None
             connection.execute(
                 """
                 INSERT INTO historical_data (
@@ -458,6 +496,117 @@ class CalculatorStorage:
             )
         return cursor.rowcount > 0
 
+    def create_ai_memory_note(
+        self,
+        title: str,
+        category: str,
+        content: str,
+        tags: str | None = None,
+    ) -> AiMemoryNote:
+        now = now_argentina_iso()
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO ai_memory_notes (title, category, content, tags, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                """,
+                (title.strip(), category.strip(), content.strip(), (tags or "").strip(), now, now),
+            )
+            row = connection.execute(
+                """
+                SELECT id, title, category, content, tags, is_active, created_at, updated_at
+                FROM ai_memory_notes
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("No se pudo guardar la memoria tecnica.")
+        return self._row_to_ai_memory_note(row)
+
+    def list_ai_memory_notes(
+        self,
+        category: str | None = None,
+        search: str | None = None,
+        include_inactive: bool = False,
+        limit: int = 200,
+    ) -> list[AiMemoryNote]:
+        filters = []
+        params: list[object] = []
+        if not include_inactive:
+            filters.append("is_active = 1")
+        if category:
+            filters.append("category = ?")
+            params.append(category.strip())
+        if search:
+            filters.append("(title LIKE ? OR content LIKE ? OR tags LIKE ?)")
+            needle = f"%{search.strip()}%"
+            params.extend([needle, needle, needle])
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, title, category, content, tags, is_active, created_at, updated_at
+                FROM ai_memory_notes
+                {where}
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                [*params, limit],
+            ).fetchall()
+        return [self._row_to_ai_memory_note(row) for row in rows]
+
+    def get_ai_memory_note(self, note_id: int) -> AiMemoryNote | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, title, category, content, tags, is_active, created_at, updated_at
+                FROM ai_memory_notes
+                WHERE id = ?
+                """,
+                (note_id,),
+            ).fetchone()
+        return self._row_to_ai_memory_note(row) if row else None
+
+    def update_ai_memory_note(
+        self,
+        note_id: int,
+        title: str | None = None,
+        category: str | None = None,
+        content: str | None = None,
+        tags: str | None = None,
+        is_active: bool | None = None,
+    ) -> AiMemoryNote | None:
+        current = self.get_ai_memory_note(note_id)
+        if current is None:
+            return None
+        now = now_argentina_iso()
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE ai_memory_notes
+                SET title = ?, category = ?, content = ?, tags = ?, is_active = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    (title if title is not None else current.title).strip(),
+                    (category if category is not None else current.category).strip(),
+                    (content if content is not None else current.content).strip(),
+                    (tags if tags is not None else current.tags).strip(),
+                    1 if (is_active if is_active is not None else current.is_active) else 0,
+                    now,
+                    note_id,
+                ),
+            )
+        return self.get_ai_memory_note(note_id)
+
+    def deactivate_ai_memory_note(self, note_id: int) -> bool:
+        updated = self.update_ai_memory_note(note_id, is_active=False)
+        return updated is not None
+
+    def search_ai_memory_notes(self, query: str, category: str | None = None) -> list[AiMemoryNote]:
+        return self.list_ai_memory_notes(category=category, search=query, include_inactive=False, limit=50)
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
@@ -544,6 +693,19 @@ class CalculatorStorage:
             settlement_type=str(row["settlement_type"]),
             value_date=date.fromisoformat(str(row["value_date"])),
             value=float(row["value"]),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _row_to_ai_memory_note(row: sqlite3.Row) -> AiMemoryNote:
+        return AiMemoryNote(
+            id=int(row["id"]),
+            title=str(row["title"]),
+            category=str(row["category"]),
+            content=str(row["content"]),
+            tags=str(row["tags"] or ""),
+            is_active=bool(row["is_active"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )

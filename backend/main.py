@@ -13,6 +13,15 @@ from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.ai_assistant import answer_ai_question
+from backend.ai_tools import (
+    build_basic_study_summary,
+    calculate_ratio_points,
+    calculate_rolling_zscore,
+    calculate_spread_points,
+    normalize_ai_ticker,
+    summarize_series,
+)
 from backend.bcra_client import BCRA_SERIES, BcraClient
 from backend.bond_calculators import (
     LECAP_TICKERS,
@@ -76,6 +85,47 @@ class HistoricalDataRequest(BaseModel):
     value: float
 
 
+class AiMemoryNoteRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    category: str = Field(pattern="^(market_concept|calculation_rule|interpretation_rule|study_template|app_behavior|personal_note)$")
+    content: str = Field(min_length=1)
+    tags: str | None = None
+
+
+class AiMemoryNoteUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    category: str | None = Field(default=None, pattern="^(market_concept|calculation_rule|interpretation_rule|study_template|app_behavior|personal_note)$")
+    content: str | None = Field(default=None, min_length=1)
+    tags: str | None = None
+    is_active: bool | None = None
+
+
+class AiSeriesRef(BaseModel):
+    ticker: str = Field(min_length=1, max_length=20)
+    dato: str = Field(pattern="^(parity|dirty_price|clean_price|ytm|tem|tna|volume)$")
+    mercado: str = Field(pattern="^(pesos|cable|mep)$")
+    liquidacion: str = Field(pattern="^(t0|t1)$")
+
+
+class AiSpreadRequest(BaseModel):
+    series_a: AiSeriesRef
+    series_b: AiSeriesRef
+
+
+class AiZScoreRequest(BaseModel):
+    points: list[dict[str, object]]
+    window: int = Field(default=20, ge=2, le=500)
+
+
+class AiStudySpreadZScoreRequest(AiSpreadRequest):
+    window: int = Field(default=20, ge=2, le=500)
+    mode: str = Field(default="spread", pattern="^(spread|ratio)$")
+
+
+class AssistantMessageRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
 @app.on_event("startup")
 async def startup() -> None:
     storage.initialize()
@@ -95,6 +145,11 @@ async def index() -> FileResponse:
 @app.get("/charts-demo")
 async def charts_demo() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "charts-demo.html")
+
+
+@app.get("/ai-demo")
+async def ai_demo() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "ai-demo.html")
 
 
 @app.get("/api/tickers")
@@ -601,6 +656,146 @@ async def export_historical_data(
     )
 
 
+@app.get("/api/ai/context")
+async def ai_context() -> dict:
+    return _build_ai_context()
+
+
+@app.get("/api/ai/memory")
+async def ai_memory(
+    category: str | None = None,
+    search: str | None = None,
+    include_inactive: bool = False,
+) -> dict:
+    return {
+        "items": [
+            note.to_dict()
+            for note in storage.list_ai_memory_notes(
+                category=category,
+                search=search,
+                include_inactive=include_inactive,
+            )
+        ],
+    }
+
+
+@app.post("/api/ai/memory")
+async def create_ai_memory(payload: AiMemoryNoteRequest) -> dict:
+    note = storage.create_ai_memory_note(
+        title=payload.title,
+        category=payload.category,
+        content=payload.content,
+        tags=payload.tags,
+    )
+    return {"item": note.to_dict()}
+
+
+@app.put("/api/ai/memory/{note_id}")
+async def update_ai_memory(note_id: int, payload: AiMemoryNoteUpdateRequest) -> dict:
+    note = storage.update_ai_memory_note(
+        note_id,
+        title=payload.title,
+        category=payload.category,
+        content=payload.content,
+        tags=payload.tags,
+        is_active=payload.is_active,
+    )
+    if note is None:
+        raise HTTPException(status_code=404, detail="Nota de memoria no encontrada.")
+    return {"item": note.to_dict()}
+
+
+@app.delete("/api/ai/memory/{note_id}")
+async def delete_ai_memory(note_id: int) -> dict:
+    if not storage.deactivate_ai_memory_note(note_id):
+        raise HTTPException(status_code=404, detail="Nota de memoria no encontrada.")
+    return {"deleted": True, "mode": "deactivated"}
+
+
+@app.get("/api/ai/available-series")
+async def ai_available_series() -> dict:
+    return {
+        "items": [
+            {
+                "ticker": item["ticker"],
+                "dato": item["metric_type"],
+                "mercado": item["price_market"],
+                "liquidacion": item["settlement_type"],
+                "first_date": item["first_date"],
+                "last_date": item["last_date"],
+                "points_count": item["count"],
+            }
+            for item in storage.list_historical_series()
+        ]
+    }
+
+
+@app.get("/api/ai/historical-series")
+async def ai_historical_series(
+    ticker: str,
+    dato: str,
+    mercado: str,
+    liquidacion: str,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 5000,
+) -> dict:
+    ref = AiSeriesRef(ticker=ticker, dato=dato, mercado=mercado, liquidacion=liquidacion)
+    points = _load_ai_series_points(ref, limit=limit)
+    return {
+        "series": _series_ref_to_dict(ref),
+        "summary": summarize_series(points),
+        "points": points,
+    }
+
+
+@app.post("/api/ai/spread")
+async def ai_spread(payload: AiSpreadRequest) -> dict:
+    series_a = _load_ai_series_points(payload.series_a)
+    series_b = _load_ai_series_points(payload.series_b)
+    points = calculate_spread_points(series_a, series_b)
+    return {
+        "series_a": _series_ref_to_dict(payload.series_a),
+        "series_b": _series_ref_to_dict(payload.series_b),
+        "summary": summarize_series(points),
+        "points": points,
+    }
+
+
+@app.post("/api/ai/zscore")
+async def ai_zscore(payload: AiZScoreRequest) -> dict:
+    points = calculate_rolling_zscore(payload.points, payload.window)
+    return {"window": payload.window, "summary": summarize_series(points), "points": points}
+
+
+@app.post("/api/ai/study/spread-zscore")
+async def ai_study_spread_zscore(payload: AiStudySpreadZScoreRequest) -> dict:
+    series_a = _load_ai_series_points(payload.series_a)
+    series_b = _load_ai_series_points(payload.series_b)
+    points = (
+        calculate_ratio_points(series_a, series_b)
+        if payload.mode == "ratio"
+        else calculate_spread_points(series_a, series_b)
+    )
+    zscore_points = calculate_rolling_zscore(points, payload.window)
+    return build_basic_study_summary(
+        series_a=_series_ref_to_dict(payload.series_a),
+        series_b=_series_ref_to_dict(payload.series_b),
+        points=points,
+        zscore_points=zscore_points,
+        window=payload.window,
+        mode=payload.mode,
+    )
+
+
+@app.post("/api/assistant/message")
+async def assistant_message(payload: AssistantMessageRequest) -> dict:
+    memory = [note.to_dict() for note in storage.search_ai_memory_notes(payload.message)]
+    return answer_ai_question(
+        payload.message,
+        memory_notes=memory,
+        app_context=_build_ai_context(include_docs=False),
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {
@@ -672,6 +867,64 @@ def _read_excel_upload(content: bytes) -> list[dict[str, object]]:
         for row in rows[1:]
         if any(value is not None and value != "" for value in row)
     ]
+
+
+def _load_ai_series_points(ref: AiSeriesRef, limit: int = 5000) -> list[dict[str, object]]:
+    items = storage.list_historical_data(
+        ticker=normalize_ai_ticker(ref.ticker),
+        metric_type=ref.dato,
+        price_market=_normalize_price_market(ref.mercado),
+        settlement_type=_normalize_settlement_type(ref.liquidacion),
+        limit=limit,
+    )
+    return [
+        {"date": item.value_date.isoformat(), "value": item.value}
+        for item in sorted(items, key=lambda item: item.value_date)
+    ]
+
+
+def _series_ref_to_dict(ref: AiSeriesRef) -> dict[str, str]:
+    return {
+        "ticker": normalize_ai_ticker(ref.ticker),
+        "dato": ref.dato,
+        "mercado": _normalize_price_market(ref.mercado),
+        "liquidacion": _normalize_settlement_type(ref.liquidacion),
+    }
+
+
+def _build_ai_context(include_docs: bool = True) -> dict[str, object]:
+    context: dict[str, object] = {
+        "project": "bonos",
+        "backend": "FastAPI",
+        "frontend": "HTML/CSS/JS estatico",
+        "storage": "SQLite via APP_DB_PATH",
+        "historical_series_key": "ticker base + dato + mercado + liquidacion + fecha",
+        "supported_metrics": list(HISTORICAL_METRIC_TYPES),
+        "supported_markets": list(PRICE_MARKET_TYPES),
+        "supported_settlements": list(SETTLEMENT_TYPES),
+        "rules": [
+            "No inventar datos de mercado.",
+            "Normalizar tickers por familia, por ejemplo AL30D o AL30C a AL30.",
+            "No ejecutar SQL libre generado por IA.",
+            "No modificar datos sin confirmacion explicita.",
+        ],
+    }
+    if include_docs:
+        docs_dir = ROOT_DIR / "docs"
+        docs = []
+        for name in (
+            "PROJECT_CONTEXT.md",
+            "DATA_DICTIONARY.md",
+            "FINANCIAL_CONCEPTS.md",
+            "AI_ASSISTANT_SPEC.md",
+            "STUDY_TEMPLATES.md",
+            "EXAMPLES.md",
+        ):
+            path = docs_dir / name
+            if path.exists():
+                docs.append({"name": name, "content": path.read_text(encoding="utf-8")[:3000]})
+        context["docs"] = docs
+    return context
 
 
 def _parse_historical_date(row: dict[str, object]) -> date:
