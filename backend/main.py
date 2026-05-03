@@ -488,7 +488,7 @@ async def historical_data(
 @app.post("/api/historical-data")
 async def save_historical_data(payload: HistoricalDataRequest) -> dict:
     try:
-        point = storage.upsert_historical_data(
+        point, replaced = storage.upsert_historical_data(
             ticker=_normalize_base_ticker(payload.ticker),
             metric_type=payload.metric_type,
             price_market=_normalize_price_market(payload.price_market),
@@ -498,7 +498,7 @@ async def save_historical_data(payload: HistoricalDataRequest) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"item": point.to_dict()}
+    return {"item": point.to_dict(), "replaced": replaced}
 
 
 @app.post("/api/historical-data/upload")
@@ -517,11 +517,12 @@ async def upload_historical_data(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     imported = 0
+    replaced = 0
     errors = []
     for index, row in enumerate(rows, start=2):
         try:
             for row_metric_type, value in _historical_points_from_row(row, normalized_metric):
-                storage.upsert_historical_data(
+                _, did_replace = storage.upsert_historical_data(
                     ticker=_normalize_base_ticker(ticker),
                     metric_type=row_metric_type,
                     price_market=_normalize_price_market(
@@ -534,6 +535,8 @@ async def upload_historical_data(
                     value=value,
                 )
                 imported += 1
+                if did_replace:
+                    replaced += 1
         except ValueError as exc:
             errors.append({"row": index, "detail": str(exc)})
 
@@ -547,6 +550,7 @@ async def upload_historical_data(
         "price_market": normalized_market,
         "settlement_type": normalized_settlement,
         "imported": imported,
+        "replaced": replaced,
         "errors": errors[:20],
     }
 
@@ -666,7 +670,7 @@ def _read_excel_upload(content: bytes) -> list[dict[str, object]]:
 
 
 def _parse_historical_date(row: dict[str, object]) -> date:
-    raw = _pick_value(row, ("fecha", "date", "value_date"))
+    raw = _pick_value(row, ("fecha", "date", "value_date", "datetime", "date time"))
     if isinstance(raw, datetime):
         return raw.date()
     if isinstance(raw, date):
@@ -678,6 +682,8 @@ def _parse_historical_date(row: dict[str, object]) -> date:
             first, second, third = parts
             if len(first) == 4:
                 return date(int(first), int(second), int(third))
+            if separator == "-" and len(third) == 4:
+                return date(int(third), int(first), int(second))
             return date(int(third), int(second), int(first))
     raise ValueError("Fecha invalida. Usa DD/MM/AAAA.")
 
@@ -685,6 +691,8 @@ def _parse_historical_date(row: dict[str, object]) -> date:
 def _historical_points_from_row(row: dict[str, object], selected_metric: str | None = None) -> list[tuple[str, float]]:
     if selected_metric:
         raw = _pick_value(row, ("valor", "value", *_HISTORICAL_UPLOAD_COLUMNS[selected_metric]))
+        if raw is None:
+            raw = _pick_first_numeric_value(row, selected_metric)
         if raw is None:
             raise ValueError("No se encontro columna Valor ni la columna del dato seleccionado.")
         return [(selected_metric, _parse_float(raw))]
@@ -709,6 +717,42 @@ def _pick_value(row: dict[str, object], aliases: tuple[str, ...]) -> object | No
         value = normalized.get(_normalize_header(alias))
         if value is not None and str(value).strip() != "":
             return value
+    return None
+
+
+def _pick_first_numeric_value(row: dict[str, object], selected_metric: str) -> object | None:
+    ignored = {
+        "fecha",
+        "date",
+        "value date",
+        "datetime",
+        "date time",
+        "tipo",
+        "dato",
+        "metric type",
+        "metric",
+        "mercado",
+        "market",
+        "price market",
+        "liquidacion",
+        "settlement",
+        "settlement type",
+    }
+    for key, value in row.items():
+        normalized_key = _normalize_header(str(key))
+        if normalized_key in ignored:
+            continue
+        if normalized_key in {"volume", "volumen"} and selected_metric != "volume":
+            continue
+        if selected_metric == "volume" and normalized_key not in {"volume", "volumen"}:
+            continue
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            _parse_float(value)
+        except ValueError:
+            continue
+        return value
     return None
 
 

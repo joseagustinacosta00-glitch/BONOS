@@ -113,6 +113,15 @@ class CalculatorStorage:
     def initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as connection, connection:
+            exists = connection.execute(
+                """
+                SELECT 1
+                FROM historical_data
+                WHERE ticker = ? AND metric_type = ? AND price_market = ?
+                  AND settlement_type = ? AND value_date = ?
+                """,
+                (ticker, metric_type, price_market, settlement_type, value_date.isoformat()),
+            ).fetchone() is not None
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS lecap_calculators (
@@ -321,7 +330,7 @@ class CalculatorStorage:
         value: float,
         price_market: str = "unspecified",
         settlement_type: str = "unspecified",
-    ) -> HistoricalDataPoint:
+    ) -> tuple[HistoricalDataPoint, bool]:
         now = now_argentina_iso()
         ticker = _normalize_base_ticker(ticker)
         metric_type = metric_type.lower().strip()
@@ -355,7 +364,8 @@ class CalculatorStorage:
             ).fetchone()
         if row is None:
             raise RuntimeError("No se pudo guardar el dato historico.")
-        return self._row_to_historical_data(row)
+        point = self._row_to_historical_data(row)
+        return point, exists
 
     def list_historical_data(
         self,

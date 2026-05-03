@@ -171,7 +171,7 @@ La solapa `Datos historicos` permite cargar por ticker un valor de:
 
 El bono se elige siempre por ticker base en pesos/familia (`AL30`, no `AL30D` ni `AL30C`). Cada carga identifica mercado (`PESOS`, `CABLE`, `MEP`) y liquidacion (`T+0`, `T+1`) para que las bases no se mezclen entre si.
 
-El flujo principal es subir archivos CSV, TXT o XLSX. En la pantalla se selecciona que dato trae el archivo: `Paridad`, `Precio dirty`, `Precio clean`, `TIR`, `TEM`, `TNA` o `Volumen`. El formato recomendado es una fila por fecha con columna `Fecha` en `DD/MM/AAAA` y una columna `Valor`; tambien acepta que la columna de valor se llame igual que el dato seleccionado. Si el archivo trae columnas `Mercado` o `Liquidacion`, esas columnas pisan el selector de la pantalla fila por fila. Los historicos quedan guardados en SQLite en `APP_DB_PATH`.
+El flujo principal es subir archivos CSV, TXT o XLSX. En la pantalla se selecciona que dato trae el archivo: `Paridad`, `Precio dirty`, `Precio clean`, `TIR`, `TEM`, `TNA` o `Volumen`. El formato recomendado es una fila por fecha con columna `Fecha` en `DD/MM/AAAA` y una columna `Valor`; tambien acepta que la columna de valor se llame igual que el dato seleccionado. Si no encuentra una columna `Valor`, usa la primera columna numerica disponible, ignorando fecha y volumen salvo que el dato seleccionado sea `Volumen`. Si el archivo trae columnas `Mercado` o `Liquidacion`, esas columnas pisan el selector de la pantalla fila por fila. Los historicos quedan guardados en SQLite en `APP_DB_PATH`.
 
 La carga manual de un dato puntual queda aparte como complemento para corregir o agregar observaciones individuales.
 

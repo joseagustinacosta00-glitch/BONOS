@@ -617,10 +617,11 @@ async function saveHistoricalData(event) {
     return;
   }
 
+  const payload = await response.json();
   historicalValue.value = "";
   await fetchHistoricalTickers();
   await fetchHistoricalData();
-  setHistoricalStatus("ok", "Dato guardado");
+  setHistoricalStatus("ok", payload.replaced ? "Dato reemplazado" : "Dato guardado");
 }
 
 async function uploadHistoricalData(event) {
@@ -653,7 +654,9 @@ async function uploadHistoricalData(event) {
   historicalFile.value = "";
   await fetchHistoricalTickers();
   await fetchHistoricalData();
-  setHistoricalStatus("ok", `${payload.imported} datos importados`);
+  const replaced = payload.replaced ? `, ${payload.replaced} reemplazados` : "";
+  const skipped = payload.errors && payload.errors.length ? `, ${payload.errors.length} filas omitidas` : "";
+  setHistoricalStatus("ok", `${payload.imported} datos importados${replaced}${skipped}`);
 }
 
 function renderHardDollarCouponInputs() {
