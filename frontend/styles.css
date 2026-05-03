@@ -318,9 +318,17 @@ tbody td {
   grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
 }
 
-.calculator-form.historical-upload-form,
+.calculator-form.historical-upload-form {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+}
+
 .calculator-form.hard-dollar-form {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.historical-upload-block {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .calculator-form label span {

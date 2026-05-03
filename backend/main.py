@@ -426,7 +426,7 @@ async def calculator_cashflows(calculator_type: str | None = None, ticker: str |
 
 @app.get("/api/data/tickers")
 async def data_tickers() -> dict:
-    tickers = sorted({ticker.symbol for ticker in BOND_TICKERS} | set(LECAP_TICKERS) | set(storage.list_tickers()))
+    tickers = sorted({ticker.family for ticker in BOND_TICKERS} | set(LECAP_TICKERS) | set(storage.list_tickers()))
     return {"tickers": tickers}
 
 
@@ -474,7 +474,7 @@ async def historical_data(
         "items": [
             point.to_dict()
             for point in storage.list_historical_data(
-                ticker=ticker,
+                ticker=_normalize_base_ticker(ticker) if ticker else None,
                 metric_type=metric_type,
                 price_market=normalized_market,
                 settlement_type=normalized_settlement,
@@ -489,7 +489,7 @@ async def historical_data(
 async def save_historical_data(payload: HistoricalDataRequest) -> dict:
     try:
         point = storage.upsert_historical_data(
-            ticker=payload.ticker,
+            ticker=_normalize_base_ticker(payload.ticker),
             metric_type=payload.metric_type,
             price_market=_normalize_price_market(payload.price_market),
             settlement_type=_normalize_settlement_type(payload.settlement_type),
@@ -504,12 +504,14 @@ async def save_historical_data(payload: HistoricalDataRequest) -> dict:
 @app.post("/api/historical-data/upload")
 async def upload_historical_data(
     ticker: Annotated[str, Form(min_length=1, max_length=20)],
+    metric_type: Annotated[str, Form()],
     price_market: Annotated[str, Form()],
     settlement_type: Annotated[str, Form()],
     file: UploadFile = File(...),
 ) -> dict:
     rows = await _read_historical_upload(file)
     try:
+        normalized_metric = _normalize_metric_type(metric_type)
         normalized_market = _normalize_price_market(price_market)
         normalized_settlement = _normalize_settlement_type(settlement_type)
     except ValueError as exc:
@@ -518,10 +520,10 @@ async def upload_historical_data(
     errors = []
     for index, row in enumerate(rows, start=2):
         try:
-            for metric_type, value in _historical_points_from_row(row):
+            for row_metric_type, value in _historical_points_from_row(row, normalized_metric):
                 storage.upsert_historical_data(
-                    ticker=ticker,
-                    metric_type=metric_type,
+                    ticker=_normalize_base_ticker(ticker),
+                    metric_type=row_metric_type,
                     price_market=_normalize_price_market(
                         _pick_value(row, ("mercado", "market", "price_market")) or normalized_market
                     ),
@@ -540,7 +542,8 @@ async def upload_historical_data(
         raise HTTPException(status_code=422, detail=detail)
 
     return {
-        "ticker": ticker.upper().strip(),
+        "ticker": _normalize_base_ticker(ticker),
+        "metric_type": normalized_metric,
         "price_market": normalized_market,
         "settlement_type": normalized_settlement,
         "imported": imported,
@@ -563,7 +566,7 @@ async def export_historical_data(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = storage.list_historical_data(
-        ticker=ticker,
+        ticker=_normalize_base_ticker(ticker),
         metric_type=metric_type,
         price_market=normalized_market,
         settlement_type=normalized_settlement,
@@ -679,7 +682,13 @@ def _parse_historical_date(row: dict[str, object]) -> date:
     raise ValueError("Fecha invalida. Usa DD/MM/AAAA.")
 
 
-def _historical_points_from_row(row: dict[str, object]) -> list[tuple[str, float]]:
+def _historical_points_from_row(row: dict[str, object], selected_metric: str | None = None) -> list[tuple[str, float]]:
+    if selected_metric:
+        raw = _pick_value(row, ("valor", "value", *_HISTORICAL_UPLOAD_COLUMNS[selected_metric]))
+        if raw is None:
+            raise ValueError("No se encontro columna Valor ni la columna del dato seleccionado.")
+        return [(selected_metric, _parse_float(raw))]
+
     metric = _normalize_historical_metric(_pick_value(row, ("tipo", "dato", "metric_type", "metric")))
     if metric:
         return [(metric, _parse_float(_pick_value(row, ("valor", "value"))))]
@@ -724,6 +733,20 @@ def _normalize_historical_metric(value: object | None) -> str | None:
         "volume": "volume",
     }
     return alias_map.get(normalized)
+
+
+def _normalize_metric_type(value: object | None) -> str:
+    metric = _normalize_historical_metric(value)
+    if metric in HISTORICAL_METRIC_TYPES:
+        return metric
+    raise ValueError("Tipo de dato historico no soportado.")
+
+
+def _normalize_base_ticker(value: str) -> str:
+    ticker = value.upper().strip()
+    if len(ticker) > 1 and ticker[-1] in {"D", "C"} and any(char.isdigit() for char in ticker[:-1]):
+        return ticker[:-1]
+    return ticker
 
 
 def _normalize_price_market(value: object | None) -> str:

@@ -303,15 +303,15 @@ class CalculatorStorage:
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 """
-                SELECT ticker FROM lecap_calculators
+                SELECT ticker AS ticker FROM lecap_calculators
                 UNION
-                SELECT ticker FROM calculator_cashflows
+                SELECT ticker AS ticker FROM calculator_cashflows
                 UNION
-                SELECT ticker FROM historical_data
+                SELECT ticker AS ticker FROM historical_data
                 ORDER BY ticker ASC
                 """
             ).fetchall()
-        return [str(row["ticker"]) for row in rows]
+        return sorted({_normalize_base_ticker(str(row["ticker"])) for row in rows})
 
     def upsert_historical_data(
         self,
@@ -323,7 +323,7 @@ class CalculatorStorage:
         settlement_type: str = "unspecified",
     ) -> HistoricalDataPoint:
         now = now_argentina_iso()
-        ticker = ticker.upper().strip()
+        ticker = _normalize_base_ticker(ticker)
         metric_type = metric_type.lower().strip()
         price_market = price_market.lower().strip()
         settlement_type = settlement_type.lower().replace("+", "").strip()
@@ -368,8 +368,9 @@ class CalculatorStorage:
         filters = []
         params: list[object] = []
         if ticker:
-            filters.append("ticker = ?")
-            params.append(ticker.upper().strip())
+            base_ticker = _normalize_base_ticker(ticker)
+            filters.append("ticker IN (?, ?, ?)")
+            params.extend([base_ticker, f"{base_ticker}D", f"{base_ticker}C"])
         if metric_type:
             filters.append("metric_type = ?")
             params.append(metric_type.lower().strip())
@@ -406,18 +407,38 @@ class CalculatorStorage:
                 ORDER BY ticker ASC, metric_type ASC, price_market ASC, settlement_type ASC
                 """
             ).fetchall()
-        return [
-            {
-                "ticker": str(row["ticker"]),
-                "metric_type": str(row["metric_type"]),
-                "price_market": str(row["price_market"]),
-                "settlement_type": str(row["settlement_type"]),
-                "count": int(row["count"]),
-                "first_date": str(row["first_date"]),
-                "last_date": str(row["last_date"]),
-            }
-            for row in rows
-        ]
+        series: dict[tuple[str, str, str, str], dict[str, object]] = {}
+        for row in rows:
+            key = (
+                _normalize_base_ticker(str(row["ticker"])),
+                str(row["metric_type"]),
+                str(row["price_market"]),
+                str(row["settlement_type"]),
+            )
+            current = series.get(key)
+            if current is None:
+                series[key] = {
+                    "ticker": key[0],
+                    "metric_type": key[1],
+                    "price_market": key[2],
+                    "settlement_type": key[3],
+                    "count": int(row["count"]),
+                    "first_date": str(row["first_date"]),
+                    "last_date": str(row["last_date"]),
+                }
+                continue
+            current["count"] = int(current["count"]) + int(row["count"])
+            current["first_date"] = min(str(current["first_date"]), str(row["first_date"]))
+            current["last_date"] = max(str(current["last_date"]), str(row["last_date"]))
+        return sorted(
+            series.values(),
+            key=lambda item: (
+                str(item["ticker"]),
+                str(item["metric_type"]),
+                str(item["price_market"]),
+                str(item["settlement_type"]),
+            ),
+        )
 
     def delete_lecap(self, item_id: int) -> bool:
         with closing(self._connect()) as connection, connection:
@@ -507,7 +528,7 @@ class CalculatorStorage:
     def _row_to_historical_data(row: sqlite3.Row) -> HistoricalDataPoint:
         return HistoricalDataPoint(
             id=int(row["id"]),
-            ticker=str(row["ticker"]),
+            ticker=_normalize_base_ticker(str(row["ticker"])),
             metric_type=str(row["metric_type"]),
             price_market=str(row["price_market"]),
             settlement_type=str(row["settlement_type"]),
@@ -516,3 +537,10 @@ class CalculatorStorage:
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
+
+
+def _normalize_base_ticker(value: str) -> str:
+    ticker = value.upper().strip()
+    if len(ticker) > 1 and ticker[-1] in {"D", "C"} and any(char.isdigit() for char in ticker[:-1]):
+        return ticker[:-1]
+    return ticker

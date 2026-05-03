@@ -48,6 +48,7 @@ const historicalTicker = document.querySelector("#historicalTicker");
 const historicalUploadTicker = document.querySelector("#historicalUploadTicker");
 const historicalTickerOptions = document.querySelector("#historicalTickerOptions");
 const historicalMetricType = document.querySelector("#historicalMetricType");
+const historicalUploadMetricType = document.querySelector("#historicalUploadMetricType");
 const historicalPriceMarket = document.querySelector("#historicalPriceMarket");
 const historicalSettlement = document.querySelector("#historicalSettlement");
 const historicalUploadPriceMarket = document.querySelector("#historicalUploadPriceMarket");
@@ -629,6 +630,7 @@ async function uploadHistoricalData(event) {
 
   const body = new FormData();
   body.append("ticker", historicalUploadTicker.value.trim().toUpperCase());
+  body.append("metric_type", historicalUploadMetricType.value);
   body.append("price_market", historicalUploadPriceMarket.value);
   body.append("settlement_type", historicalUploadSettlement.value);
   body.append("file", historicalFile.files[0]);

@@ -422,10 +422,54 @@
             <span id="historicalStatus" class="calc-status">Listo</span>
           </div>
 
+          <section class="cashflow-preview historical-upload-block" aria-label="Importar archivo historico">
+            <h3>Subir base historica</h3>
+            <form id="historicalUploadForm" class="calculator-form historical-upload-form">
+              <label>
+                <span>Bono</span>
+                <input id="historicalUploadTicker" class="form-control form-control-sm" list="historicalTickerOptions" type="text" placeholder="Ej. AL30" required>
+              </label>
+              <label>
+                <span>Dato del archivo</span>
+                <select id="historicalUploadMetricType" class="form-select form-select-sm" required>
+                  <option value="parity">Paridad</option>
+                  <option value="dirty_price">Precio dirty</option>
+                  <option value="clean_price">Precio clean</option>
+                  <option value="ytm">TIR</option>
+                  <option value="tem">TEM</option>
+                  <option value="tna">TNA</option>
+                  <option value="volume">Volumen</option>
+                </select>
+              </label>
+              <label>
+                <span>Mercado archivo</span>
+                <select id="historicalUploadPriceMarket" class="form-select form-select-sm" required>
+                  <option value="pesos">PESOS</option>
+                  <option value="cable">CABLE</option>
+                  <option value="mep">MEP</option>
+                </select>
+              </label>
+              <label>
+                <span>Liquidacion archivo</span>
+                <select id="historicalUploadSettlement" class="form-select form-select-sm" required>
+                  <option value="t0">T+0</option>
+                  <option value="t1">T+1</option>
+                </select>
+              </label>
+              <label>
+                <span>Archivo</span>
+                <input id="historicalFile" class="form-control form-control-sm" type="file" accept=".csv,.txt,.xlsx,.xlsm" required>
+              </label>
+              <button class="btn btn-sm btn-dark" type="submit">Subir archivo</button>
+            </form>
+          </section>
+
+          <section class="cashflow-preview" aria-label="Carga manual historica">
+            <h3>Agregar dato puntual</h3>
           <form id="historicalForm" class="calculator-form historical-form">
             <label>
               <span>Ticker</span>
-              <input id="historicalTicker" class="form-control form-control-sm" list="historicalTickerOptions" type="text" placeholder="Ej. AL30D" required>
+              <input id="historicalTicker" class="form-control form-control-sm" list="historicalTickerOptions" type="text" placeholder="Ej. AL30" required>
               <datalist id="historicalTickerOptions"></datalist>
             </label>
             <label>
@@ -465,33 +509,7 @@
             </label>
             <button class="btn btn-sm btn-dark" type="submit">Guardar</button>
           </form>
-
-          <form id="historicalUploadForm" class="calculator-form historical-upload-form">
-            <label>
-              <span>Ticker para archivo</span>
-              <input id="historicalUploadTicker" class="form-control form-control-sm" list="historicalTickerOptions" type="text" placeholder="Ej. AL30D" required>
-            </label>
-            <label>
-              <span>Mercado archivo</span>
-              <select id="historicalUploadPriceMarket" class="form-select form-select-sm" required>
-                <option value="pesos">PESOS</option>
-                <option value="cable">CABLE</option>
-                <option value="mep">MEP</option>
-              </select>
-            </label>
-            <label>
-              <span>Liquidacion archivo</span>
-              <select id="historicalUploadSettlement" class="form-select form-select-sm" required>
-                <option value="t0">T+0</option>
-                <option value="t1">T+1</option>
-              </select>
-            </label>
-            <label>
-              <span>Archivo</span>
-              <input id="historicalFile" class="form-control form-control-sm" type="file" accept=".csv,.txt,.xlsx,.xlsm" required>
-            </label>
-            <button class="btn btn-sm btn-outline-dark" type="submit">Subir archivo</button>
-          </form>
+          </section>
 
           <section class="cashflow-preview" aria-label="Series historicas disponibles">
             <h3>Series disponibles</h3>
