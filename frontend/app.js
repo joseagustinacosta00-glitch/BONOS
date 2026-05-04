@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd31 cargado - HD: 30/360 day count + secciones inicio/gracia abiertas");
+console.log("[Monitor] app.js v=hd32 cargado - HD: secciones inicio/gracia visibles pero colapsadas");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -1192,14 +1192,14 @@ function renderHdDeferredControls() {
   }
 }
 
-// Las secciones <details> arrancan colapsadas por inline d-none.
-// Las marcamos visibles + abiertas tras generar los cupones para que el
-// usuario las vea siempre y no piense que desaparecieron.
+// Las secciones <details> arrancan ocultas con d-none. Tras generar los
+// cupones las marcamos visibles pero CERRADAS (open=false) para mantener
+// el UI minimalista — el usuario las despliega solo si las necesita.
 function ensureHdDetailsVisible() {
   for (const el of [hdDeferredSection, hdGraceSection]) {
     if (!el) continue;
     el.classList.remove("d-none");
-    if (el.tagName === "DETAILS") el.open = true;
+    if (el.tagName === "DETAILS") el.open = false;
   }
 }
 
