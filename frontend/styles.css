@@ -324,7 +324,34 @@ tbody td {
 }
 
 .calculator-form.hard-dollar-form {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.hd-amort-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.hd-coupons-table input.form-control,
+.hd-coupons-table input.form-select {
+  width: 100%;
+}
+
+.hd-cashflow-table th {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.hd-cashflow-table td {
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .hd-amort-controls {
+    grid-template-columns: 1fr;
+  }
 }
 
 .historical-upload-block {

@@ -296,12 +296,34 @@
                   <input id="hdMaturityDate" class="form-control form-control-sm" type="date">
                 </label>
                 <label>
+                  <span>VNO</span>
+                  <input id="hdFaceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100">
+                </label>
+                <label>
                   <span>Frecuencia</span>
                   <select id="hdFrequency" class="form-select form-select-sm">
-                    <option value="1">Anual</option>
-                    <option value="2" selected>Semestral</option>
-                    <option value="4">Trimestral</option>
-                    <option value="12">Mensual</option>
+                    <option value="annual">Anual</option>
+                    <option value="semiannual" selected>Semestral</option>
+                    <option value="quarterly">Trimestral</option>
+                    <option value="monthly">Mensual</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Tipo de bono</span>
+                  <select id="hdBondType" class="form-select form-select-sm">
+                    <option value="bullet" selected>Bullet</option>
+                    <option value="amortizable">Amortizable</option>
+                    <option value="zero_coupon">Zero-coupon</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Convencion</span>
+                  <select id="hdConvention" class="form-select form-select-sm">
+                    <option value="30_360_eu" selected>30/360 EU</option>
+                    <option value="30_360_us">30/360 US</option>
+                    <option value="act_360">Act/360</option>
+                    <option value="act_365">Act/365</option>
+                    <option value="act_act">Act/Act</option>
                   </select>
                 </label>
                 <label>
@@ -313,13 +335,81 @@
                 </label>
                 <label id="hdFixedCouponWrap">
                   <span>Cupon anual %</span>
-                  <input id="hdFixedCoupon" class="form-control form-control-sm" type="number" step="0.0001">
+                  <input id="hdFixedCoupon" class="form-control form-control-sm" type="number" step="0.0001" value="0.5">
                 </label>
+                <button id="hdGenerateSchedule" class="btn btn-sm btn-dark" type="button">Generar tabla de cupones</button>
+                <button id="hdCalculate" class="btn btn-sm btn-outline-dark" type="button" disabled>Calcular cashflow</button>
+                <span id="hdStatus" class="calc-status">Borrador</span>
               </form>
 
-              <section id="hdStepUpSection" class="cashflow-preview d-none" aria-label="Cupones step-up">
-                <h3>Cupon step-up por anio</h3>
+              <section id="hdStepUpSection" class="cashflow-preview d-none" aria-label="Cupones step-up por año">
+                <h3>Cupon step-up por año</h3>
                 <div id="hdStepUpRows" class="step-up-grid"></div>
+              </section>
+
+              <section id="hdAmortizationSection" class="cashflow-preview d-none" aria-label="Amortizacion">
+                <h3>Amortizacion</h3>
+                <div class="hd-amort-controls">
+                  <label>
+                    <span>Amortiza desde el cupon #</span>
+                    <input id="hdAmortStart" class="form-control form-control-sm" type="number" min="1" step="1" value="1">
+                  </label>
+                  <label>
+                    <span>Cantidad de cuotas</span>
+                    <input id="hdAmortCount" class="form-control form-control-sm" type="number" min="1" step="1" value="1">
+                  </label>
+                  <button id="hdAmortDistribute" class="btn btn-sm btn-outline-dark" type="button">Distribuir 100% en cuotas iguales</button>
+                </div>
+              </section>
+
+              <section id="hdCouponsSection" class="cashflow-preview d-none" aria-label="Cupones por periodo">
+                <h3>Cupones</h3>
+                <div class="table-wrap inner-table">
+                  <table class="table table-sm align-middle mb-0 hd-coupons-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Fecha de pago</th>
+                        <th class="text-end">Cupon anual %</th>
+                        <th class="text-end">Amortizacion %</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hdCouponsBody">
+                      <tr><td colspan="4" class="empty-state">Generar tabla con la frecuencia elegida</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section id="hdCashflowSection" class="cashflow-preview" aria-label="Cashflow Bono HD">
+                <h3>Cashflow Bono HD</h3>
+                <div class="table-wrap inner-table">
+                  <table class="table table-sm align-middle mb-0 hd-cashflow-table">
+                    <thead>
+                      <tr>
+                        <th rowspan="2">#</th>
+                        <th colspan="2" class="text-center">Fecha de pago</th>
+                        <th colspan="2" class="text-center">Amortizacion</th>
+                        <th colspan="2" class="text-center">Interes</th>
+                        <th colspan="3" class="text-center">Flujo de fondos c/100 vn</th>
+                      </tr>
+                      <tr>
+                        <th>Manual</th>
+                        <th>Efectiva</th>
+                        <th class="text-end">Amort. (vn)</th>
+                        <th class="text-end">Valor residual</th>
+                        <th class="text-end">Tasa de interes</th>
+                        <th class="text-end">Interes (vn)</th>
+                        <th class="text-end">Amortizacion</th>
+                        <th class="text-end">Interes</th>
+                        <th class="text-end">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hdCashflowBody">
+                      <tr><td colspan="10" class="empty-state">Generar tabla y calcular para ver el cashflow</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </section>
             </div>
 

@@ -64,10 +64,25 @@ const historicalDownload = document.querySelector("#historicalDownload");
 const hardDollarForm = document.querySelector("#hardDollarForm");
 const hdIssueDate = document.querySelector("#hdIssueDate");
 const hdMaturityDate = document.querySelector("#hdMaturityDate");
+const hdFaceValue = document.querySelector("#hdFaceValue");
+const hdFrequency = document.querySelector("#hdFrequency");
+const hdBondType = document.querySelector("#hdBondType");
+const hdConvention = document.querySelector("#hdConvention");
 const hdCouponType = document.querySelector("#hdCouponType");
 const hdFixedCouponWrap = document.querySelector("#hdFixedCouponWrap");
+const hdFixedCoupon = document.querySelector("#hdFixedCoupon");
 const hdStepUpSection = document.querySelector("#hdStepUpSection");
 const hdStepUpRows = document.querySelector("#hdStepUpRows");
+const hdAmortizationSection = document.querySelector("#hdAmortizationSection");
+const hdAmortStart = document.querySelector("#hdAmortStart");
+const hdAmortCount = document.querySelector("#hdAmortCount");
+const hdAmortDistribute = document.querySelector("#hdAmortDistribute");
+const hdCouponsSection = document.querySelector("#hdCouponsSection");
+const hdCouponsBody = document.querySelector("#hdCouponsBody");
+const hdCashflowBody = document.querySelector("#hdCashflowBody");
+const hdGenerateSchedule = document.querySelector("#hdGenerateSchedule");
+const hdCalculate = document.querySelector("#hdCalculate");
+const hdStatus = document.querySelector("#hdStatus");
 const tplusForm = document.querySelector("#tplusForm");
 const tplusDirection = document.querySelector("#tplusDirection");
 const tplusRate = document.querySelector("#tplusRate");
@@ -659,28 +674,41 @@ async function uploadHistoricalData(event) {
   setHistoricalStatus("ok", `${payload.imported} datos importados${replaced}${skipped}`);
 }
 
+let hdCoupons = [];
+let hdLastCalculation = null;
+
+function setHdStatus(kind, text) {
+  if (!hdStatus) return;
+  hdStatus.dataset.kind = kind;
+  hdStatus.textContent = text;
+}
+
 function renderHardDollarCouponInputs() {
   const isStepUp = hdCouponType.value === "step_up";
   hdFixedCouponWrap.classList.toggle("d-none", isStepUp);
   hdStepUpSection.classList.toggle("d-none", !isStepUp);
+  const isAmortizable = hdBondType.value === "amortizable";
+  hdAmortizationSection.classList.toggle("d-none", !isAmortizable);
 
   if (!isStepUp) {
     hdStepUpRows.innerHTML = "";
-    return;
+  } else {
+    const years = hardDollarYearLabels();
+    if (!years.length) {
+      hdStepUpRows.innerHTML = '<span class="empty-cell">Completa emision y vencimiento para abrir los años.</span>';
+    } else {
+      hdStepUpRows.innerHTML = years.map((year) => `
+        <label>
+          <span>${year}</span>
+          <input class="form-control form-control-sm" type="number" step="0.0001" data-hd-step-year="${year}">
+        </label>
+      `).join("");
+      hdStepUpRows.querySelectorAll("input[data-hd-step-year]").forEach((input) => {
+        input.addEventListener("input", refreshHdCouponRates);
+      });
+    }
   }
-
-  const years = hardDollarYearLabels();
-  if (!years.length) {
-    hdStepUpRows.innerHTML = '<span class="empty-cell">Completa emision y vencimiento para abrir los anios.</span>';
-    return;
-  }
-
-  hdStepUpRows.innerHTML = years.map((year) => `
-    <label>
-      <span>${year}</span>
-      <input class="form-control form-control-sm" type="number" step="0.0001" data-hd-step-year="${year}">
-    </label>
-  `).join("");
+  refreshHdCouponRates();
 }
 
 function hardDollarYearLabels() {
@@ -696,6 +724,192 @@ function hardDollarYearLabels() {
     cursor += 1;
   }
   return labels;
+}
+
+function getHdAnnualRateForYear(year) {
+  const isStepUp = hdCouponType.value === "step_up";
+  if (!isStepUp) {
+    return parseFloat(hdFixedCoupon.value) || 0;
+  }
+  const input = hdStepUpRows.querySelector(`input[data-hd-step-year="${year}"]`);
+  if (!input || input.value === "") return 0;
+  return parseFloat(input.value) || 0;
+}
+
+function refreshHdCouponRates() {
+  if (!hdCoupons.length) return;
+  hdCoupons = hdCoupons.map((coupon) => ({
+    ...coupon,
+    annual_rate_percent: getHdAnnualRateForYear(coupon.payment_date.slice(0, 4)),
+  }));
+  renderHdCouponsTable();
+}
+
+async function generateHdSchedule() {
+  if (!hdIssueDate.value || !hdMaturityDate.value) {
+    setHdStatus("error", "Completa fechas de emision y vencimiento");
+    return;
+  }
+  setHdStatus("draft", "Generando cupones...");
+  try {
+    const response = await fetch("/api/calculators/bond-hd/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        issue_date: hdIssueDate.value,
+        maturity_date: hdMaturityDate.value,
+        frequency: hdFrequency.value,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || "No se pudo generar la tabla de cupones");
+    }
+    const payload = await response.json();
+    hdCoupons = (payload.payment_dates || []).map((paymentDate) => ({
+      payment_date: paymentDate,
+      annual_rate_percent: getHdAnnualRateForYear(paymentDate.slice(0, 4)),
+      amortization_percent: 0,
+    }));
+    applyAmortizationDefaults();
+    renderHdCouponsTable();
+    hdCouponsSection.classList.remove("d-none");
+    hdCalculate.disabled = hdCoupons.length === 0;
+    setHdStatus("ok", `Generados ${hdCoupons.length} cupones`);
+  } catch (error) {
+    setHdStatus("error", error.message || "Error al generar cupones");
+  }
+}
+
+function applyAmortizationDefaults() {
+  if (hdBondType.value !== "amortizable" || !hdCoupons.length) return;
+  const start = Math.max(1, parseInt(hdAmortStart.value, 10) || 1);
+  const count = Math.max(1, parseInt(hdAmortCount.value, 10) || 1);
+  hdCoupons = hdCoupons.map((coupon, index) => {
+    const number = index + 1;
+    const inWindow = number >= start && number < start + count;
+    return {
+      ...coupon,
+      amortization_percent: inWindow ? 100 / count : 0,
+    };
+  });
+}
+
+function distributeAmortization() {
+  if (!hdCoupons.length) {
+    setHdStatus("error", "Primero genera la tabla de cupones");
+    return;
+  }
+  applyAmortizationDefaults();
+  renderHdCouponsTable();
+  setHdStatus("ok", "Amortizacion distribuida");
+}
+
+function renderHdCouponsTable() {
+  if (!hdCoupons.length) {
+    hdCouponsBody.innerHTML = '<tr><td colspan="4" class="empty-state">Generar tabla con la frecuencia elegida</td></tr>';
+    return;
+  }
+  const isAmort = hdBondType.value === "amortizable";
+  hdCouponsBody.innerHTML = hdCoupons.map((coupon, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td>
+        <input type="date" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${coupon.payment_date}">
+      </td>
+      <td class="text-end">
+        <input type="number" step="0.0001" class="form-control form-control-sm text-end" data-hd-coupon-rate="${index}" value="${coupon.annual_rate_percent}">
+      </td>
+      <td class="text-end">
+        <input type="number" step="0.0001" min="0" class="form-control form-control-sm text-end" data-hd-coupon-amort="${index}" value="${coupon.amortization_percent}" ${isAmort ? "" : "disabled"}>
+      </td>
+    </tr>
+  `).join("");
+
+  hdCouponsBody.querySelectorAll("input[data-hd-coupon-date]").forEach((input) => {
+    input.addEventListener("change", (event) => {
+      const idx = parseInt(event.target.dataset.hdCouponDate, 10);
+      hdCoupons[idx].payment_date = event.target.value;
+      hdCoupons[idx].annual_rate_percent = getHdAnnualRateForYear(event.target.value.slice(0, 4));
+      renderHdCouponsTable();
+    });
+  });
+  hdCouponsBody.querySelectorAll("input[data-hd-coupon-rate]").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const idx = parseInt(event.target.dataset.hdCouponRate, 10);
+      hdCoupons[idx].annual_rate_percent = parseFloat(event.target.value) || 0;
+    });
+  });
+  hdCouponsBody.querySelectorAll("input[data-hd-coupon-amort]").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      const idx = parseInt(event.target.dataset.hdCouponAmort, 10);
+      hdCoupons[idx].amortization_percent = parseFloat(event.target.value) || 0;
+    });
+  });
+}
+
+async function calculateHdCashflow() {
+  if (!hdCoupons.length) {
+    setHdStatus("error", "Generar la tabla de cupones primero");
+    return;
+  }
+  if (!hdIssueDate.value || !hdMaturityDate.value || !hdFaceValue.value) {
+    setHdStatus("error", "Completa emision, vencimiento y VNO");
+    return;
+  }
+  setHdStatus("draft", "Calculando...");
+  const lastIndex = hdCoupons.length - 1;
+  const adjustedCoupons = hdCoupons.map((coupon, index) => ({
+    payment_date: index === lastIndex ? hdMaturityDate.value : coupon.payment_date,
+    annual_rate_percent: coupon.annual_rate_percent,
+    amortization_percent: coupon.amortization_percent,
+  }));
+  try {
+    const response = await fetch("/api/calculators/bond-hd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        issue_date: hdIssueDate.value,
+        maturity_date: hdMaturityDate.value,
+        face_value: parseFloat(hdFaceValue.value),
+        bond_type: hdBondType.value,
+        frequency: hdFrequency.value,
+        convention: hdConvention.value,
+        coupons: adjustedCoupons,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo calcular el cashflow");
+    }
+    hdLastCalculation = await response.json();
+    renderHdCashflowTable(hdLastCalculation);
+    setHdStatus("ok", "Cashflow calculado");
+  } catch (error) {
+    setHdStatus("error", error.message || "Error al calcular");
+  }
+}
+
+function renderHdCashflowTable(payload) {
+  const cashflows = (payload && payload.cashflows) || [];
+  if (!cashflows.length) {
+    hdCashflowBody.innerHTML = '<tr><td colspan="10" class="empty-state">Sin cashflow para mostrar</td></tr>';
+    return;
+  }
+  hdCashflowBody.innerHTML = cashflows.map((row) => `
+    <tr>
+      <td>${row.number}</td>
+      <td>${formatDate(row.payment_date)}</td>
+      <td>${formatDate(row.effective_payment_date)}</td>
+      <td class="text-end">${formatNumber(row.amortization_vn_percent, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.residual_vn_percent, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.annual_rate_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.period_rate_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.amortization_per_100, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.interest_per_100, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.total_per_100, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+    </tr>
+  `).join("");
 }
 
 async function fetchLecapMarket() {
@@ -1016,6 +1230,35 @@ hardDollarForm.addEventListener("submit", (event) => event.preventDefault());
 hdIssueDate.addEventListener("change", renderHardDollarCouponInputs);
 hdMaturityDate.addEventListener("change", renderHardDollarCouponInputs);
 hdCouponType.addEventListener("change", renderHardDollarCouponInputs);
+hdBondType.addEventListener("change", () => {
+  renderHardDollarCouponInputs();
+  if (hdBondType.value === "amortizable") {
+    applyAmortizationDefaults();
+  } else {
+    hdCoupons = hdCoupons.map((coupon) => ({ ...coupon, amortization_percent: 0 }));
+  }
+  renderHdCouponsTable();
+});
+hdFixedCoupon.addEventListener("input", refreshHdCouponRates);
+hdGenerateSchedule.addEventListener("click", () => {
+  generateHdSchedule().catch(() => setHdStatus("error", "Error al generar cupones"));
+});
+hdAmortDistribute.addEventListener("click", distributeAmortization);
+hdAmortStart.addEventListener("input", () => {
+  if (hdBondType.value === "amortizable") {
+    applyAmortizationDefaults();
+    renderHdCouponsTable();
+  }
+});
+hdAmortCount.addEventListener("input", () => {
+  if (hdBondType.value === "amortizable") {
+    applyAmortizationDefaults();
+    renderHdCouponsTable();
+  }
+});
+hdCalculate.addEventListener("click", () => {
+  calculateHdCashflow().catch(() => setHdStatus("error", "Error al calcular"));
+});
 saveLecap.addEventListener("click", () => {
   saveLatestLecap().catch(() => {
     setCalculatorStatus("error", "No se pudo guardar");

@@ -367,6 +367,307 @@ def build_lecap_market_row(
     )
 
 
+class BondHdType(StrEnum):
+    BULLET = "bullet"
+    AMORTIZABLE = "amortizable"
+    ZERO_COUPON = "zero_coupon"
+
+
+class BondHdFrequency(StrEnum):
+    ANNUAL = "annual"
+    SEMIANNUAL = "semiannual"
+    QUARTERLY = "quarterly"
+    MONTHLY = "monthly"
+
+
+class BondHdConvention(StrEnum):
+    THIRTY_360_EU = "30_360_eu"
+    THIRTY_360_US = "30_360_us"
+    ACT_360 = "act_360"
+    ACT_365 = "act_365"
+    ACT_ACT = "act_act"
+
+
+HD_FREQUENCY_MONTH_STEP: dict[BondHdFrequency, int] = {
+    BondHdFrequency.ANNUAL: 12,
+    BondHdFrequency.SEMIANNUAL: 6,
+    BondHdFrequency.QUARTERLY: 3,
+    BondHdFrequency.MONTHLY: 1,
+}
+
+HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
+    BondHdFrequency.ANNUAL: 1,
+    BondHdFrequency.SEMIANNUAL: 2,
+    BondHdFrequency.QUARTERLY: 4,
+    BondHdFrequency.MONTHLY: 12,
+}
+
+HD_CONVENTION_LABELS: dict[BondHdConvention, str] = {
+    BondHdConvention.THIRTY_360_EU: "30/360 EU",
+    BondHdConvention.THIRTY_360_US: "30/360 US",
+    BondHdConvention.ACT_360: "Act/360",
+    BondHdConvention.ACT_365: "Act/365",
+    BondHdConvention.ACT_ACT: "Act/Act",
+}
+
+
+@dataclass(frozen=True)
+class BondHdCouponInput:
+    payment_date: date
+    annual_rate_percent: float
+    amortization_percent: float = 0.0
+
+
+@dataclass(frozen=True)
+class BondHdCashflow:
+    number: int
+    payment_date: date
+    effective_payment_date: date
+    period_start: date
+    period_end: date
+    period_days: int
+    year_fraction: float
+    annual_rate_percent: float
+    period_rate_percent: float
+    amortization_vn_percent: float
+    residual_vn_percent: float
+    interest_per_100: float
+    amortization_per_100: float
+    total_per_100: float
+    interest_amount: float
+    amortization_amount: float
+    total_amount: float
+
+    @property
+    def total(self) -> float:
+        return self.amortization_amount + self.interest_amount
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "number": self.number,
+            "payment_date": self.payment_date.isoformat(),
+            "effective_payment_date": self.effective_payment_date.isoformat(),
+            "period_start": self.period_start.isoformat(),
+            "period_end": self.period_end.isoformat(),
+            "period_days": self.period_days,
+            "year_fraction": self.year_fraction,
+            "annual_rate_percent": self.annual_rate_percent,
+            "period_rate_percent": self.period_rate_percent,
+            "amortization_vn_percent": self.amortization_vn_percent,
+            "residual_vn_percent": self.residual_vn_percent,
+            "interest_per_100": self.interest_per_100,
+            "amortization_per_100": self.amortization_per_100,
+            "total_per_100": self.total_per_100,
+            "interest_amount": self.interest_amount,
+            "amortization_amount": self.amortization_amount,
+            "total_amount": self.total_amount,
+        }
+
+
+@dataclass(frozen=True)
+class BondHdCalculation:
+    issue_date: date
+    maturity_date: date
+    face_value: float
+    bond_type: BondHdType
+    frequency: BondHdFrequency
+    convention: BondHdConvention
+    cashflows: tuple[BondHdCashflow, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "issue_date": self.issue_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "face_value": self.face_value,
+            "bond_type": self.bond_type.value,
+            "frequency": self.frequency.value,
+            "convention": self.convention.value,
+            "convention_label": HD_CONVENTION_LABELS[self.convention],
+            "cashflows": [cashflow.to_dict() for cashflow in self.cashflows],
+        }
+
+
+def hd_year_fraction(start: date, end: date, convention: BondHdConvention) -> float:
+    if end < start:
+        return 0.0
+    if convention == BondHdConvention.ACT_360:
+        return (end - start).days / 360
+    if convention == BondHdConvention.ACT_365:
+        return (end - start).days / 365
+    if convention == BondHdConvention.ACT_ACT:
+        return (end - start).days / 365.25
+    if convention == BondHdConvention.THIRTY_360_EU:
+        d1 = min(start.day, 30)
+        d2 = min(end.day, 30)
+        days = (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
+        return days / 360
+    if convention == BondHdConvention.THIRTY_360_US:
+        d1, d2 = start.day, end.day
+        if d1 == 31:
+            d1 = 30
+        if d2 == 31 and d1 >= 30:
+            d2 = 30
+        days = (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
+        return days / 360
+    raise ValueError("Convencion de intereses no soportada.")
+
+
+def hd_period_days(start: date, end: date, convention: BondHdConvention) -> int:
+    if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
+        if convention == BondHdConvention.THIRTY_360_EU:
+            d1 = min(start.day, 30)
+            d2 = min(end.day, 30)
+        else:
+            d1, d2 = start.day, end.day
+            if d1 == 31:
+                d1 = 30
+            if d2 == 31 and d1 >= 30:
+                d2 = 30
+        return (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
+    return (end - start).days
+
+
+def generate_bond_hd_default_dates(
+    issue_date: date,
+    maturity_date: date,
+    frequency: BondHdFrequency,
+) -> list[date]:
+    if maturity_date <= issue_date:
+        return []
+    step = HD_FREQUENCY_MONTH_STEP[frequency]
+    from calendar import monthrange
+
+    dates: list[date] = []
+    cursor_year, cursor_month, cursor_day = issue_date.year, issue_date.month, issue_date.day
+    safety = 0
+    while True:
+        safety += 1
+        if safety > 2400:
+            raise ValueError("Demasiados cupones generados.")
+        cursor_month += step
+        while cursor_month > 12:
+            cursor_month -= 12
+            cursor_year += 1
+        last_day = monthrange(cursor_year, cursor_month)[1]
+        day = min(cursor_day, last_day)
+        candidate = date(cursor_year, cursor_month, day)
+        if candidate >= maturity_date:
+            dates.append(maturity_date)
+            return dates
+        dates.append(candidate)
+
+
+def build_bond_hd_calculation(
+    issue_date: date,
+    maturity_date: date,
+    face_value: float,
+    bond_type: BondHdType,
+    frequency: BondHdFrequency,
+    convention: BondHdConvention,
+    coupons: list[BondHdCouponInput],
+    calendar: BusinessCalendar,
+) -> BondHdCalculation:
+    if maturity_date <= issue_date:
+        raise ValueError("La fecha de vencimiento debe ser posterior a la fecha de emision.")
+    if face_value <= 0:
+        raise ValueError("El VNO debe ser mayor a cero.")
+    if not coupons:
+        raise ValueError("Se requiere al menos un cupon.")
+
+    sorted_coupons = sorted(coupons, key=lambda item: item.payment_date)
+    if sorted_coupons[0].payment_date <= issue_date:
+        raise ValueError("Las fechas de pago deben ser posteriores a la emision.")
+    if sorted_coupons[-1].payment_date != maturity_date:
+        raise ValueError("La ultima fecha de pago debe coincidir con el vencimiento.")
+
+    if bond_type == BondHdType.ZERO_COUPON:
+        if len(sorted_coupons) != 1:
+            raise ValueError("Zero-coupon admite un unico pago al vencimiento.")
+        sorted_coupons = [
+            BondHdCouponInput(
+                payment_date=sorted_coupons[0].payment_date,
+                annual_rate_percent=0.0,
+                amortization_percent=100.0,
+            )
+        ]
+    elif bond_type == BondHdType.BULLET:
+        sorted_coupons = [
+            BondHdCouponInput(
+                payment_date=item.payment_date,
+                annual_rate_percent=item.annual_rate_percent,
+                amortization_percent=(100.0 if index == len(sorted_coupons) - 1 else 0.0),
+            )
+            for index, item in enumerate(sorted_coupons)
+        ]
+    else:
+        total_amort = sum(item.amortization_percent for item in sorted_coupons)
+        if abs(total_amort - 100.0) > 0.01:
+            raise ValueError(
+                f"Las amortizaciones deben sumar 100% (suma actual: {total_amort:.4f}%)."
+            )
+
+    cashflows: list[BondHdCashflow] = []
+    period_start_eff = calendar.next_business_day(issue_date, include_current=True)
+    residual_vn_percent = 100.0
+
+    for index, coupon in enumerate(sorted_coupons, start=1):
+        payment_date = coupon.payment_date
+        effective_payment_date = calendar.next_business_day(payment_date, include_current=True)
+        period_end_eff = effective_payment_date
+        period_days = hd_period_days(period_start_eff, period_end_eff, convention)
+        yf = hd_year_fraction(period_start_eff, period_end_eff, convention)
+
+        if bond_type == BondHdType.ZERO_COUPON:
+            annual_rate = 0.0
+            period_rate = 0.0
+            interest_per_100 = 0.0
+            amort_per_100 = 100.0
+        else:
+            annual_rate = coupon.annual_rate_percent
+            period_rate = annual_rate * yf
+            interest_per_100 = period_rate * residual_vn_percent / 100.0
+            amort_per_100 = coupon.amortization_percent
+
+        residual_after = residual_vn_percent - amort_per_100
+        if residual_after < -0.01:
+            raise ValueError("La amortizacion del periodo supera el VN remanente.")
+
+        cashflows.append(
+            BondHdCashflow(
+                number=index,
+                payment_date=payment_date,
+                effective_payment_date=effective_payment_date,
+                period_start=period_start_eff,
+                period_end=period_end_eff,
+                period_days=period_days,
+                year_fraction=yf,
+                annual_rate_percent=annual_rate,
+                period_rate_percent=period_rate,
+                amortization_vn_percent=amort_per_100,
+                residual_vn_percent=residual_vn_percent,
+                interest_per_100=interest_per_100,
+                amortization_per_100=amort_per_100,
+                total_per_100=interest_per_100 + amort_per_100,
+                interest_amount=interest_per_100 * face_value / 100.0,
+                amortization_amount=amort_per_100 * face_value / 100.0,
+                total_amount=(interest_per_100 + amort_per_100) * face_value / 100.0,
+            )
+        )
+
+        residual_vn_percent = max(residual_after, 0.0)
+        period_start_eff = period_end_eff
+
+    return BondHdCalculation(
+        issue_date=issue_date,
+        maturity_date=maturity_date,
+        face_value=face_value,
+        bond_type=bond_type,
+        frequency=frequency,
+        convention=convention,
+        cashflows=tuple(cashflows),
+    )
+
+
 def _build_lecap_metrics(
     settlement_type: str,
     settlement_date: date,

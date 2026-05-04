@@ -24,11 +24,18 @@ from backend.ai_tools import (
 )
 from backend.bcra_client import BCRA_SERIES, BcraClient
 from backend.bond_calculators import (
+    HD_CONVENTION_LABELS,
     LECAP_TICKERS,
+    BondHdConvention,
+    BondHdCouponInput,
+    BondHdFrequency,
+    BondHdType,
     BondModelType,
     build_bond_draft,
+    build_bond_hd_calculation,
     build_lecap_calculation,
     build_lecap_market_row,
+    generate_bond_hd_default_dates,
 )
 from backend.bonds import BOND_TICKERS
 from backend.config import get_settings
@@ -67,6 +74,28 @@ class LecapCalculationRequest(BaseModel):
     maturity_date: date
     face_value: float = Field(gt=0)
     tem_emission_percent: float
+
+
+class BondHdCouponPayload(BaseModel):
+    payment_date: date
+    annual_rate_percent: float = 0.0
+    amortization_percent: float = 0.0
+
+
+class BondHdCalculationRequest(BaseModel):
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
+    bond_type: str = Field(pattern="^(bullet|amortizable|zero_coupon)$")
+    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
+    convention: str = Field(pattern="^(30_360_eu|30_360_us|act_360|act_365|act_act)$")
+    coupons: list[BondHdCouponPayload] = Field(min_length=1)
+
+
+class BondHdScheduleRequest(BaseModel):
+    issue_date: date
+    maturity_date: date
+    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
 
 
 class TPlusConversionRequest(BaseModel):
@@ -477,6 +506,70 @@ async def calculator_delete_lecap(item_id: int) -> dict:
     if not storage.delete_lecap(item_id):
         raise HTTPException(status_code=404, detail="LECAP no encontrada.")
     return {"deleted": True}
+
+
+@app.get("/api/calculators/bond-hd/conventions")
+async def calculator_bond_hd_conventions() -> dict:
+    return {
+        "conventions": [
+            {"key": value.value, "label": HD_CONVENTION_LABELS[value]}
+            for value in BondHdConvention
+        ],
+        "frequencies": [
+            {"key": "annual", "label": "Anual", "periods_per_year": 1},
+            {"key": "semiannual", "label": "Semestral", "periods_per_year": 2},
+            {"key": "quarterly", "label": "Trimestral", "periods_per_year": 4},
+            {"key": "monthly", "label": "Mensual", "periods_per_year": 12},
+        ],
+        "bond_types": [
+            {"key": "bullet", "label": "Bullet"},
+            {"key": "amortizable", "label": "Amortizable"},
+            {"key": "zero_coupon", "label": "Zero-coupon"},
+        ],
+    }
+
+
+@app.post("/api/calculators/bond-hd/schedule")
+async def calculator_bond_hd_schedule(payload: BondHdScheduleRequest) -> dict:
+    try:
+        dates = generate_bond_hd_default_dates(
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            frequency=BondHdFrequency(payload.frequency),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "issue_date": payload.issue_date.isoformat(),
+        "maturity_date": payload.maturity_date.isoformat(),
+        "frequency": payload.frequency,
+        "payment_dates": [item.isoformat() for item in dates],
+    }
+
+
+@app.post("/api/calculators/bond-hd")
+async def calculator_bond_hd(payload: BondHdCalculationRequest) -> dict:
+    try:
+        calculation = build_bond_hd_calculation(
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            bond_type=BondHdType(payload.bond_type),
+            frequency=BondHdFrequency(payload.frequency),
+            convention=BondHdConvention(payload.convention),
+            coupons=[
+                BondHdCouponInput(
+                    payment_date=coupon.payment_date,
+                    annual_rate_percent=coupon.annual_rate_percent,
+                    amortization_percent=coupon.amortization_percent,
+                )
+                for coupon in payload.coupons
+            ],
+            calendar=market_calendar,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return calculation.to_dict()
 
 
 @app.get("/api/calculators/cashflows")
