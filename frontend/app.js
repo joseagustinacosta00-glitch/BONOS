@@ -696,6 +696,62 @@ function formatDateDisplay(value) {
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
+function parseDdmmYyyy(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim().replace(/-/g, "/");
+  const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1900) return null;
+  const probe = new Date(year, month - 1, day);
+  if (probe.getFullYear() !== year || probe.getMonth() !== month - 1 || probe.getDate() !== day) {
+    return null;
+  }
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  return `${year}-${mm}-${dd}`;
+}
+
+function isoToDdmmYyyy(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+function attachDdmmAutoformat(input) {
+  if (!input) return;
+  input.addEventListener("input", (event) => {
+    const target = event.target;
+    const digits = target.value.replace(/\D/g, "").slice(0, 8);
+    let formatted = digits;
+    if (digits.length > 4) {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+    } else if (digits.length > 2) {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    }
+    if (target.value !== formatted) {
+      target.value = formatted;
+    }
+  });
+  input.addEventListener("blur", (event) => {
+    const iso = parseDdmmYyyy(event.target.value);
+    if (iso) {
+      event.target.value = isoToDdmmYyyy(iso);
+      event.target.classList.remove("is-invalid");
+    } else if (event.target.value.trim() !== "") {
+      event.target.classList.add("is-invalid");
+    } else {
+      event.target.classList.remove("is-invalid");
+    }
+  });
+}
+
+function getHdIssueIso() { return parseDdmmYyyy(hdIssueDate?.value); }
+function getHdMaturityIso() { return parseDdmmYyyy(hdMaturityDate?.value); }
+
 function renderHardDollarCouponInputs() {
   const isStepUp = hdCouponType.value === "step_up";
   hdFixedCouponWrap.classList.toggle("d-none", isStepUp);
@@ -725,9 +781,11 @@ function renderHardDollarCouponInputs() {
 }
 
 function hardDollarYearLabels() {
-  if (!hdIssueDate.value || !hdMaturityDate.value) return [];
-  const start = new Date(`${hdIssueDate.value}T00:00:00`);
-  const end = new Date(`${hdMaturityDate.value}T00:00:00`);
+  const issueIso = getHdIssueIso();
+  const maturityIso = getHdMaturityIso();
+  if (!issueIso || !maturityIso) return [];
+  const start = new Date(`${issueIso}T00:00:00`);
+  const end = new Date(`${maturityIso}T00:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return [];
 
   const labels = [];
@@ -759,8 +817,10 @@ function refreshHdCouponRates() {
 }
 
 async function generateHdSchedule() {
-  if (!hdIssueDate.value || !hdMaturityDate.value) {
-    setHdStatus("error", "Completa fechas de emision y vencimiento");
+  const issueIso = getHdIssueIso();
+  const maturityIso = getHdMaturityIso();
+  if (!issueIso || !maturityIso) {
+    setHdStatus("error", "Completa emision y vencimiento como DD/MM/AAAA");
     return;
   }
   setHdStatus("draft", "Generando cupones...");
@@ -769,8 +829,8 @@ async function generateHdSchedule() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        issue_date: hdIssueDate.value,
-        maturity_date: hdMaturityDate.value,
+        issue_date: issueIso,
+        maturity_date: maturityIso,
         frequency: hdFrequency.value,
       }),
     });
@@ -828,10 +888,7 @@ function renderHdCouponsTable() {
     <tr>
       <td>${index + 1}</td>
       <td>
-        <div class="hd-date-cell">
-          <input type="date" lang="es-AR" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${coupon.payment_date}">
-          <small class="hd-date-display" data-hd-coupon-display="${index}">${formatDateDisplay(coupon.payment_date)}</small>
-        </div>
+        <input type="text" inputmode="numeric" maxlength="10" placeholder="DD/MM/AAAA" autocomplete="off" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${formatDateDisplay(coupon.payment_date)}">
       </td>
       <td class="text-end">
         <input type="number" step="0.0001" class="form-control form-control-sm text-end" data-hd-coupon-rate="${index}" value="${coupon.annual_rate_percent}">
@@ -843,12 +900,18 @@ function renderHdCouponsTable() {
   `).join("");
 
   hdCouponsBody.querySelectorAll("input[data-hd-coupon-date]").forEach((input) => {
-    input.addEventListener("change", (event) => {
+    attachDdmmAutoformat(input);
+    input.addEventListener("blur", (event) => {
       const idx = parseInt(event.target.dataset.hdCouponDate, 10);
-      hdCoupons[idx].payment_date = event.target.value;
-      hdCoupons[idx].annual_rate_percent = getHdAnnualRateForYear(event.target.value.slice(0, 4));
-      const displayCell = hdCouponsBody.querySelector(`[data-hd-coupon-display="${idx}"]`);
-      if (displayCell) displayCell.textContent = formatDateDisplay(event.target.value);
+      const iso = parseDdmmYyyy(event.target.value);
+      if (!iso) {
+        if (event.target.value.trim() === "") {
+          hdCoupons[idx].payment_date = "";
+        }
+        return;
+      }
+      hdCoupons[idx].payment_date = iso;
+      hdCoupons[idx].annual_rate_percent = getHdAnnualRateForYear(iso.slice(0, 4));
     });
   });
   hdCouponsBody.querySelectorAll("input[data-hd-coupon-rate]").forEach((input) => {
@@ -870,14 +933,16 @@ async function calculateHdCashflow() {
     setHdStatus("error", "Generar la tabla de cupones primero");
     return;
   }
-  if (!hdIssueDate.value || !hdMaturityDate.value || !hdFaceValue.value) {
-    setHdStatus("error", "Completa emision, vencimiento y VNO");
+  const issueIso = getHdIssueIso();
+  const maturityIso = getHdMaturityIso();
+  if (!issueIso || !maturityIso || !hdFaceValue.value) {
+    setHdStatus("error", "Completa emision (DD/MM/AAAA), vencimiento (DD/MM/AAAA) y VNO");
     return;
   }
   setHdStatus("draft", "Calculando...");
   const lastIndex = hdCoupons.length - 1;
   const adjustedCoupons = hdCoupons.map((coupon, index) => ({
-    payment_date: index === lastIndex ? hdMaturityDate.value : coupon.payment_date,
+    payment_date: index === lastIndex ? maturityIso : coupon.payment_date,
     annual_rate_percent: coupon.annual_rate_percent,
     amortization_percent: coupon.amortization_percent,
   }));
@@ -886,8 +951,8 @@ async function calculateHdCashflow() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        issue_date: hdIssueDate.value,
-        maturity_date: hdMaturityDate.value,
+        issue_date: issueIso,
+        maturity_date: maturityIso,
         face_value: parseFloat(hdFaceValue.value),
         bond_type: hdBondType.value,
         frequency: hdFrequency.value,
@@ -1244,8 +1309,10 @@ bondDraftForm.addEventListener("submit", submitBondDraft);
 historicalForm.addEventListener("submit", saveHistoricalData);
 historicalUploadForm.addEventListener("submit", uploadHistoricalData);
 hardDollarForm?.addEventListener("submit", (event) => event.preventDefault());
-hdIssueDate?.addEventListener("change", renderHardDollarCouponInputs);
-hdMaturityDate?.addEventListener("change", renderHardDollarCouponInputs);
+attachDdmmAutoformat(hdIssueDate);
+attachDdmmAutoformat(hdMaturityDate);
+hdIssueDate?.addEventListener("blur", renderHardDollarCouponInputs);
+hdMaturityDate?.addEventListener("blur", renderHardDollarCouponInputs);
 hdCouponType?.addEventListener("change", renderHardDollarCouponInputs);
 hdBondType?.addEventListener("change", () => {
   renderHardDollarCouponInputs();
