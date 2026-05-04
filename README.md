@@ -196,6 +196,60 @@ Series iniciales:
 
 El cliente esta en `backend/bcra_client.py`, pagina hasta 3000 registros por request y guarda cache en memoria por `BCRA_CACHE_TTL_SECONDS`.
 
+## Checklist Render: que todo persista
+
+Si la app corre en Render, hay tres componentes separados que cada uno necesita su propia configuracion. Sin esto, los datos se pierden en cada redeploy. Verificar uno por uno:
+
+### Checklist (5 minutos)
+
+1. **Disco persistente para SQLite** (LECAPs, Bonos HD, series historicas, notas IA, backups)
+   - Render Dashboard -> servicio web -> Disks -> Add Disk
+   - Mount path: `/var/data`, size: 1 GB (~$0.25/mes)
+   - Environment -> `APP_DB_PATH=/var/data/user_data.db`
+   - Re-deploy
+
+2. **Postgres para market history** (ticks intradia + resumen diario VWAP)
+   - Render Dashboard -> New + -> PostgreSQL -> free tier
+   - Copiar el "Internal Database URL"
+   - Environment del servicio web -> `DATABASE_URL=<el connection string>`
+   - Re-deploy
+
+3. **Plan Starter** (la app no se duerme)
+   - Render plan Free duerme la app a los 15 min sin trafico = scheduler para de grabar.
+   - Para market history continuo durante 10:30-17:00 ART -> plan Starter (~$7/mes).
+
+### Verificacion despues del deploy
+
+Abrir la app y ir a `Datos historicos`: arriba aparece el panel **Estado del sistema** con 4 cards:
+
+- **SQLite**: tiene que decir "Disco persistente: Si" y "Escribible: Si". Si dice "No", el disco no esta montado.
+- **Backups**: cantidad > 0 despues del primer arranque.
+- **Market history (Postgres)**: "Configurado: Si", "Conectado: Si", "Scheduler: running" (o "outside_market_hours" si estas fuera de 10:30-17:00).
+- **Entorno**: confirma `market_source`, horarios y dia habil.
+
+Si ves "Avisos" en amarillo abajo, listan exactamente que falta configurar.
+
+Tambien podes consultar directo el endpoint:
+```
+GET https://tu-app.onrender.com/api/system/health
+GET https://tu-app.onrender.com/api/system/disk-check
+```
+
+### Que se guarda donde
+
+| Cosa | Donde vive | Que la borra |
+|---|---|---|
+| LECAPs guardadas | SQLite (`bond_lecaps`) | Sin disco persistente: cada redeploy |
+| Bonos HD calculados | SQLite (`bond_hd_calculations`) | Idem |
+| Series historicas (paridad, TIR, etc.) | SQLite (`historical_data`) | Idem |
+| Cashflows guardados | SQLite (`calculator_cashflows`) | Idem |
+| Notas IA | SQLite (`ai_memory_notes`) | Idem |
+| Backups automaticos | `data/backups/` (mismo disco que SQLite) | Idem |
+| Ticks intradia (1s/5s) | Postgres (`market_ticks`) | Sin DATABASE_URL: no se guardan |
+| Resumen diario VWAP | Postgres (`daily_summary`) | Idem |
+
+Con disco persistente + DATABASE_URL + plan Starter, **nada se pierde nunca** salvo que vos borres explicitamente.
+
 ## Como NO perder los datos cargados (politica de backups)
 
 Los datos del usuario (LECAPs guardadas, Bonos HD calculados, series historicas, notas IA) viven en SQLite, en `APP_DB_PATH` (default `data/user_data.db`). Esa base esta fuera del repo (`.gitignore` la cubre). Capas de defensa para que no se pierdan:

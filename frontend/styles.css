@@ -669,6 +669,90 @@ tbody td {
   }
 }
 
+.system-status-block {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.system-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.system-status-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.status-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafbfc;
+}
+
+.status-card h4 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-card .status-meta {
+  margin: 2px 0;
+  font-size: 0.82rem;
+  color: #1f2937;
+}
+
+.status-card .status-meta code {
+  background: #e5e7eb;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+
+.status-card table {
+  font-size: 0.8rem;
+}
+
+.status-dot-mini {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-warnings {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+}
+
+.status-warnings h4 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  color: #92400e;
+}
+
+.status-warnings ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  color: #78350f;
+}
+
 .hd-cashflow-table th {
   vertical-align: middle;
   white-space: nowrap;

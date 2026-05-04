@@ -736,6 +736,69 @@ class CalculatorStorage:
             })
         return items
 
+    def get_db_info(self) -> dict:
+        """Resumen del estado fisico de la base SQLite."""
+        info: dict[str, object] = {
+            "path": str(self.db_path),
+            "absolute_path": str(self.db_path.resolve()) if self.db_path.exists() else None,
+            "exists": self.db_path.exists(),
+            "size_bytes": 0,
+            "writable": False,
+        }
+        if self.db_path.exists():
+            try:
+                info["size_bytes"] = self.db_path.stat().st_size
+            except OSError:
+                pass
+        try:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            test_path = self.db_path.parent / ".write_test"
+            test_path.write_text("ok")
+            test_path.unlink()
+            info["writable"] = True
+        except OSError as exc:
+            info["writable"] = False
+            info["write_error"] = str(exc)
+        info["tables"] = self.get_table_counts()
+        backups_dir = self.db_path.parent / "backups"
+        backup_count = 0
+        backup_total_size = 0
+        latest_backup = None
+        if backups_dir.exists():
+            for path in sorted(backups_dir.glob("*.db")):
+                try:
+                    backup_count += 1
+                    backup_total_size += path.stat().st_size
+                    latest_backup = path.name
+                except OSError:
+                    continue
+        info["backups"] = {
+            "count": backup_count,
+            "total_size_bytes": backup_total_size,
+            "latest": latest_backup,
+            "directory": str(backups_dir),
+        }
+        return info
+
+    def get_table_counts(self) -> dict[str, int]:
+        if not self.db_path.exists():
+            return {}
+        counts: dict[str, int] = {}
+        with closing(self._connect()) as connection:
+            for table in (
+                "lecap_calculators",
+                "calculator_cashflows",
+                "historical_data",
+                "bond_hd_calculations",
+                "ai_memory_notes",
+            ):
+                try:
+                    row = connection.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()
+                    counts[table] = int(row["c"])
+                except sqlite3.Error:
+                    counts[table] = -1
+        return counts
+
     def export_all_json(self) -> dict:
         """Exporta TODAS las tablas relevantes a un dict JSON-serializable.
         Util como backup portable independiente del binario SQLite."""

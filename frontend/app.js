@@ -1939,3 +1939,108 @@ backupRestore?.addEventListener("click", async () => {
 });
 
 if (backupList) refreshBackupList();
+
+// ===== Estado del sistema =====
+const systemStatusBody = document.querySelector("#systemStatusBody");
+const systemStatusRefresh = document.querySelector("#systemStatusRefresh");
+
+function formatBytes(n) {
+  if (!n || n < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
+}
+
+function dot(kind) {
+  const colors = { ok: "#15803d", warn: "#f59e0b", err: "#b91c1c" };
+  return `<span class="status-dot-mini" style="background:${colors[kind] || "#94a3b8"}"></span>`;
+}
+
+async function refreshSystemStatus() {
+  if (!systemStatusBody) return;
+  systemStatusBody.innerHTML = '<span class="empty-cell">Cargando...</span>';
+  try {
+    const response = await fetch("/api/system/health");
+    if (!response.ok) throw new Error("No se pudo leer estado");
+    const payload = await response.json();
+    renderSystemStatus(payload);
+  } catch (error) {
+    systemStatusBody.innerHTML = `<span class="empty-cell">No se pudo leer estado: ${error.message}</span>`;
+  }
+}
+
+function renderSystemStatus(p) {
+  const sqlite = p.sqlite || {};
+  const tables = sqlite.tables || {};
+  const backups = sqlite.backups || {};
+  const market = p.market_history || {};
+  const env = p.environment || {};
+  const warnings = p.warnings || [];
+
+  const sqliteOk = sqlite.exists && sqlite.writable;
+  const persistentOk = sqlite.is_persistent_path;
+  const marketOk = market.connected;
+  const marketScheduler = market.scheduler_status || "—";
+
+  const tableRows = Object.keys(tables).map((name) => {
+    const count = tables[name];
+    const formatted = count >= 0 ? count.toLocaleString("es-AR") : "error";
+    return `<tr><td>${name}</td><td class="text-end">${formatted}</td></tr>`;
+  }).join("");
+
+  systemStatusBody.innerHTML = `
+    <div class="status-grid">
+      <div class="status-card">
+        <h4>${dot(sqliteOk ? "ok" : "err")}SQLite</h4>
+        <p class="status-meta"><strong>Path:</strong> <code>${sqlite.path || "—"}</code></p>
+        <p class="status-meta"><strong>Tamaño:</strong> ${formatBytes(sqlite.size_bytes)}</p>
+        <p class="status-meta"><strong>Escribible:</strong> ${sqlite.writable ? "✓ Si" : "✗ No"}</p>
+        <p class="status-meta"><strong>Disco persistente:</strong> ${dot(persistentOk ? "ok" : "warn")}${persistentOk ? "Si (path /var/data o similar)" : "No detectado — config Render disco persistente"}</p>
+        <table class="table table-sm mb-0 mt-2">
+          <thead><tr><th>Tabla</th><th class="text-end">Filas</th></tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+
+      <div class="status-card">
+        <h4>${dot(backups.count > 0 ? "ok" : "warn")}Backups</h4>
+        <p class="status-meta"><strong>Cantidad:</strong> ${backups.count || 0}</p>
+        <p class="status-meta"><strong>Total:</strong> ${formatBytes(backups.total_size_bytes)}</p>
+        <p class="status-meta"><strong>Ultimo:</strong> ${backups.latest || "—"}</p>
+        <p class="status-meta"><strong>Directorio:</strong> <code>${backups.directory || "—"}</code></p>
+      </div>
+
+      <div class="status-card">
+        <h4>${dot(marketOk ? "ok" : (market.configured ? "warn" : "err"))}Market history (Postgres)</h4>
+        <p class="status-meta"><strong>Configurado:</strong> ${market.configured ? "✓ Si" : "✗ No (DATABASE_URL ausente)"}</p>
+        <p class="status-meta"><strong>Conectado:</strong> ${marketOk ? "✓ Si" : "✗ No"}</p>
+        <p class="status-meta"><strong>Scheduler:</strong> ${marketScheduler}</p>
+        <p class="status-meta"><strong>Instrumentos activos:</strong> ${market.active_instruments ?? "—"}</p>
+        <p class="status-meta"><strong>Ticks hoy:</strong> ${(market.ticks_today ?? 0).toLocaleString("es-AR")}</p>
+        <p class="status-meta"><strong>Ultimo tick:</strong> ${market.last_tick_ts || "—"}</p>
+        <p class="status-meta"><strong>Ultimo daily summary:</strong> ${market.last_summary_date || "—"}</p>
+      </div>
+
+      <div class="status-card">
+        <h4>${dot("ok")}Entorno</h4>
+        <p class="status-meta"><strong>Market source:</strong> ${env.market_source}</p>
+        <p class="status-meta"><strong>pyRofex env:</strong> ${env.rofex_environment} ${env.rofex_user_set ? "(credenciales OK)" : "(sin credenciales)"}</p>
+        <p class="status-meta"><strong>Horario:</strong> ${env.market_open_local} → ${env.market_close_local}</p>
+        <p class="status-meta"><strong>Hoy es habil:</strong> ${env.is_business_day ? "Si" : "No"}</p>
+        <p class="status-meta"><strong>Ahora:</strong> ${env.now_argentina}</p>
+      </div>
+    </div>
+
+    ${warnings.length ? `
+      <div class="status-warnings">
+        <h4>Avisos</h4>
+        <ul>${warnings.map((w) => `<li>${w}</li>`).join("")}</ul>
+      </div>
+    ` : ""}
+  `;
+}
+
+systemStatusRefresh?.addEventListener("click", () => refreshSystemStatus());
+if (systemStatusBody) refreshSystemStatus();

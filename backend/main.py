@@ -1108,6 +1108,77 @@ async def assistant_message(payload: AssistantMessageRequest) -> dict:
     )
 
 
+@app.get("/api/system/health")
+async def system_health() -> dict:
+    """Diagnostico completo: SQLite, backups, market history, entorno."""
+    db_info = storage.get_db_info()
+    db_path_str = str(db_info.get("absolute_path") or db_info.get("path") or "")
+    is_persistent = db_path_str.startswith(("/var/data", "/data", "/mnt/")) or "/var/" in db_path_str
+    db_info["is_persistent_path"] = is_persistent
+
+    market_history_info = await market_history_storage.health()
+    market_history_info["scheduler_status"] = market_scheduler.status
+
+    environment = {
+        "market_source": settings.market_source,
+        "rofex_environment": settings.rofex_environment,
+        "rofex_user_set": bool(settings.rofex_user),
+        "app_db_path": settings.app_db_path,
+        "market_history_enabled": settings.market_history_enabled,
+        "market_history_database_url_set": bool(settings.market_history_database_url),
+        "market_open_local": settings.market_open_local,
+        "market_close_local": settings.market_close_local,
+        "now_argentina": now_argentina_iso(),
+        "is_business_day": market_calendar.is_business_day(now_argentina().date()),
+    }
+
+    warnings: list[str] = []
+    if not is_persistent:
+        warnings.append(
+            "APP_DB_PATH no apunta a un disco persistente. "
+            "En Render configurar disco en /var/data y APP_DB_PATH=/var/data/user_data.db."
+        )
+    if not db_info.get("writable"):
+        warnings.append("La base SQLite no es escribible.")
+    if settings.market_history_enabled and not settings.market_history_database_url:
+        warnings.append(
+            "Pipeline de market history activo pero falta DATABASE_URL. "
+            "Sin Postgres no se persisten ticks."
+        )
+    if db_info.get("backups", {}).get("count", 0) == 0:
+        warnings.append("No hay backups todavia. Apreta 'Crear backup en el server' al menos una vez.")
+
+    return {
+        "sqlite": db_info,
+        "market_history": market_history_info,
+        "environment": environment,
+        "warnings": warnings,
+    }
+
+
+@app.get("/api/system/disk-check")
+async def system_disk_check() -> dict:
+    """Verifica que el filesystem donde vive la base sea escribible y persistente."""
+    from datetime import datetime
+    target = ROOT_DIR / settings.app_db_path
+    parent = target.parent
+    result = {
+        "path_under_test": str(parent),
+        "writable": False,
+        "test_file": None,
+    }
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        marker = parent / f"_persistence_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        marker.write_text("ok")
+        result["writable"] = True
+        result["test_file"] = marker.name
+        marker.unlink()
+    except OSError as exc:
+        result["error"] = str(exc)
+    return result
+
+
 @app.get("/api/data/backup/download")
 async def data_backup_download() -> FileResponse:
     """Descarga la base SQLite completa como backup binario."""
