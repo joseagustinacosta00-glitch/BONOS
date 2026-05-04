@@ -350,6 +350,17 @@ tbody td {
   font-size: 0.75rem;
 }
 
+.hd-derived {
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+
+.hd-help {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0 0 8px;
+}
+
 .calc-status[data-kind="error"] {
   color: #b91c1c;
   font-weight: 600;
