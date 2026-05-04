@@ -1757,14 +1757,6 @@ document.querySelectorAll("[data-market-category]").forEach((button) => {
       candidate.classList.toggle("btn-dark", active);
       candidate.classList.toggle("btn-outline-dark", !active);
     });
-    if (currentMarketList === "lecaps") {
-      // Si elige una categoria distinta de tasa_fija/general, volvemos a la lista de bonos
-      if (!["general", "tasa_fija"].includes(currentMarketCategory)) {
-        const bondsBtn = document.querySelector('[data-market-list="bonds"]');
-        if (bondsBtn) bondsBtn.click();
-        return;
-      }
-    }
     renderQuotes();
   });
 });
@@ -1779,11 +1771,7 @@ document.querySelectorAll("[data-market-settlement]").forEach((button) => {
       candidate.classList.toggle("btn-dark", active);
       candidate.classList.toggle("btn-outline-dark", !active);
     });
-    if (currentMarketList === "lecaps") {
-      fetchLecapMarket();
-    } else {
-      renderQuotes();
-    }
+    renderQuotes();
   });
 });
 
