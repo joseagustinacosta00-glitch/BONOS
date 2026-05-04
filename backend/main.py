@@ -678,6 +678,27 @@ _SPANISH_MONTH_PATTERN = re.compile(
     r"(\d{1,2})\s*(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s*(?:de|del)?\s*(\d{4}))?",
     re.IGNORECASE,
 )
+# Patron permisivo: dia + palabra arbitraria (validamos despues con fuzzy
+# match contra los meses para tolerar OCR malo: "iulio" -> "julio", etc.).
+_DAY_WORD_PATTERN = re.compile(
+    r"(\d{1,2})\s*(?:de\s+)?([A-Za-zÀ-ſ]{3,15})(?:\s*(?:de|del)?\s*(\d{4}))?",
+    re.IGNORECASE,
+)
+
+
+def _fuzzy_month_match(word: str) -> int | None:
+    """Devuelve el numero de mes si la palabra se parece a un mes (tolerante a
+    errores de OCR / hyphenation). None si no hay match razonable."""
+    word_l = word.lower().strip()
+    if word_l in SPANISH_MONTHS:
+        return SPANISH_MONTHS[word_l]
+    # difflib distance: aceptar matches con ratio >= 0.75 (tolera 1-2 errores
+    # en palabras de 5-10 letras)
+    import difflib
+    candidates = difflib.get_close_matches(word_l, SPANISH_MONTHS.keys(), n=1, cutoff=0.75)
+    if candidates:
+        return SPANISH_MONTHS[candidates[0]]
+    return None
 _TODOS_DE_PATTERN = re.compile(r"todos?\s*(?:de|del)\s*(\d{4})", re.IGNORECASE)
 _BROKEN_TODOS_PATTERN = re.compile(r"to[\s\-‐–\.]+dos?", re.IGNORECASE)
 _HYPHEN_LINEBREAK_PATTERN = re.compile(r"[-‐–]\s*\n\s*")
@@ -804,6 +825,10 @@ def _extract_dates_from_text(
         return []
     cleaned = _HYPHEN_LINEBREAK_PATTERN.sub("", text)
     cleaned = _BROKEN_TODOS_PATTERN.sub("todos", cleaned)
+    # Tambien unir guiones intra-palabra (caso "ju-lio" sin newline cuando el
+    # PDF pega rara): letra-letra (sin espacios) -> letraletra. Seguro en
+    # contexto financiero donde los meses no llevan guion.
+    cleaned = re.sub(r"([A-Za-zÀ-ſ])-([A-Za-zÀ-ſ])", r"\1\2", cleaned)
     normalized = re.sub(r"\s+", " ", cleaned)
     found: set[date] = set()
     # Patrones recurrentes (solo si tenemos rango)
@@ -824,6 +849,27 @@ def _extract_dates_from_text(
         try:
             found.add(date(year, SPANISH_MONTHS[month_name], day))
         except (ValueError, KeyError):
+            continue
+
+    # Pasada complementaria con fuzzy match para tolerar OCR malo
+    # (ej: "iulio" / "ju lio" / "juloo" -> julio). Solo agrega fechas nuevas
+    # que no haya capturado el regex estricto.
+    for match in _DAY_WORD_PATTERN.finditer(normalized):
+        day = int(match.group(1))
+        word = match.group(2)
+        explicit_year = match.group(3)
+        month = _fuzzy_month_match(word)
+        if month is None:
+            continue
+        if explicit_year:
+            year = int(explicit_year)
+        else:
+            year = next((y for pos, y in todos_markers if pos > match.start()), None)
+            if year is None:
+                continue
+        try:
+            found.add(date(year, month, day))
+        except ValueError:
             continue
 
     for match in _ISO_DATE_PATTERN.finditer(normalized):
