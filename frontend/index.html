@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=hd14">
+    <link rel="stylesheet" href="/static/styles.css?v=hd15">
   </head>
   <body>
     <main class="app-shell">
@@ -48,6 +48,15 @@
       </nav>
 
       <section id="marketView" class="view-panel active">
+        <nav id="marketCategoryTabs" class="market-category-tabs" aria-label="Categoria">
+          <button class="btn btn-sm btn-dark active" data-market-category="general" type="button">General</button>
+          <button class="btn btn-sm btn-outline-dark" data-market-category="hard_dollar" type="button">Hard Dollar</button>
+          <button class="btn btn-sm btn-outline-dark" data-market-category="tasa_fija" type="button">Tasa Fija</button>
+          <button class="btn btn-sm btn-outline-dark" data-market-category="cer" type="button">CER</button>
+          <button class="btn btn-sm btn-outline-dark" data-market-category="tamar" type="button">TAMAR</button>
+          <button class="btn btn-sm btn-outline-dark" data-market-category="dual" type="button">Duales</button>
+        </nav>
+
         <section class="toolbar" aria-label="Filtros">
           <div class="market-controls">
             <div class="btn-group" role="group" aria-label="Lista de mercado">
@@ -60,9 +69,9 @@
               <button class="btn btn-sm btn-outline-dark" data-currency="USD" type="button">USD</button>
               <button class="btn btn-sm btn-outline-dark" data-currency="Cable" type="button">Cable</button>
             </div>
-            <div id="lecapSettlementFilter" class="btn-group settlement-filter" role="group" aria-label="Settlement LECAP">
-              <button class="btn btn-sm btn-dark active" data-lecap-settlement="t1" type="button">T+1</button>
-              <button class="btn btn-sm btn-outline-dark" data-lecap-settlement="t0" type="button">T+0</button>
+            <div id="marketSettlementFilter" class="btn-group settlement-filter" role="group" aria-label="Liquidacion">
+              <button class="btn btn-sm btn-dark active" data-market-settlement="t1" type="button">T+1</button>
+              <button class="btn btn-sm btn-outline-dark" data-market-settlement="t0" type="button">T+0</button>
             </div>
           </div>
           <input id="searchInput" class="form-control form-control-sm" type="search" placeholder="Filtrar ticker">
@@ -843,6 +852,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=hd14"></script>
+    <script src="/static/app.js?v=hd15"></script>
   </body>
 </html>

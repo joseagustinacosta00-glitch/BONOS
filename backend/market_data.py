@@ -136,6 +136,7 @@ class MarketDataService:
                     "provider_symbol": self._rofex_symbol(ticker.symbol),
                     "family": ticker.family,
                     "currency": ticker.currency,
+                    "category": str(ticker.category),
                     "law": ticker.law,
                     "last": None,
                     "last_volume": None,
@@ -190,11 +191,12 @@ class MarketDataService:
             now = now_argentina_iso()
             with self._lock:
                 for ticker in BOND_TICKERS:
-                    base = base_prices.get(ticker.family, 65.0)
-                    if ticker.currency == "ARS":
-                        base *= 1180
-                    elif ticker.currency == "Cable":
-                        base *= 0.998
+                    base = base_prices.get(ticker.family, 95.0)
+                    if str(ticker.category) == "hard_dollar":
+                        if ticker.currency == "ARS":
+                            base *= 1180
+                        elif ticker.currency == "Cable":
+                            base *= 0.998
 
                     move = random.uniform(-0.35, 0.35)
                     last = max(base + move, 0.01)

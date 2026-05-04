@@ -131,11 +131,16 @@ h1 {
 }
 
 .settlement-filter {
-  display: none;
+  display: inline-flex;
 }
 
-.settlement-filter.active {
-  display: inline-flex;
+.market-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
 }
 
 .toolbar .form-control {

@@ -7,7 +7,7 @@ const connectionDot = document.querySelector("#connectionDot");
 const connectionText = document.querySelector("#connectionText");
 const searchInput = document.querySelector("#searchInput");
 const currencyFilter = document.querySelector("#currencyFilter");
-const lecapSettlementFilter = document.querySelector("#lecapSettlementFilter");
+const marketSettlementFilter = document.querySelector("#marketSettlementFilter");
 const marketView = document.querySelector("#marketView");
 const ratesView = document.querySelector("#ratesView");
 const bcraView = document.querySelector("#bcraView");
@@ -113,6 +113,8 @@ const tplusOutput = document.querySelector("#tplusOutput");
 let currentCurrency = "all";
 let currentMarketList = "bonds";
 let currentLecapSettlement = "t1";
+let currentMarketCategory = "general";
+let currentMarketSettlement = "t1";
 let currentView = "market";
 let currentBcraSeries = "cer";
 let currentBondModel = "lecap";
@@ -246,7 +248,8 @@ function renderQuotes() {
   const rows = latestQuotes.filter((quote) => {
     const currencyMatch = currentCurrency === "all" || quote.currency === currentCurrency;
     const textMatch = !text || quote.symbol.includes(text) || quote.family.includes(text);
-    return currencyMatch && textMatch;
+    const categoryMatch = currentMarketCategory === "general" || quote.category === currentMarketCategory;
+    return currencyMatch && textMatch && categoryMatch;
   });
 
   instrumentCount.textContent = latestQuotes.length;
@@ -1657,7 +1660,7 @@ document.querySelectorAll("[data-market-list]").forEach((button) => {
       candidate.classList.toggle("btn-outline-dark", !active);
     });
     currencyFilter.classList.toggle("d-none", currentMarketList === "lecaps");
-    lecapSettlementFilter.classList.toggle("active", currentMarketList === "lecaps");
+    if (marketSettlementFilter) marketSettlementFilter.classList.toggle("active", currentMarketList === "lecaps");
     if (currentMarketList === "lecaps") {
       quotesBody.innerHTML = '<tr><td colspan="16" class="empty-state">Cargando LECAPs</td></tr>';
       fetchLecapMarket();
@@ -1677,6 +1680,45 @@ document.querySelectorAll("[data-lecap-settlement]").forEach((button) => {
       candidate.classList.toggle("btn-outline-dark", !active);
     });
     fetchLecapMarket();
+  });
+});
+
+document.querySelectorAll("[data-market-category]").forEach((button) => {
+  button.addEventListener("click", () => {
+    currentMarketCategory = button.dataset.marketCategory;
+    document.querySelectorAll("[data-market-category]").forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle("active", active);
+      candidate.classList.toggle("btn-dark", active);
+      candidate.classList.toggle("btn-outline-dark", !active);
+    });
+    if (currentMarketList === "lecaps") {
+      // Si elige una categoria distinta de tasa_fija/general, volvemos a la lista de bonos
+      if (!["general", "tasa_fija"].includes(currentMarketCategory)) {
+        const bondsBtn = document.querySelector('[data-market-list="bonds"]');
+        if (bondsBtn) bondsBtn.click();
+        return;
+      }
+    }
+    renderQuotes();
+  });
+});
+
+document.querySelectorAll("[data-market-settlement]").forEach((button) => {
+  button.addEventListener("click", () => {
+    currentMarketSettlement = button.dataset.marketSettlement;
+    currentLecapSettlement = currentMarketSettlement;
+    document.querySelectorAll("[data-market-settlement]").forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle("active", active);
+      candidate.classList.toggle("btn-dark", active);
+      candidate.classList.toggle("btn-outline-dark", !active);
+    });
+    if (currentMarketList === "lecaps") {
+      fetchLecapMarket();
+    } else {
+      renderQuotes();
+    }
   });
 });
 
