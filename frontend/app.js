@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd26 cargado - HD: periodo de gracia + tablas FX/Futuros separadas");
+console.log("[Monitor] app.js v=hd27 cargado - HD: 'Devenga desde' visible + gracia colapsable");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -1448,17 +1448,30 @@ function distributeAmortization() {
 
 function renderHdCouponsTable() {
   if (!hdCoupons.length) {
-    hdCouponsBody.innerHTML = '<tr><td colspan="5" class="empty-state">Generar tabla con la frecuencia elegida</td></tr>';
+    hdCouponsBody.innerHTML = '<tr><td colspan="6" class="empty-state">Generar tabla con la frecuencia elegida</td></tr>';
     return;
   }
+  const issueIso = getHdIssueIso();
   hdCouponsBody.innerHTML = hdCoupons.map((coupon, index) => {
     const inGrace = coupon.in_grace === true;
     const stateBadge = inGrace
-      ? '<span class="badge bg-secondary">GRACIA</span>'
+      ? '<span class="badge bg-secondary">GRACIA (no devenga)</span>'
       : '<span class="badge bg-success">PAGA</span>';
+    // "Devenga desde": flujo 1 desde emision, resto desde el flujo anterior.
+    let accrualFrom = "-";
+    if (index === 0) {
+      accrualFrom = issueIso ? formatDateDisplay(issueIso) : '<span class="empty-cell">cargar emision</span>';
+    } else {
+      const prev = hdCoupons[index - 1];
+      accrualFrom = prev?.payment_date ? formatDateDisplay(prev.payment_date) : "-";
+    }
+    const accrualBadge = (index === 0 && issueIso)
+      ? `<span class="hd-derived" title="Acumulado desde la emision">${accrualFrom} <small>(emision)</small></span>`
+      : `<span class="hd-derived">${accrualFrom}</span>`;
     return `
     <tr class="${inGrace ? 'hd-grace-row' : ''}">
       <td>${index + 1}</td>
+      <td>${accrualBadge}</td>
       <td>
         <input type="text" inputmode="numeric" maxlength="10" placeholder="DD/MM/AAAA" autocomplete="off" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${formatDateDisplay(coupon.payment_date)}">
       </td>
