@@ -373,8 +373,32 @@ tbody td {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
   user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.hd-import-toggle > summary:hover {
+  background: #eef7fb;
+  border-color: var(--accent);
+}
+
+.hd-import-toggle[open] > summary {
+  background: #1f2937;
+  border-color: #1f2937;
+  color: #f9fafb;
+}
+
+.hd-import-toggle[open] > summary .hd-import-summary-title,
+.hd-import-toggle[open] > summary .hd-import-summary-hint {
+  color: #f9fafb;
+}
+
+.hd-import-toggle[open] > summary::after {
+  color: #f9fafb;
 }
 
 .hd-import-toggle > summary::-webkit-details-marker {

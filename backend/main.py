@@ -571,6 +571,8 @@ _SPANISH_MONTH_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _TODOS_DE_PATTERN = re.compile(r"todos?\s*(?:de|del)\s*(\d{4})", re.IGNORECASE)
+_BROKEN_TODOS_PATTERN = re.compile(r"to[\s\-‐–\.]+dos?", re.IGNORECASE)
+_HYPHEN_LINEBREAK_PATTERN = re.compile(r"[-‐–]\s*\n\s*")
 _NUMERIC_DATE_PATTERN = re.compile(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})")
 _ISO_DATE_PATTERN = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
 
@@ -578,7 +580,9 @@ _ISO_DATE_PATTERN = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
 def _extract_dates_from_text(text: str) -> list[date]:
     if not text:
         return []
-    normalized = re.sub(r"\s+", " ", text)
+    cleaned = _HYPHEN_LINEBREAK_PATTERN.sub("", text)
+    cleaned = _BROKEN_TODOS_PATTERN.sub("todos", cleaned)
+    normalized = re.sub(r"\s+", " ", cleaned)
     found: set[date] = set()
 
     todos_markers = [(m.start(), int(m.group(1))) for m in _TODOS_DE_PATTERN.finditer(normalized)]

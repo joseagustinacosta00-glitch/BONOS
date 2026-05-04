@@ -1535,13 +1535,20 @@ async function submitBondDraft(event) {
   if (currentBondModel !== "lecap") return;
   setCalculatorStatus("draft", "Calculando");
 
+  const issueIso = parseDdmmYyyy(issueDate.value);
+  const maturityIso = parseDdmmYyyy(maturityDate.value);
+  if (!issueIso || !maturityIso) {
+    setCalculatorStatus("error", "Fechas invalidas (DD/MM/AAAA)");
+    return;
+  }
+
   const response = await fetch("/api/calculators/lecaps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ticker: lecapTicker.value,
-      issue_date: issueDate.value,
-      maturity_date: maturityDate.value,
+      issue_date: issueIso,
+      maturity_date: maturityIso,
       face_value: Number(faceValue.value),
       tem_emission_percent: Number(temEmission.value),
     }),
@@ -1709,6 +1716,8 @@ historicalUploadForm.addEventListener("submit", uploadHistoricalData);
 hardDollarForm?.addEventListener("submit", (event) => event.preventDefault());
 attachDdmmAutoformat(hdIssueDate);
 attachDdmmAutoformat(hdMaturityDate);
+attachDdmmAutoformat(issueDate);
+attachDdmmAutoformat(maturityDate);
 hdIssueDate?.addEventListener("blur", renderHardDollarCouponInputs);
 hdMaturityDate?.addEventListener("blur", renderHardDollarCouponInputs);
 hdCouponType?.addEventListener("change", renderHardDollarCouponInputs);
