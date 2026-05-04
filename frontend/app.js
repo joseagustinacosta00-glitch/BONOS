@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd28 cargado - HD: step-down + diferimiento de primer pago");
+console.log("[Monitor] app.js v=hd29 cargado - HD: long-first-coupon fix + UI colapsable + calc abajo");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -123,6 +123,7 @@ const hdCashflowBody = document.querySelector("#hdCashflowBody");
 const hdGenerateSchedule = document.querySelector("#hdGenerateSchedule");
 const hdCalculate = document.querySelector("#hdCalculate");
 const hdStatus = document.querySelector("#hdStatus");
+const hdStatusBottom = document.querySelector("#hdStatusBottom");
 const tplusForm = document.querySelector("#tplusForm");
 const tplusDirection = document.querySelector("#tplusDirection");
 const tplusRate = document.querySelector("#tplusRate");
@@ -1014,6 +1015,10 @@ function setHdStatus(kind, text) {
   }
   hdStatus.dataset.kind = kind;
   hdStatus.textContent = text;
+  if (hdStatusBottom) {
+    hdStatusBottom.dataset.kind = kind;
+    hdStatusBottom.textContent = text;
+  }
   if (kind === "error") {
     console.error("[Bono HD]", text);
   }

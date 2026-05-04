@@ -933,3 +933,20 @@ tbody td {
 
 .hd-grace-row { background-color: #f3f4f6; color: #6b7280; }
 .hd-grace-row input { background-color: #f9fafb; }
+
+.hd-calc-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+.hd-calc-bar button {
+  min-width: 200px;
+}

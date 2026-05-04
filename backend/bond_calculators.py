@@ -502,6 +502,14 @@ def hd_year_fraction(
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
         if frequency is None:
             raise ValueError("La convencion 180/360 requiere frecuencia definida.")
+        # Convencion estandar: 1 / N para cupones regulares.
+        # Para cupones irregulares (long/short first coupon - caso GD35 con
+        # diferimiento), prorratear por dias reales sobre 360 (practica de
+        # mercado para "irregular first coupon").
+        standard_days = int(round(360 / HD_FREQUENCY_PERIODS_PER_YEAR[frequency]))
+        actual_days = (end - start).days
+        if abs(actual_days - standard_days) > 15:
+            return actual_days / 360.0
         return 1.0 / HD_FREQUENCY_PERIODS_PER_YEAR[frequency]
     if convention == BondHdConvention.ACT_360:
         return (end - start).days / 360
@@ -534,7 +542,11 @@ def hd_period_days(
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
         if frequency is None:
             raise ValueError("La convencion 180/360 requiere frecuencia definida.")
-        return int(round(360 / HD_FREQUENCY_PERIODS_PER_YEAR[frequency]))
+        standard_days = int(round(360 / HD_FREQUENCY_PERIODS_PER_YEAR[frequency]))
+        actual_days = (end - start).days
+        if abs(actual_days - standard_days) > 15:
+            return actual_days  # Reportar dias reales del cupon irregular
+        return standard_days
     if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
         if convention == BondHdConvention.THIRTY_360_EU:
             d1 = min(start.day, 30)

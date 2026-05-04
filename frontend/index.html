@@ -8,7 +8,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd28">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd29">
   </head>
   <body>
     <main class="app-shell">
@@ -463,14 +463,17 @@
                   <input id="hdFixedCoupon" class="form-control form-control-sm" type="number" step="0.0001" value="0.5">
                 </label>
                 <button id="hdGenerateSchedule" class="btn btn-sm btn-dark" type="button">Generar tabla de cupones</button>
-                <button id="hdCalculate" class="btn btn-sm btn-outline-dark" type="button" disabled>Calcular cashflow</button>
                 <span id="hdStatus" class="calc-status">Borrador</span>
               </form>
 
-              <section id="hdStepUpSection" class="cashflow-preview d-none" aria-label="Cupones step-up por año">
-                <h3>Cupon step-up por año</h3>
+              <details id="hdStepUpSection" class="cashflow-preview d-none hd-import-toggle" aria-label="Cupones step-up por año">
+                <summary>
+                  <span class="hd-import-summary-title">Cupon step-up / step-down por año</span>
+                  <span class="hd-import-summary-hint">Click para abrir y cargar tasas anuales</span>
+                </summary>
+                <h3 class="d-none">Cupon step-up por año</h3>
                 <div id="hdStepUpRows" class="step-up-grid"></div>
-              </section>
+              </details>
 
               <details id="hdDeferredSection" class="cashflow-preview d-none hd-import-toggle" aria-label="Inicio de pagos de cupon">
                 <summary>
@@ -535,8 +538,11 @@
                 </div>
               </details>
 
-              <section id="hdAmortizationSection" class="cashflow-preview d-none" aria-label="Amortizacion">
-                <h3>Amortizacion</h3>
+              <details id="hdAmortizationSection" class="cashflow-preview d-none hd-import-toggle" aria-label="Amortizacion">
+                <summary>
+                  <span class="hd-import-summary-title">Amortizacion</span>
+                  <span class="hd-import-summary-hint">Click para abrir y configurar % por periodo</span>
+                </summary>
                 <div class="hd-amort-controls">
                   <label>
                     <span>Empieza en el año</span>
@@ -555,7 +561,7 @@
                 </div>
                 <p class="hd-help">Editar la columna "Amortizacion" en la tabla de cupones para ajustar fila por fila. La tabla anual de abajo es referencial.</p>
                 <div id="hdAmortYearRows" class="step-up-grid"></div>
-              </section>
+              </details>
 
               <details id="hdImportSection" class="cashflow-preview hd-import-toggle" aria-label="Importar fechas">
                 <summary>
@@ -578,8 +584,12 @@
                 </div>
               </details>
 
-              <section id="hdCouponsSection" class="cashflow-preview d-none" aria-label="Cupones por periodo">
-                <h3>Cupones por periodo</h3>
+              <details id="hdCouponsSection" class="cashflow-preview d-none hd-import-toggle" open aria-label="Cupones por periodo">
+                <summary>
+                  <span class="hd-import-summary-title">Cupones por periodo</span>
+                  <span class="hd-import-summary-hint">Click para colapsar / abrir</span>
+                </summary>
+                <h3 class="d-none">Cupones por periodo</h3>
                 <p class="hd-help">"Devenga desde" indica desde cuando se acumula el interes de ese cupon. Para el flujo 1 es la fecha de emision (acumulado periodo previo). Para los siguientes, desde el flujo anterior. Solo se muestra "GRACIA" si activaste el periodo de gracia opcional.</p>
                 <div class="table-wrap inner-table">
                   <table class="table table-sm align-middle mb-0 hd-coupons-table">
@@ -598,7 +608,12 @@
                     </tbody>
                   </table>
                 </div>
-              </section>
+              </details>
+
+              <div class="hd-calc-bar" aria-label="Calcular cashflow">
+                <button id="hdCalculate" class="btn btn-dark" type="button" disabled>Calcular cashflow</button>
+                <span id="hdStatusBottom" class="calc-status">-</span>
+              </div>
 
               <section id="hdCashflowSection" class="cashflow-preview" aria-label="Cashflow Bono HD">
                 <h3>Cashflow Bono HD</h3>
@@ -959,6 +974,6 @@
       </section>
     </main>
 
-    <script src="/app-bundle.js?v=hd28"></script>
+    <script src="/app-bundle.js?v=hd29"></script>
   </body>
 </html>
