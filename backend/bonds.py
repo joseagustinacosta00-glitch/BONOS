@@ -83,13 +83,12 @@ CER_TICKERS: tuple[BondTicker, ...] = (
 
 # TAMAR puro. Solo pesos.
 TAMAR_TICKERS: tuple[BondTicker, ...] = (
-    BondTicker("M31G7", "M31G7", "ARS", BondCategory.TAMAR),
+    BondTicker("M31G6", "M31G6", "ARS", BondCategory.TAMAR),
 )
 
 # Duales (pagan lo mejor entre fijo o TAMAR). Solo pesos.
 DUAL_TICKERS: tuple[BondTicker, ...] = (
     BondTicker("TTJ26", "TTJ26", "ARS", BondCategory.DUAL),
-    BondTicker("M31G6", "M31G6", "ARS", BondCategory.DUAL),
     BondTicker("TTS26", "TTS26", "ARS", BondCategory.DUAL),
     BondTicker("TTD26", "TTD26", "ARS", BondCategory.DUAL),
     BondTicker("TMF27", "TMF27", "ARS", BondCategory.DUAL),

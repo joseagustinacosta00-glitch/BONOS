@@ -146,6 +146,8 @@ class MarketDataService:
                     "change": None,
                     "volume": None,
                     "ytm": None,
+                    "previous_close": None,
+                    "opening_price": None,
                     "settlement": self.settings.rofex_settlement,
                     "updated_at": now,
                     "raw": {},
@@ -456,7 +458,16 @@ class MarketDataService:
         ask = self._entry_price(market_data.get("OF"))
         last = self._entry_price(market_data.get("LA"))
         last_volume = self._entry_size(market_data.get("LA"))
-        volume = self._entry_value(market_data.get("TV"))
+        # Volumen: pyRofex puede mandar TV (Trade Volume = nominales operados),
+        # NV (Nominal Volume = nominales operados, alias) o EV (Effective Volume = monto $).
+        # Tomamos lo que venga primero con dato.
+        volume = (
+            self._entry_value(market_data.get("TV"))
+            or self._entry_value(market_data.get("NV"))
+            or self._entry_value(market_data.get("EV"))
+        )
+        previous_close = self._entry_price(market_data.get("CL"))
+        opening_price = self._entry_price(market_data.get("OP"))
         now = now_argentina_iso()
 
         with self._lock:
@@ -466,18 +477,27 @@ class MarketDataService:
                 current = self._lecap_quotes[settlement_type][local_symbol]
             else:
                 current = self._quotes[local_symbol]
-            current.update(
-                {
-                    "bid": bid if bid is not None else current["bid"],
-                    "ask": ask if ask is not None else current["ask"],
-                    "last": last if last is not None else current["last"],
-                    "last_volume": last_volume if last_volume is not None else current.get("last_volume"),
-                    "cumulative_volume": volume if volume is not None else current.get("cumulative_volume"),
-                    "volume": volume if volume is not None else current["volume"],
-                    "updated_at": now,
-                    "raw": self._json_safe(message),
-                }
-            )
+            updates = {
+                "bid": bid if bid is not None else current.get("bid"),
+                "ask": ask if ask is not None else current.get("ask"),
+                "last": last if last is not None else current.get("last"),
+                "last_volume": last_volume if last_volume is not None else current.get("last_volume"),
+                "cumulative_volume": volume if volume is not None else current.get("cumulative_volume"),
+                "volume": volume if volume is not None else current.get("volume"),
+                "previous_close": previous_close if previous_close is not None else current.get("previous_close"),
+                "opening_price": opening_price if opening_price is not None else current.get("opening_price"),
+                "updated_at": now,
+                "raw": self._json_safe(message),
+            }
+            # Calcular change_percent automaticamente si tenemos last + previous_close
+            effective_last = updates["last"]
+            effective_prev = updates["previous_close"]
+            if effective_last is not None and effective_prev not in (None, 0):
+                try:
+                    updates["change"] = (float(effective_last) / float(effective_prev) - 1) * 100
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+            current.update(updates)
 
     def _provider_symbol_from_message(self, message: dict[str, Any]) -> str | None:
         instrument = message.get("instrumentId") or message.get("instrument") or {}
@@ -757,12 +777,18 @@ class MarketDataService:
 
     @staticmethod
     def _market_data_entries(pyRofex: Any) -> list[Any]:
-        return [
+        entries = [
             pyRofex.MarketDataEntry.BIDS,
             pyRofex.MarketDataEntry.OFFERS,
             pyRofex.MarketDataEntry.LAST,
             pyRofex.MarketDataEntry.TRADE_VOLUME,
         ]
+        # Entries opcionales que pyRofex puede no exponer en todas las versiones.
+        for attr in ("NOMINAL_VOLUME", "EFFECTIVE_VOLUME", "OPENING_PRICE", "CLOSING_PRICE"):
+            value = getattr(pyRofex.MarketDataEntry, attr, None)
+            if value is not None:
+                entries.append(value)
+        return entries
 
     @classmethod
     def _entry_price(cls, entry: Any) -> float | int | None:
