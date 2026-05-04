@@ -625,6 +625,50 @@ tbody td {
   border-bottom: 1px solid var(--line);
 }
 
+.historical-upload-form-grouped {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.historical-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafbfc;
+}
+
+.historical-group-source {
+  background: #eef7fb;
+  border-color: #b6e3f0;
+}
+
+.historical-group-title {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.historical-group-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.historical-group-file .historical-group-fields {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 980px) {
+  .historical-upload-form-grouped {
+    grid-template-columns: 1fr;
+  }
+}
+
 .hd-cashflow-table th {
   vertical-align: middle;
   white-space: nowrap;

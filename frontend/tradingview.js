@@ -54,13 +54,13 @@ renderTradingView(activeSymbol);
 
 // ===== Mis datos (Lightweight Charts conectado a /api/historical-data) =====
 
-const ownTicker = document.querySelector("#ownTicker");
+const ownTickerSearch = document.querySelector("#ownTickerSearch");
 const ownTickerOptions = document.querySelector("#ownTickerOptions");
-const ownMetric = document.querySelector("#ownMetric");
-const ownMarket = document.querySelector("#ownMarket");
-const ownSettlement = document.querySelector("#ownSettlement");
-const ownPlot = document.querySelector("#ownPlot");
-const ownAddOverlay = document.querySelector("#ownAddOverlay");
+const ownSearchBtn = document.querySelector("#ownSearchBtn");
+const ownSeriesList = document.querySelector("#ownSeriesList");
+const ownChartType = document.querySelector("#ownChartType");
+const ownChartScale = document.querySelector("#ownChartScale");
+const ownClearBtn = document.querySelector("#ownClearBtn");
 const ownOverlayList = document.querySelector("#ownOverlayList");
 const ownDataStatus = document.querySelector("#ownDataStatus");
 const ownDataChartContainer = document.querySelector("#ownDataChart");
@@ -74,6 +74,9 @@ const METRIC_LABEL = {
   tna: "TNA",
   volume: "Volumen",
 };
+
+const MARKET_LABEL = { pesos: "Pesos", cable: "Cable", mep: "MEP" };
+const SETTLEMENT_LABEL = { t0: "T+0", t1: "T+1" };
 
 const SERIES_COLORS = ["#38bdf8", "#fb923c", "#a3e635", "#f472b6", "#facc15", "#22d3ee", "#c084fc", "#fb7185"];
 
@@ -101,13 +104,20 @@ function ensureOwnChart() {
       vertLines: { color: "#1a2738" },
       horzLines: { color: "#1a2738" },
     },
-    rightPriceScale: { borderColor: "#24384f" },
-    timeScale: { borderColor: "#24384f", timeVisible: false },
+    rightPriceScale: { borderColor: "#24384f", mode: 0 },
+    timeScale: { borderColor: "#24384f", timeVisible: false, rightOffset: 5 },
     crosshair: { mode: 1 },
     localization: { locale: "es-AR" },
   });
   window.addEventListener("resize", () => ownChart?.timeScale().fitContent());
+  applyChartScale();
   return ownChart;
+}
+
+function applyChartScale() {
+  if (!ownChart) return;
+  const mode = ownChartScale.value === "log" ? 1 : 0;
+  ownChart.priceScale("right").applyOptions({ mode });
 }
 
 function clearOwnChart() {
@@ -124,7 +134,7 @@ function buildSeriesKey(spec) {
 }
 
 function buildSeriesLabel(spec) {
-  return `${spec.ticker} · ${METRIC_LABEL[spec.metric] || spec.metric} · ${spec.market.toUpperCase()} · T+${spec.settlement === "t0" ? "0" : "1"}`;
+  return `${spec.ticker} · ${METRIC_LABEL[spec.metric] || spec.metric} (${MARKET_LABEL[spec.market] || spec.market} ${SETTLEMENT_LABEL[spec.settlement] || spec.settlement})`;
 }
 
 async function fetchSeriesPoints(spec) {
@@ -158,23 +168,55 @@ async function fetchSeriesPoints(spec) {
   return unique;
 }
 
-async function plotMainSeries() {
-  const spec = readSpec();
-  if (!spec.ticker) {
-    setOwnStatus("error", "Eligi un ticker");
-    return;
+function aggregateOhlc(points, bucket) {
+  // bucket: 'd' (diario, no agrupa), 'w' (semana ISO), 'm' (mes)
+  if (!points.length) return [];
+  const groups = new Map();
+  for (const p of points) {
+    let key;
+    const [y, m, d] = p.time.split("-").map(Number);
+    if (bucket === "d") {
+      key = p.time;
+    } else if (bucket === "m") {
+      key = `${y}-${String(m).padStart(2, "0")}-01`;
+    } else {
+      // semana ISO: tomamos el lunes
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      const day = dt.getUTCDay() || 7;
+      dt.setUTCDate(dt.getUTCDate() - day + 1);
+      key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+    }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p.value);
   }
+  return Array.from(groups.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([time, values]) => ({
+      time,
+      open: values[0],
+      high: Math.max(...values),
+      low: Math.min(...values),
+      close: values[values.length - 1],
+    }));
+}
+
+async function plotSeries(spec, mode = "main") {
   setOwnStatus("draft", "Cargando serie...");
   try {
     const points = await fetchSeriesPoints(spec);
     if (!points.length) {
-      setOwnStatus("error", `Sin datos para ${spec.ticker} ${spec.metric} ${spec.market} ${spec.settlement}`);
+      setOwnStatus("error", `Sin datos para ${spec.ticker}`);
       return;
     }
     const chart = ensureOwnChart();
     if (!chart) return;
-    clearOwnChart();
-    addSeriesToChart(spec, points, true);
+    if (mode === "main") {
+      clearOwnChart();
+    } else if (ownOverlays.some((entry) => entry.key === buildSeriesKey(spec))) {
+      setOwnStatus("error", "Esa serie ya esta cargada");
+      return;
+    }
+    addSeriesToChart(spec, points);
     setOwnStatus("ok", `Graficados ${points.length} puntos`);
   } catch (error) {
     setOwnStatus("error", error.message || "Error al graficar");
@@ -182,52 +224,47 @@ async function plotMainSeries() {
   }
 }
 
-async function addOverlaySeries() {
-  const spec = readSpec();
-  if (!spec.ticker) {
-    setOwnStatus("error", "Eligi un ticker");
-    return;
-  }
-  if (!ownChart) {
-    setOwnStatus("error", "Primero apreta Graficar para crear el chart");
-    return;
-  }
-  const key = buildSeriesKey(spec);
-  if (ownOverlays.some((entry) => entry.key === key)) {
-    setOwnStatus("error", "Esa serie ya esta cargada");
-    return;
-  }
-  setOwnStatus("draft", "Cargando overlay...");
-  try {
-    const points = await fetchSeriesPoints(spec);
-    if (!points.length) {
-      setOwnStatus("error", "Sin datos para esa serie");
-      return;
-    }
-    addSeriesToChart(spec, points, false);
-    setOwnStatus("ok", `Overlay agregado (${points.length} puntos)`);
-  } catch (error) {
-    setOwnStatus("error", error.message || "Error al agregar overlay");
-    console.error(error);
-  }
-}
-
-function addSeriesToChart(spec, points, isMain) {
+function addSeriesToChart(spec, points) {
   const chart = ensureOwnChart();
   if (!chart) return;
   const color = SERIES_COLORS[ownOverlays.length % SERIES_COLORS.length];
-  const series = chart.addLineSeries({
-    color,
-    lineWidth: isMain ? 2 : 2,
-    priceLineVisible: false,
-    lastValueVisible: true,
-  });
-  series.setData(points);
+  const chartType = ownChartType.value;
+
+  let series;
+  if (chartType === "candle_d" || chartType === "candle_w" || chartType === "candle_m") {
+    const bucket = chartType === "candle_w" ? "w" : chartType === "candle_m" ? "m" : "d";
+    const ohlc = aggregateOhlc(points, bucket);
+    series = chart.addCandlestickSeries({
+      upColor: "#22d3ee",
+      downColor: "#fb7185",
+      borderVisible: false,
+      wickUpColor: "#22d3ee",
+      wickDownColor: "#fb7185",
+    });
+    series.setData(ohlc);
+  } else if (chartType === "area") {
+    series = chart.addAreaSeries({
+      lineColor: color,
+      topColor: color + "44",
+      bottomColor: color + "00",
+      lineWidth: 2,
+    });
+    series.setData(points);
+  } else {
+    series = chart.addLineSeries({
+      color,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
+    series.setData(points);
+  }
   const entry = {
     key: buildSeriesKey(spec),
     label: buildSeriesLabel(spec),
     color,
     series,
+    spec,
   };
   ownOverlays.push(entry);
   renderOverlayList();
@@ -241,14 +278,12 @@ function removeOverlay(key) {
   try { ownChart.removeSeries(entry.series); } catch (_) {}
   ownOverlays.splice(idx, 1);
   renderOverlayList();
-  if (!ownOverlays.length) {
-    setOwnStatus("draft", "Sin series");
-  }
+  if (!ownOverlays.length) setOwnStatus("draft", "Sin series");
 }
 
 function renderOverlayList() {
   if (!ownOverlays.length) {
-    ownOverlayList.innerHTML = '<span class="tv-subtle">Sin series cargadas. Apreta Graficar.</span>';
+    ownOverlayList.innerHTML = '<span class="tv-subtle">Sin series cargadas. Buscar y elegir.</span>';
     return;
   }
   ownOverlayList.innerHTML = ownOverlays.map((entry) => `
@@ -263,13 +298,83 @@ function renderOverlayList() {
   });
 }
 
-function readSpec() {
-  return {
-    ticker: ownTicker.value.trim().toUpperCase(),
-    metric: ownMetric.value,
-    market: ownMarket.value,
-    settlement: ownSettlement.value,
-  };
+async function searchSeriesForTicker() {
+  const ticker = ownTickerSearch.value.trim().toUpperCase();
+  if (!ticker) {
+    setOwnStatus("error", "Cargar un ticker para buscar");
+    return;
+  }
+  setOwnStatus("draft", `Buscando series para ${ticker}...`);
+  try {
+    const response = await fetch(`/api/historical-data/series?ticker=${encodeURIComponent(ticker)}`);
+    if (!response.ok) throw new Error("No se pudo leer el catalogo");
+    const payload = await response.json();
+    const items = payload.items || [];
+    renderSeriesList(items, ticker);
+    if (!items.length) {
+      setOwnStatus("error", `Sin series cargadas para ${ticker}`);
+    } else {
+      setOwnStatus("ok", `${items.length} serie(s) encontradas para ${ticker}`);
+    }
+  } catch (error) {
+    setOwnStatus("error", error.message || "Error al buscar");
+  }
+}
+
+function renderSeriesList(items, ticker) {
+  if (!items.length) {
+    ownSeriesList.innerHTML = `<span class="tv-subtle">No hay series cargadas para ${ticker}. Carga datos en la pestaña "Datos historicos".</span>`;
+    return;
+  }
+  // Agrupar por metric para que sea mas claro
+  const byMetric = {};
+  for (const item of items) {
+    const metric = item.metric_type;
+    if (!byMetric[metric]) byMetric[metric] = [];
+    byMetric[metric].push(item);
+  }
+  const html = Object.keys(byMetric).map((metric) => {
+    const variants = byMetric[metric].map((item) => {
+      const spec = {
+        ticker: item.ticker,
+        metric: item.metric_type,
+        market: item.price_market,
+        settlement: item.settlement_type,
+      };
+      const dataAttr = encodeURIComponent(JSON.stringify(spec));
+      const variantLabel = `${MARKET_LABEL[item.price_market] || item.price_market} ${SETTLEMENT_LABEL[item.settlement_type] || item.settlement_type}`;
+      const points = item.count || 0;
+      return `
+        <div class="tv-series-variant">
+          <span class="tv-variant-label">${variantLabel}</span>
+          <span class="tv-variant-meta">${points} pts · ${item.first_date || "?"} → ${item.last_date || "?"}</span>
+          <div class="tv-variant-actions">
+            <button type="button" class="tv-variant-plot" data-spec="${dataAttr}">Graficar</button>
+            <button type="button" class="tv-variant-overlay" data-spec="${dataAttr}">+ Overlay</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="tv-series-group">
+        <h4 class="tv-series-metric">${METRIC_LABEL[metric] || metric}</h4>
+        ${variants}
+      </div>
+    `;
+  }).join("");
+  ownSeriesList.innerHTML = html;
+  ownSeriesList.querySelectorAll(".tv-variant-plot").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const spec = JSON.parse(decodeURIComponent(btn.dataset.spec));
+      plotSeries(spec, "main");
+    });
+  });
+  ownSeriesList.querySelectorAll(".tv-variant-overlay").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const spec = JSON.parse(decodeURIComponent(btn.dataset.spec));
+      plotSeries(spec, "overlay");
+    });
+  });
 }
 
 async function loadOwnTickerOptions() {
@@ -284,13 +389,33 @@ async function loadOwnTickerOptions() {
   }
 }
 
-ownPlot.addEventListener("click", () => plotMainSeries());
-ownAddOverlay.addEventListener("click", () => addOverlaySeries());
-ownTicker.addEventListener("keydown", (event) => {
+ownSearchBtn.addEventListener("click", () => searchSeriesForTicker());
+ownTickerSearch.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    plotMainSeries();
+    searchSeriesForTicker();
   }
+});
+ownChartScale.addEventListener("change", applyChartScale);
+ownChartType.addEventListener("change", () => {
+  if (!ownOverlays.length) return;
+  // Re-render con nuevo tipo: tomamos los specs y reploteamos
+  const specs = ownOverlays.map((e) => e.spec);
+  clearOwnChart();
+  setOwnStatus("draft", "Re-renderizando...");
+  (async () => {
+    for (const spec of specs) {
+      try {
+        const points = await fetchSeriesPoints(spec);
+        if (points.length) addSeriesToChart(spec, points);
+      } catch (_) { /* ignore */ }
+    }
+    setOwnStatus("ok", `${ownOverlays.length} serie(s) cargadas`);
+  })();
+});
+ownClearBtn.addEventListener("click", () => {
+  clearOwnChart();
+  setOwnStatus("draft", "Sin series");
 });
 
 loadOwnTickerOptions();

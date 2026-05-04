@@ -121,6 +121,135 @@ h1 {
   grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(120px, 1fr) minmax(100px, 1fr) auto auto;
 }
 
+.tv-search-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.tv-search-label {
+  display: grid;
+  gap: 6px;
+  color: #98a8ba;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tv-search-label input {
+  border: 1px solid #24384f;
+  border-radius: 6px;
+  background: #070b10;
+  color: #e8eef6;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.tv-series-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tv-series-list:empty {
+  display: none;
+}
+
+.tv-series-group {
+  border: 1px solid #172638;
+  border-radius: 8px;
+  background: #0f1c2b;
+  padding: 10px 12px;
+}
+
+.tv-series-metric {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #7dd3fc;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.tv-series-variant {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid #172638;
+  font-size: 13px;
+}
+
+.tv-series-variant:first-of-type {
+  border-top: 0;
+}
+
+.tv-variant-label {
+  font-weight: 700;
+  color: #e8eef6;
+}
+
+.tv-variant-meta {
+  color: #98a8ba;
+  font-size: 12px;
+}
+
+.tv-variant-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.tv-variant-plot,
+.tv-variant-overlay {
+  border: 1px solid #24384f;
+  border-radius: 6px;
+  background: #0f1c2b;
+  color: #e8eef6;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+
+.tv-variant-plot:hover {
+  border-color: #38bdf8;
+}
+
+.tv-variant-overlay:hover {
+  border-color: #fb923c;
+}
+
+.tv-chart-controls {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tv-chart-controls label {
+  display: grid;
+  gap: 6px;
+  color: #98a8ba;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tv-chart-controls select {
+  width: 100%;
+  border: 1px solid #24384f;
+  border-radius: 6px;
+  background: #070b10;
+  color: #e8eef6;
+  font: inherit;
+  padding: 10px 12px;
+}
+
 .tv-secondary {
   background: #172638 !important;
 }

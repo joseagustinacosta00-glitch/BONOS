@@ -790,6 +790,16 @@ async def data_tickers() -> dict:
     return {"tickers": tickers}
 
 
+@app.get("/api/historical-data/series")
+async def historical_data_series(ticker: str | None = None) -> dict:
+    """Devuelve el catalogo de series cargadas, opcionalmente filtrado por ticker."""
+    items = storage.list_historical_series()
+    if ticker:
+        normalized = _normalize_base_ticker(ticker)
+        items = [item for item in items if item.get("ticker") == normalized]
+    return {"items": items}
+
+
 @app.get("/api/historical-data/types")
 async def historical_data_types() -> dict:
     return {
@@ -879,6 +889,7 @@ async def upload_historical_data(
     imported = 0
     replaced = 0
     errors = []
+    detected_format = _detect_date_format(rows)
     for index, row in enumerate(rows, start=2):
         try:
             for row_metric_type, value in _historical_points_from_row(row, normalized_metric):
@@ -891,7 +902,7 @@ async def upload_historical_data(
                     settlement_type=_normalize_settlement_type(
                         _pick_value(row, ("liquidacion", "settlement", "settlement_type")) or normalized_settlement
                     ),
-                    value_date=_parse_historical_date(row),
+                    value_date=_parse_historical_date(row, date_format=detected_format),
                     value=value,
                 )
                 imported += 1
@@ -912,6 +923,7 @@ async def upload_historical_data(
         "imported": imported,
         "replaced": replaced,
         "errors": errors[:20],
+        "date_format_detected": detected_format,
     }
 
 
@@ -1428,7 +1440,7 @@ def _build_ai_context(include_docs: bool = True) -> dict[str, object]:
     return context
 
 
-def _parse_historical_date(row: dict[str, object]) -> date:
+def _parse_historical_date(row: dict[str, object], date_format: str = "auto") -> date:
     raw = _pick_value(row, ("fecha", "date", "value_date", "datetime", "date time"))
     if isinstance(raw, datetime):
         return raw.date()
@@ -1444,6 +1456,13 @@ def _parse_historical_date(row: dict[str, object]) -> date:
             return date(int(first), int(second), int(third))
         if len(third) == 4:
             a, b, year = int(first), int(second), int(third)
+            if date_format == "mdy":
+                if 1 <= a <= 12 and 1 <= b <= 31:
+                    return date(year, a, b)
+            elif date_format == "dmy":
+                if 1 <= b <= 12 and 1 <= a <= 31:
+                    return date(year, b, a)
+            # auto: heuristica fila por fila
             if a > 12 and b <= 12:
                 return date(year, b, a)
             if b > 12 and a <= 12:
@@ -1451,6 +1470,41 @@ def _parse_historical_date(row: dict[str, object]) -> date:
             return date(year, b, a)
         return date(int(third), int(second), int(first))
     raise ValueError("Fecha invalida. Usa DD/MM/AAAA.")
+
+
+def _detect_date_format(rows: list[dict[str, object]]) -> str:
+    """Inspecciona todas las fechas del archivo y devuelve 'mdy', 'dmy' o 'auto'.
+    Si una fila tiene un dia > 12 en la primer posicion -> dmy.
+    Si una fila tiene un dia > 12 en la segunda posicion -> mdy.
+    Gana el que tenga evidencia clara. Si ambas o ninguna -> auto (ambiguo)."""
+    mdy_evidence = 0
+    dmy_evidence = 0
+    for row in rows:
+        raw = _pick_value(row, ("fecha", "date", "value_date", "datetime", "date time"))
+        if isinstance(raw, (date, datetime)):
+            continue
+        value = str(raw or "").strip()
+        for separator in ("/", "-"):
+            parts = value.split(separator)
+            if len(parts) != 3:
+                continue
+            first, second, third = parts
+            if len(first) == 4 or len(third) != 4:
+                break
+            try:
+                a, b = int(first), int(second)
+            except ValueError:
+                break
+            if a > 12 and 1 <= b <= 12:
+                dmy_evidence += 1
+            elif b > 12 and 1 <= a <= 12:
+                mdy_evidence += 1
+            break
+    if mdy_evidence > 0 and dmy_evidence == 0:
+        return "mdy"
+    if dmy_evidence > 0 and mdy_evidence == 0:
+        return "dmy"
+    return "auto"
 
 
 def _historical_points_from_row(row: dict[str, object], selected_metric: str | None = None) -> list[tuple[str, float]]:
