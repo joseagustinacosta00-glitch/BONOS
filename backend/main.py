@@ -602,17 +602,70 @@ _SPANISH_MONTH_PATTERN = re.compile(
 _TODOS_DE_PATTERN = re.compile(r"todos?\s*(?:de|del)\s*(\d{4})", re.IGNORECASE)
 _BROKEN_TODOS_PATTERN = re.compile(r"to[\s\-‐–\.]+dos?", re.IGNORECASE)
 _HYPHEN_LINEBREAK_PATTERN = re.compile(r"[-‐–]\s*\n\s*")
+_RECURRENT_HINT_PATTERN = re.compile(
+    r"(cada\s+a[ñn]o|todos\s+los\s+a[ñn]os|anual\s*mente|recurrente)",
+    re.IGNORECASE,
+)
+_DAY_MONTH_PATTERN = re.compile(r"\b(\d{1,2})[\/\-\.](\d{1,2})\b(?!\s*[\/\-\.]\s*\d)")
 _NUMERIC_DATE_PATTERN = re.compile(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})")
 _ISO_DATE_PATTERN = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
 
 
-def _extract_dates_from_text(text: str) -> list[date]:
+def _expand_recurring_day_month(
+    text: str,
+    issue_date: date | None,
+    maturity_date: date | None,
+) -> set[date]:
+    """Detecta patrones tipo '10/07 y 09/01 de cada año' y expande las fechas
+    dentro del rango emision-vencimiento. Necesita rango definido."""
+    if issue_date is None or maturity_date is None:
+        return set()
+    if not _RECURRENT_HINT_PATTERN.search(text):
+        return set()
+    pairs: set[tuple[int, int]] = set()
+    for match in _DAY_MONTH_PATTERN.finditer(text):
+        a, b = int(match.group(1)), int(match.group(2))
+        # Decidir cual es dia y cual mes: si uno > 12 es seguro
+        if a > 12 and 1 <= b <= 12:
+            day, month = a, b
+        elif b > 12 and 1 <= a <= 12:
+            day, month = b, a
+        elif 1 <= a <= 31 and 1 <= b <= 12:
+            day, month = a, b  # default DD/MM (ARG)
+        else:
+            continue
+        if 1 <= day <= 31 and 1 <= month <= 12:
+            pairs.add((day, month))
+    if not pairs:
+        return set()
+    results: set[date] = set()
+    from calendar import monthrange
+    for year in range(issue_date.year, maturity_date.year + 1):
+        for day, month in pairs:
+            last_day = monthrange(year, month)[1]
+            actual_day = min(day, last_day)
+            try:
+                candidate = date(year, month, actual_day)
+            except ValueError:
+                continue
+            if issue_date <= candidate <= maturity_date:
+                results.add(candidate)
+    return results
+
+
+def _extract_dates_from_text(
+    text: str,
+    issue_date: date | None = None,
+    maturity_date: date | None = None,
+) -> list[date]:
     if not text:
         return []
     cleaned = _HYPHEN_LINEBREAK_PATTERN.sub("", text)
     cleaned = _BROKEN_TODOS_PATTERN.sub("todos", cleaned)
     normalized = re.sub(r"\s+", " ", cleaned)
     found: set[date] = set()
+    # Patrones recurrentes (solo si tenemos rango)
+    found.update(_expand_recurring_day_month(normalized, issue_date, maturity_date))
 
     todos_markers = [(m.start(), int(m.group(1))) for m in _TODOS_DE_PATTERN.finditer(normalized)]
 
@@ -664,6 +717,8 @@ def _extract_dates_from_text(text: str) -> list[date]:
 async def calculator_bond_hd_parse_dates(
     text: Annotated[str | None, Form()] = None,
     file: Annotated[UploadFile | None, File()] = None,
+    issue_date: Annotated[date | None, Form()] = None,
+    maturity_date: Annotated[date | None, Form()] = None,
 ) -> dict:
     if not text and (file is None or not file.filename):
         raise HTTPException(status_code=422, detail="Subir archivo o pegar texto con fechas.")
@@ -693,11 +748,11 @@ async def calculator_bond_hd_parse_dates(
                 if isinstance(value, date):
                     found.add(value)
                     continue
-                for parsed in _extract_dates_from_text(str(value)):
+                for parsed in _extract_dates_from_text(str(value), issue_date, maturity_date):
                     found.add(parsed)
 
     if text:
-        for parsed in _extract_dates_from_text(text):
+        for parsed in _extract_dates_from_text(text, issue_date, maturity_date):
             found.add(parsed)
 
     if not found:
