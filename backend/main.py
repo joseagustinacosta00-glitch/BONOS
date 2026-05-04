@@ -688,14 +688,17 @@ _DAY_WORD_PATTERN = re.compile(
 
 def _fuzzy_month_match(word: str) -> int | None:
     """Devuelve el numero de mes si la palabra se parece a un mes (tolerante a
-    errores de OCR / hyphenation). None si no hay match razonable."""
-    word_l = word.lower().strip()
-    if word_l in SPANISH_MONTHS:
-        return SPANISH_MONTHS[word_l]
-    # difflib distance: aceptar matches con ratio >= 0.75 (tolera 1-2 errores
-    # en palabras de 5-10 letras)
+    errores de OCR / hyphenation / caracteres invisibles). None si no hay
+    match razonable."""
+    # Strip caracteres no-alfa por si sobrevivieron invisibles (soft hyphen,
+    # zero-width chars) o puntuacion adyacente.
+    word_clean = re.sub(r"[^a-záéíóúñü]", "", word.lower())
+    if not word_clean:
+        return None
+    if word_clean in SPANISH_MONTHS:
+        return SPANISH_MONTHS[word_clean]
     import difflib
-    candidates = difflib.get_close_matches(word_l, SPANISH_MONTHS.keys(), n=1, cutoff=0.75)
+    candidates = difflib.get_close_matches(word_clean, SPANISH_MONTHS.keys(), n=1, cutoff=0.7)
     if candidates:
         return SPANISH_MONTHS[candidates[0]]
     return None
@@ -823,13 +826,21 @@ def _extract_dates_from_text(
 ) -> list[date]:
     if not text:
         return []
-    cleaned = _HYPHEN_LINEBREAK_PATTERN.sub("", text)
+    # Limpieza agresiva pre-regex: remover caracteres invisibles que los PDFs
+    # insertan en line breaks (soft hyphen U+00AD, zero-width space U+200B,
+    # zero-width joiners U+200C/U+200D, word joiner U+2060, BOM U+FEFF) y
+    # que rompen el matching de palabras como "ju<U+00AD>lio".
+    invisibles = "­​‌‍⁠﻿"
+    cleaned = "".join(ch for ch in text if ch not in invisibles)
+    cleaned = _HYPHEN_LINEBREAK_PATTERN.sub("", cleaned)
     cleaned = _BROKEN_TODOS_PATTERN.sub("todos", cleaned)
-    # Tambien unir guiones intra-palabra (caso "ju-lio" sin newline cuando el
-    # PDF pega rara): letra-letra (sin espacios) -> letraletra. Seguro en
+    # Unir guiones intra-palabra (caso "ju-lio" sin newline cuando el PDF
+    # pega rara): letra-letra (sin espacios) -> letraletra. Seguro en
     # contexto financiero donde los meses no llevan guion.
     cleaned = re.sub(r"([A-Za-zÀ-ſ])-([A-Za-zÀ-ſ])", r"\1\2", cleaned)
-    normalized = re.sub(r"\s+", " ", cleaned)
+    # Normalizar TODO whitespace incluyendo NBSP ( ) y otros unicode
+    cleaned = re.sub(r"[\s ]+", " ", cleaned)
+    normalized = cleaned
     found: set[date] = set()
     # Patrones recurrentes (solo si tenemos rango)
     found.update(_expand_recurring_day_month(normalized, issue_date, maturity_date))
