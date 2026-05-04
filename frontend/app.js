@@ -96,8 +96,6 @@ const hdCouponsBody = document.querySelector("#hdCouponsBody");
 const hdDatesFile = document.querySelector("#hdDatesFile");
 const hdDatesText = document.querySelector("#hdDatesText");
 const hdImportDates = document.querySelector("#hdImportDates");
-const hdOcrFile = document.querySelector("#hdOcrFile");
-const hdOcrSubmit = document.querySelector("#hdOcrSubmit");
 const hdCashflowBody = document.querySelector("#hdCashflowBody");
 const hdGenerateSchedule = document.querySelector("#hdGenerateSchedule");
 const hdCalculate = document.querySelector("#hdCalculate");
@@ -1219,46 +1217,19 @@ function loadTesseractJs() {
   return tesseractLoadPromise;
 }
 
-async function ocrImportHdDates() {
-  const file = hdOcrFile?.files?.[0];
-  if (!file) {
-    setHdStatus("error", "Subir una imagen para OCR");
-    return;
-  }
-  setHdStatus("draft", "Cargando OCR...");
-  let Tesseract;
-  try {
-    Tesseract = await loadTesseractJs();
-  } catch (error) {
-    setHdStatus("error", "No se pudo cargar el motor OCR");
-    console.error("[Bono HD] cargar tesseract", error);
-    return;
-  }
+async function runOcrOnImage(file) {
+  setHdStatus("draft", "Cargando motor OCR...");
+  const Tesseract = await loadTesseractJs();
   setHdStatus("draft", "Extrayendo texto de la imagen (puede tardar)...");
-  let recognized;
-  try {
-    recognized = await Tesseract.recognize(file, "spa", {
-      logger: (info) => {
-        if (info && info.status) {
-          setHdStatus("draft", `OCR: ${info.status} ${info.progress ? `${Math.round(info.progress * 100)}%` : ""}`);
-        }
-      },
-    });
-  } catch (error) {
-    setHdStatus("error", "OCR fallo, probar con otra imagen");
-    console.error("[Bono HD] OCR recognize", error);
-    return;
-  }
-  const extractedText = (recognized?.data?.text || "").trim();
-  if (!extractedText) {
-    setHdStatus("error", "OCR no detecto texto");
-    return;
-  }
-  if (hdDatesText) {
-    const previous = hdDatesText.value.trim();
-    hdDatesText.value = previous ? `${previous}\n\n${extractedText}` : extractedText;
-  }
-  await importHdDates();
+  const recognized = await Tesseract.recognize(file, "spa", {
+    logger: (info) => {
+      if (info && info.status) {
+        const pct = info.progress ? `${Math.round(info.progress * 100)}%` : "";
+        setHdStatus("draft", `OCR: ${info.status} ${pct}`);
+      }
+    },
+  });
+  return (recognized?.data?.text || "").trim();
 }
 
 async function deleteHdSaved(ticker) {
@@ -1281,17 +1252,48 @@ async function deleteHdSaved(ticker) {
   }
 }
 
+function isImageFile(file) {
+  if (!file) return false;
+  if (file.type && file.type.startsWith("image/")) return true;
+  const name = (file.name || "").toLowerCase();
+  return /\.(png|jpe?g|gif|bmp|webp|tif?f)$/.test(name);
+}
+
 async function importHdDates() {
   const file = hdDatesFile?.files?.[0];
-  const text = (hdDatesText?.value || "").trim();
-  if (!file && !text) {
+  const pastedText = (hdDatesText?.value || "").trim();
+  if (!file && !pastedText) {
     setHdStatus("error", "Subir archivo o pegar texto con fechas");
     return;
   }
+
+  let combinedText = pastedText;
+  let fileForBackend = null;
+
+  if (file) {
+    if (isImageFile(file)) {
+      try {
+        const ocrText = await runOcrOnImage(file);
+        if (!ocrText && !combinedText) {
+          setHdStatus("error", "OCR no detecto texto en la imagen");
+          return;
+        }
+        combinedText = combinedText ? `${combinedText}\n\n${ocrText}` : ocrText;
+      } catch (error) {
+        setHdStatus("error", error.message || "OCR fallo");
+        console.error("[Bono HD] OCR", error);
+        return;
+      }
+    } else {
+      fileForBackend = file;
+    }
+  }
+
   setHdStatus("draft", "Parseando fechas...");
   const formData = new FormData();
-  if (file) formData.append("file", file);
-  if (text) formData.append("text", text);
+  if (fileForBackend) formData.append("file", fileForBackend);
+  if (combinedText) formData.append("text", combinedText);
+
   try {
     const response = await fetch("/api/calculators/bond-hd/parse-dates", {
       method: "POST",
@@ -1735,13 +1737,6 @@ hdImportDates?.addEventListener("click", () => {
   importHdDates().catch((err) => {
     console.error("[Bono HD] importar fechas fallo", err);
     setHdStatus("error", "Error al importar fechas");
-  });
-});
-hdOcrSubmit?.addEventListener("click", () => {
-  console.log("[Bono HD] click OCR");
-  ocrImportHdDates().catch((err) => {
-    console.error("[Bono HD] OCR fallo", err);
-    setHdStatus("error", "Error en OCR");
   });
 });
 

@@ -367,6 +367,39 @@ tbody td {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.hd-import-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.hd-import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hd-import-field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.hd-import-field textarea {
+  font-family: inherit;
+}
+
+.hd-import-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+@media (max-width: 720px) {
+  .hd-import-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .hd-mode-switch {
   display: flex;
   gap: 8px;

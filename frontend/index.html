@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=hd7">
+    <link rel="stylesheet" href="/static/styles.css?v=hd8">
   </head>
   <body>
     <main class="app-shell">
@@ -420,16 +420,19 @@
 
               <section id="hdImportSection" class="cashflow-preview" aria-label="Importar fechas">
                 <h3>Importar fechas de pago</h3>
-                <p class="hd-help">Subir Excel/CSV, pegar texto del prospecto o subir una captura (OCR). Reemplaza las fechas actuales.</p>
-                <div class="hd-import-controls">
-                  <input id="hdDatesFile" type="file" accept=".xlsx,.xlsm,.csv,.txt" class="form-control form-control-sm">
-                  <textarea id="hdDatesText" class="form-control form-control-sm" rows="3" placeholder="Pegar texto con fechas..."></textarea>
-                  <button id="hdImportDates" type="button" class="btn btn-sm btn-outline-dark">Parsear y autocompletar fechas</button>
+                <p class="hd-help">Subir un archivo (imagen, Excel, CSV, TXT) o pegar el texto del prospecto. Si subis imagen se corre OCR automatico (la primera vez baja ~10 MB del motor en español). Reemplaza las fechas actuales.</p>
+                <div class="hd-import-grid">
+                  <label class="hd-import-field">
+                    <span>Archivo (opcional)</span>
+                    <input id="hdDatesFile" type="file" accept="image/*,.xlsx,.xlsm,.csv,.txt" class="form-control form-control-sm">
+                  </label>
+                  <label class="hd-import-field">
+                    <span>Texto pegado (opcional)</span>
+                    <textarea id="hdDatesText" class="form-control form-control-sm" rows="3" placeholder="Pegar texto del prospecto con fechas..."></textarea>
+                  </label>
                 </div>
-                <div class="hd-import-controls hd-import-ocr">
-                  <input id="hdOcrFile" type="file" accept="image/*" class="form-control form-control-sm">
-                  <button id="hdOcrSubmit" type="button" class="btn btn-sm btn-outline-dark">OCR de imagen y autocompletar</button>
-                  <small class="hd-help">La primera vez descarga ~10 MB del modelo de español. Tarda unos segundos.</small>
+                <div class="hd-import-actions">
+                  <button id="hdImportDates" type="button" class="btn btn-sm btn-dark">Importar fechas y autocompletar</button>
                 </div>
               </section>
 
@@ -765,6 +768,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=hd7"></script>
+    <script src="/static/app.js?v=hd8"></script>
   </body>
 </html>
