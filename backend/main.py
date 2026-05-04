@@ -690,8 +690,6 @@ def _fuzzy_month_match(word: str) -> int | None:
     """Devuelve el numero de mes si la palabra se parece a un mes (tolerante a
     errores de OCR / hyphenation / caracteres invisibles). None si no hay
     match razonable."""
-    # Strip caracteres no-alfa por si sobrevivieron invisibles (soft hyphen,
-    # zero-width chars) o puntuacion adyacente.
     word_clean = re.sub(r"[^a-záéíóúñü]", "", word.lower())
     if not word_clean:
         return None
@@ -702,6 +700,62 @@ def _fuzzy_month_match(word: str) -> int | None:
     if candidates:
         return SPANISH_MONTHS[candidates[0]]
     return None
+
+
+def _normalize_unicode_text(text: str) -> str:
+    """NFKD + strip combining marks. 'días' -> 'dias', 'júlío' -> 'julio'."""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _brute_force_month_dates(
+    text: str,
+    todos_markers: list[tuple[int, int]],
+) -> set[date]:
+    """Fallback brute-force: para cada mes en SPANISH_MONTHS, busca todas las
+    ocurrencias en el texto (case-insensitive, tolerando 1 error en el medio
+    via approximate matching) y para cada match retrocede hasta ~20 chars
+    para encontrar el dia (1-2 digitos)."""
+    found: set[date] = set()
+    text_norm = _normalize_unicode_text(text).lower()
+    for month_name, month_num in SPANISH_MONTHS.items():
+        # Variantes con hasta 1 error: substitution o deletion en cualquier pos
+        variants = {month_name}
+        # Deletions (1 char)
+        for i in range(len(month_name)):
+            variants.add(month_name[:i] + month_name[i + 1:])
+        # Substitutions (cualquier letra por cualquier otra) - solo si len > 4
+        if len(month_name) > 4:
+            for i in range(len(month_name)):
+                for ch in "abcdefghijklmnopqrstuvwxyz":
+                    if ch != month_name[i]:
+                        variants.add(month_name[:i] + ch + month_name[i + 1:])
+        for variant in variants:
+            for m in re.finditer(rf"\b{re.escape(variant)}\b", text_norm):
+                start = m.start()
+                # Buscar 1-2 digitos en los ~20 chars anteriores
+                window = text_norm[max(0, start - 20):start]
+                day_matches = re.findall(r"(\d{1,2})", window)
+                if not day_matches:
+                    continue
+                day = int(day_matches[-1])  # el ultimo (mas cercano al mes)
+                if not (1 <= day <= 31):
+                    continue
+                # Asignar año: explicito en los siguientes ~30 chars o via todos_markers
+                tail = text_norm[m.end():m.end() + 30]
+                year_match = re.search(r"\b(20\d{2})\b", tail)
+                if year_match:
+                    year = int(year_match.group(1))
+                else:
+                    year = next((y for pos, y in todos_markers if pos > start), None)
+                    if year is None:
+                        continue
+                try:
+                    found.add(date(year, month_num, day))
+                except ValueError:
+                    continue
+    return found
 _TODOS_DE_PATTERN = re.compile(r"todos?\s*(?:de|del)\s*(\d{4})", re.IGNORECASE)
 _BROKEN_TODOS_PATTERN = re.compile(r"to[\s\-‐–\.]+dos?", re.IGNORECASE)
 _HYPHEN_LINEBREAK_PATTERN = re.compile(r"[-‐–]\s*\n\s*")
@@ -832,6 +886,8 @@ def _extract_dates_from_text(
     # que rompen el matching de palabras como "ju<U+00AD>lio".
     invisibles = "­​‌‍⁠﻿"
     cleaned = "".join(ch for ch in text if ch not in invisibles)
+    # NFKD + strip combining marks: 'dias' tildados -> sin tildes, robusto
+    cleaned = _normalize_unicode_text(cleaned)
     cleaned = _HYPHEN_LINEBREAK_PATTERN.sub("", cleaned)
     cleaned = _BROKEN_TODOS_PATTERN.sub("todos", cleaned)
     # Unir guiones intra-palabra (caso "ju-lio" sin newline cuando el PDF
@@ -908,6 +964,12 @@ def _extract_dates_from_text(
             found.add(date(year, month, day))
         except ValueError:
             continue
+
+    # Pasada brute-force final: para cada mes en SPANISH_MONTHS, escanea el
+    # texto buscando ocurrencias (incluso con 1 error) y retrocede para hallar
+    # el dia. Captura cualquier cosa que el regex estricto y el fuzzy matching
+    # de palabras hayan dejado afuera (caso prospectos con OCR raro).
+    found.update(_brute_force_month_dates(normalized, todos_markers))
 
     return sorted(found)
 
