@@ -6,3 +6,4 @@ __pycache__/
 *.db
 data/user_data.db
 data/*.db
+.claude/
