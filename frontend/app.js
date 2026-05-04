@@ -1122,10 +1122,52 @@ async function loadHdSaved(ticker) {
     const payload = await response.json();
     const item = payload.item || {};
     renderHdSavedDetail(item);
+    fetchHdSavedQuotes(item.ticker).catch((err) => console.error("[Bono HD] quotes", err));
     setHdSaveStatus("ok", `${item.ticker} cargado`);
   } catch (error) {
     setHdSaveStatus("error", "Error al cargar");
     console.error("[Bono HD] cargar guardado", error);
+  }
+}
+
+async function fetchHdSavedQuotes(family) {
+  const body = document.querySelector("#hdSavedQuotesBody");
+  const meta = document.querySelector("#hdQuotesSourceMeta");
+  if (!body) return;
+  if (!family) {
+    body.innerHTML = '<tr><td colspan="8" class="empty-state">Sin ticker</td></tr>';
+    return;
+  }
+  try {
+    const response = await fetch("/api/quotes");
+    if (!response.ok) throw new Error("No se pudo leer /api/quotes");
+    const payload = await response.json();
+    const quotes = (payload.quotes || []).filter((q) => String(q.family || "").toUpperCase() === String(family).toUpperCase());
+    if (meta) {
+      const source = payload.source || "-";
+      const updated = payload.updated_at ? formatTime(payload.updated_at) : "-";
+      meta.textContent = `Fuente: ${source} · Status: ${payload.status || "-"} · Actualizado: ${updated}`;
+    }
+    if (!quotes.length) {
+      body.innerHTML = `<tr><td colspan="8" class="empty-state">No hay cotizaciones para la familia ${family}</td></tr>`;
+      return;
+    }
+    body.innerHTML = quotes.map((q) => `
+      <tr>
+        <td>${q.symbol || ""}</td>
+        <td>${q.currency || ""}</td>
+        <td class="text-end">${formatNumber(q.bid, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(q.ask, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(q.last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(q.change_percent, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</td>
+        <td class="text-end">${formatNumber(q.volume)}</td>
+        <td class="text-end">${q.updated_at ? formatTime(q.updated_at) : '<span class="empty-cell">s/d</span>'}</td>
+      </tr>
+    `).join("");
+  } catch (error) {
+    body.innerHTML = '<tr><td colspan="8" class="empty-state">No se pudieron leer cotizaciones</td></tr>';
+    if (meta) meta.textContent = "";
+    throw error;
   }
 }
 

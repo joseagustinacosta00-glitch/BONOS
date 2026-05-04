@@ -89,7 +89,7 @@ class BondHdCalculationRequest(BaseModel):
     face_value: float = Field(gt=0)
     bond_type: str = Field(pattern="^(bullet|amortizable|zero_coupon)$")
     frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
-    convention: str = Field(pattern="^(30_360_eu|30_360_us|act_360|act_365|act_act)$")
+    convention: str = Field(pattern="^(30_360_eu|30_360_us|180_360_eu|180_360_us|act_360|act_365|act_act)$")
     coupons: list[BondHdCouponPayload] = Field(min_length=1)
 
 
@@ -100,7 +100,7 @@ class BondHdSavePayload(BaseModel):
     face_value: float = Field(gt=0)
     bond_type: str = Field(pattern="^(bullet|amortizable|zero_coupon)$")
     frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
-    convention: str = Field(pattern="^(30_360_eu|30_360_us|act_360|act_365|act_act)$")
+    convention: str = Field(pattern="^(30_360_eu|30_360_us|180_360_eu|180_360_us|act_360|act_365|act_act)$")
     payload: dict
 
 

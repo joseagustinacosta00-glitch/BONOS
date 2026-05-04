@@ -383,6 +383,8 @@ class BondHdFrequency(StrEnum):
 class BondHdConvention(StrEnum):
     THIRTY_360_EU = "30_360_eu"
     THIRTY_360_US = "30_360_us"
+    ONE_EIGHTY_360_EU = "180_360_eu"
+    ONE_EIGHTY_360_US = "180_360_us"
     ACT_360 = "act_360"
     ACT_365 = "act_365"
     ACT_ACT = "act_act"
@@ -405,6 +407,8 @@ HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
 HD_CONVENTION_LABELS: dict[BondHdConvention, str] = {
     BondHdConvention.THIRTY_360_EU: "30/360 EU",
     BondHdConvention.THIRTY_360_US: "30/360 US",
+    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU (fijo por frecuencia)",
+    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US (fijo por frecuencia)",
     BondHdConvention.ACT_360: "Act/360",
     BondHdConvention.ACT_365: "Act/365",
     BondHdConvention.ACT_ACT: "Act/Act",
@@ -487,9 +491,18 @@ class BondHdCalculation:
         }
 
 
-def hd_year_fraction(start: date, end: date, convention: BondHdConvention) -> float:
+def hd_year_fraction(
+    start: date,
+    end: date,
+    convention: BondHdConvention,
+    frequency: BondHdFrequency | None = None,
+) -> float:
     if end < start:
         return 0.0
+    if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
+        if frequency is None:
+            raise ValueError("La convencion 180/360 requiere frecuencia definida.")
+        return 1.0 / HD_FREQUENCY_PERIODS_PER_YEAR[frequency]
     if convention == BondHdConvention.ACT_360:
         return (end - start).days / 360
     if convention == BondHdConvention.ACT_365:
@@ -512,7 +525,16 @@ def hd_year_fraction(start: date, end: date, convention: BondHdConvention) -> fl
     raise ValueError("Convencion de intereses no soportada.")
 
 
-def hd_period_days(start: date, end: date, convention: BondHdConvention) -> int:
+def hd_period_days(
+    start: date,
+    end: date,
+    convention: BondHdConvention,
+    frequency: BondHdFrequency | None = None,
+) -> int:
+    if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
+        if frequency is None:
+            raise ValueError("La convencion 180/360 requiere frecuencia definida.")
+        return int(round(360 / HD_FREQUENCY_PERIODS_PER_YEAR[frequency]))
     if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
         if convention == BondHdConvention.THIRTY_360_EU:
             d1 = min(start.day, 30)
@@ -614,8 +636,8 @@ def build_bond_hd_calculation(
         payment_date = coupon.payment_date
         effective_payment_date = calendar.next_business_day(payment_date, include_current=True)
         period_end_eff = effective_payment_date
-        period_days = hd_period_days(period_start_eff, period_end_eff, convention)
-        yf = hd_year_fraction(period_start_eff, period_end_eff, convention)
+        period_days = hd_period_days(period_start_eff, period_end_eff, convention, frequency)
+        yf = hd_year_fraction(period_start_eff, period_end_eff, convention, frequency)
 
         if bond_type == BondHdType.ZERO_COUPON:
             annual_rate = 0.0

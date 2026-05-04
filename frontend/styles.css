@@ -541,6 +541,22 @@ tbody td {
   margin-top: 10px;
 }
 
+.hd-quotes-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.hd-quotes-section h4 {
+  font-size: 0.95rem;
+  margin: 0 0 6px;
+}
+
+.hd-quotes-table th,
+.hd-quotes-table td {
+  white-space: nowrap;
+}
+
 .hd-import-controls textarea {
   font-family: inherit;
 }
