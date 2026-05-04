@@ -339,6 +339,26 @@ tbody td {
   width: 100%;
 }
 
+.hd-date-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hd-date-display {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.calc-status[data-kind="error"] {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.calc-status[data-kind="ok"] {
+  color: #15803d;
+}
+
 .hd-cashflow-table th {
   vertical-align: middle;
   white-space: nowrap;

@@ -678,9 +678,22 @@ let hdCoupons = [];
 let hdLastCalculation = null;
 
 function setHdStatus(kind, text) {
-  if (!hdStatus) return;
+  if (!hdStatus) {
+    console.warn("[Bono HD] hdStatus element no encontrado:", kind, text);
+    return;
+  }
   hdStatus.dataset.kind = kind;
   hdStatus.textContent = text;
+  if (kind === "error") {
+    console.error("[Bono HD]", text);
+  }
+}
+
+function formatDateDisplay(value) {
+  if (!value) return "";
+  const parts = String(value).split("-");
+  if (parts.length !== 3) return value;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
 function renderHardDollarCouponInputs() {
@@ -815,7 +828,10 @@ function renderHdCouponsTable() {
     <tr>
       <td>${index + 1}</td>
       <td>
-        <input type="date" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${coupon.payment_date}">
+        <div class="hd-date-cell">
+          <input type="date" lang="es-AR" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${coupon.payment_date}">
+          <small class="hd-date-display" data-hd-coupon-display="${index}">${formatDateDisplay(coupon.payment_date)}</small>
+        </div>
       </td>
       <td class="text-end">
         <input type="number" step="0.0001" class="form-control form-control-sm text-end" data-hd-coupon-rate="${index}" value="${coupon.annual_rate_percent}">
@@ -831,7 +847,8 @@ function renderHdCouponsTable() {
       const idx = parseInt(event.target.dataset.hdCouponDate, 10);
       hdCoupons[idx].payment_date = event.target.value;
       hdCoupons[idx].annual_rate_percent = getHdAnnualRateForYear(event.target.value.slice(0, 4));
-      renderHdCouponsTable();
+      const displayCell = hdCouponsBody.querySelector(`[data-hd-coupon-display="${idx}"]`);
+      if (displayCell) displayCell.textContent = formatDateDisplay(event.target.value);
     });
   });
   hdCouponsBody.querySelectorAll("input[data-hd-coupon-rate]").forEach((input) => {
@@ -1226,11 +1243,11 @@ ratesRefresh.addEventListener("click", () => {
 bondDraftForm.addEventListener("submit", submitBondDraft);
 historicalForm.addEventListener("submit", saveHistoricalData);
 historicalUploadForm.addEventListener("submit", uploadHistoricalData);
-hardDollarForm.addEventListener("submit", (event) => event.preventDefault());
-hdIssueDate.addEventListener("change", renderHardDollarCouponInputs);
-hdMaturityDate.addEventListener("change", renderHardDollarCouponInputs);
-hdCouponType.addEventListener("change", renderHardDollarCouponInputs);
-hdBondType.addEventListener("change", () => {
+hardDollarForm?.addEventListener("submit", (event) => event.preventDefault());
+hdIssueDate?.addEventListener("change", renderHardDollarCouponInputs);
+hdMaturityDate?.addEventListener("change", renderHardDollarCouponInputs);
+hdCouponType?.addEventListener("change", renderHardDollarCouponInputs);
+hdBondType?.addEventListener("change", () => {
   renderHardDollarCouponInputs();
   if (hdBondType.value === "amortizable") {
     applyAmortizationDefaults();
@@ -1239,26 +1256,38 @@ hdBondType.addEventListener("change", () => {
   }
   renderHdCouponsTable();
 });
-hdFixedCoupon.addEventListener("input", refreshHdCouponRates);
-hdGenerateSchedule.addEventListener("click", () => {
-  generateHdSchedule().catch(() => setHdStatus("error", "Error al generar cupones"));
+hdFixedCoupon?.addEventListener("input", refreshHdCouponRates);
+hdGenerateSchedule?.addEventListener("click", () => {
+  console.log("[Bono HD] click generar tabla");
+  generateHdSchedule().catch((err) => {
+    console.error("[Bono HD] generar tabla fallo", err);
+    setHdStatus("error", "Error al generar cupones");
+  });
 });
-hdAmortDistribute.addEventListener("click", distributeAmortization);
-hdAmortStart.addEventListener("input", () => {
+hdAmortDistribute?.addEventListener("click", distributeAmortization);
+hdAmortStart?.addEventListener("input", () => {
   if (hdBondType.value === "amortizable") {
     applyAmortizationDefaults();
     renderHdCouponsTable();
   }
 });
-hdAmortCount.addEventListener("input", () => {
+hdAmortCount?.addEventListener("input", () => {
   if (hdBondType.value === "amortizable") {
     applyAmortizationDefaults();
     renderHdCouponsTable();
   }
 });
-hdCalculate.addEventListener("click", () => {
-  calculateHdCashflow().catch(() => setHdStatus("error", "Error al calcular"));
+hdCalculate?.addEventListener("click", () => {
+  console.log("[Bono HD] click calcular");
+  calculateHdCashflow().catch((err) => {
+    console.error("[Bono HD] calcular fallo", err);
+    setHdStatus("error", "Error al calcular");
+  });
 });
+
+if (!hdGenerateSchedule || !hdCalculate) {
+  console.warn("[Bono HD] elementos de la calculadora no encontrados; revisa que index.html esté actualizado y limpia cache.");
+}
 saveLecap.addEventListener("click", () => {
   saveLatestLecap().catch(() => {
     setCalculatorStatus("error", "No se pudo guardar");

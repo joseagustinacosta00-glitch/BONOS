@@ -1034,13 +1034,19 @@ def _parse_historical_date(row: dict[str, object]) -> date:
     value = str(raw or "").strip()
     for separator in ("/", "-"):
         parts = value.split(separator)
-        if len(parts) == 3:
-            first, second, third = parts
-            if len(first) == 4:
-                return date(int(first), int(second), int(third))
-            if separator == "-" and len(third) == 4:
-                return date(int(third), int(first), int(second))
-            return date(int(third), int(second), int(first))
+        if len(parts) != 3:
+            continue
+        first, second, third = parts
+        if len(first) == 4:
+            return date(int(first), int(second), int(third))
+        if len(third) == 4:
+            a, b, year = int(first), int(second), int(third)
+            if a > 12 and b <= 12:
+                return date(year, b, a)
+            if b > 12 and a <= 12:
+                return date(year, a, b)
+            return date(year, b, a)
+        return date(int(third), int(second), int(first))
     raise ValueError("Fecha invalida. Usa DD/MM/AAAA.")
 
 
