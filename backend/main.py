@@ -1156,6 +1156,12 @@ async def system_health() -> dict:
     }
 
 
+@app.get("/api/system/quotes-status")
+async def system_quotes_status() -> dict:
+    """Diagnostico de cotizaciones: que instrumentos tienen data y cuales no."""
+    return market.quotes_status()
+
+
 @app.get("/api/system/disk-check")
 async def system_disk_check() -> dict:
     """Verifica que el filesystem donde vive la base sea escribible y persistente."""

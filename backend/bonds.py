@@ -78,6 +78,7 @@ CER_TICKERS: tuple[BondTicker, ...] = (
     BondTicker("DICP", "DICP", "ARS", BondCategory.CER),
     BondTicker("PARP", "PARP", "ARS", BondCategory.CER),
     BondTicker("CUAP", "CUAP", "ARS", BondCategory.CER),
+    BondTicker("TXMJ9", "TXMJ9", "ARS", BondCategory.CER),
 )
 
 # TAMAR puro. Solo pesos.

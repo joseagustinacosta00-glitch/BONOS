@@ -289,16 +289,104 @@ class MarketDataService:
             exception_handler=self._on_exception,
             environment=environment,
         )
-        pyRofex.market_data_subscription(
-            tickers=list(self._rofex_to_quote.keys()),
-            entries=entries,
-            depth=1,
-            market=self._market(pyRofex),
-            environment=environment,
-        )
+        self._subscribe_in_chunks(pyRofex, environment, entries)
 
         self.status = "connected"
         self.last_error = None
+
+    def _subscribe_in_chunks(self, pyRofex: Any, environment: Any, entries: list[Any], chunk_size: int = 8) -> None:
+        """Suscribe los instrumentos en chunks pequeños para que un simbolo
+        invalido no rompa toda la subscripcion del resto."""
+        all_symbols = list(self._rofex_to_quote.keys())
+        market = self._market(pyRofex)
+        self._subscription_failed: list[str] = []
+        self._subscription_succeeded: list[str] = []
+        for i in range(0, len(all_symbols), chunk_size):
+            chunk = all_symbols[i:i + chunk_size]
+            try:
+                pyRofex.market_data_subscription(
+                    tickers=chunk,
+                    entries=entries,
+                    depth=1,
+                    market=market,
+                    environment=environment,
+                )
+                self._subscription_succeeded.extend(chunk)
+            except Exception as exc:
+                logger.warning("subscripcion fallo para chunk %s: %s", chunk, exc)
+                # Reintenta uno por uno para identificar cual rompe
+                for symbol in chunk:
+                    try:
+                        pyRofex.market_data_subscription(
+                            tickers=[symbol],
+                            entries=entries,
+                            depth=1,
+                            market=market,
+                            environment=environment,
+                        )
+                        self._subscription_succeeded.append(symbol)
+                    except Exception as exc_inner:
+                        logger.warning("subscripcion fallo para %s: %s", symbol, exc_inner)
+                        self._subscription_failed.append(symbol)
+        logger.info(
+            "subscripcion pyRofex: %d ok / %d fallaron",
+            len(self._subscription_succeeded),
+            len(self._subscription_failed),
+        )
+
+    def quotes_status(self) -> dict[str, Any]:
+        """Diagnostico por instrumento: tiene cotizacion, cuando, provider symbol, etc."""
+        with self._lock:
+            instruments = []
+            for symbol, quote in self._quotes.items():
+                instruments.append({
+                    "symbol": symbol,
+                    "provider_symbol": quote.get("provider_symbol"),
+                    "category": quote.get("category"),
+                    "currency": quote.get("currency"),
+                    "has_last": quote.get("last") is not None,
+                    "last": quote.get("last"),
+                    "bid": quote.get("bid"),
+                    "ask": quote.get("ask"),
+                    "updated_at": quote.get("updated_at"),
+                    "subscription_failed": symbol in (getattr(self, "_subscription_failed", []) or []),
+                })
+            for settlement_key, rows in self._lecap_quotes.items():
+                for symbol, quote in rows.items():
+                    instruments.append({
+                        "symbol": f"LECAP:{symbol}:{settlement_key}",
+                        "provider_symbol": quote.get("provider_symbol"),
+                        "category": "lecap",
+                        "currency": "ARS",
+                        "has_last": quote.get("last") is not None,
+                        "last": quote.get("last"),
+                        "bid": quote.get("bid"),
+                        "ask": quote.get("ask"),
+                        "updated_at": quote.get("updated_at"),
+                        "subscription_failed": False,
+                    })
+            for symbol, quote in self._caucion_quotes.items():
+                instruments.append({
+                    "symbol": f"CAUCION:{symbol}",
+                    "provider_symbol": quote.get("provider_symbol"),
+                    "category": "caucion",
+                    "currency": "ARS",
+                    "has_last": quote.get("last") is not None,
+                    "last": quote.get("last"),
+                    "updated_at": quote.get("updated_at"),
+                    "subscription_failed": False,
+                })
+        with_data = sum(1 for inst in instruments if inst["has_last"])
+        without_data = len(instruments) - with_data
+        failed_subs = [s for s in (getattr(self, "_subscription_failed", []) or [])]
+        return {
+            "total_instruments": len(instruments),
+            "with_data": with_data,
+            "without_data": without_data,
+            "subscription_failed_count": len(failed_subs),
+            "subscription_failed_symbols": failed_subs,
+            "instruments": instruments,
+        }
 
     def _disconnect_pyrofex(self) -> None:
         try:
