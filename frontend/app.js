@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd32 cargado - HD: secciones inicio/gracia visibles pero colapsadas");
+console.log("[Monitor] app.js v=hd33 cargado - HD: fix duplicado julio + hint inicio sacado");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");

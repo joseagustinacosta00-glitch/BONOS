@@ -719,6 +719,7 @@ def _brute_force_month_dates(
     para encontrar el dia (1-2 digitos)."""
     found: set[date] = set()
     text_norm = _normalize_unicode_text(text).lower()
+    all_month_names = set(SPANISH_MONTHS.keys())
     for month_name, month_num in SPANISH_MONTHS.items():
         # Variantes con hasta 1 error: substitution o deletion en cualquier pos
         variants = {month_name}
@@ -731,6 +732,12 @@ def _brute_force_month_dates(
                 for ch in "abcdefghijklmnopqrstuvwxyz":
                     if ch != month_name[i]:
                         variants.add(month_name[:i] + ch + month_name[i + 1:])
+        # CRITICO: filtrar variantes que coincidan con otros meses reales.
+        # Por ejemplo, "junio" se genera como variante de "julio" (sub l->n)
+        # pero es el mes real junio. Sin este filtro, "junio" en el texto se
+        # asignaria a julio.
+        other_months = all_month_names - {month_name}
+        variants = {v for v in variants if v not in other_months and len(v) >= 4}
         for variant in variants:
             for m in re.finditer(rf"\b{re.escape(variant)}\b", text_norm):
                 start = m.start()
