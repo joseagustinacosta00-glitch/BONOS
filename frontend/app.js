@@ -231,6 +231,16 @@ function renderQuotes() {
     return;
   }
 
+  if (currentMarketCategory === "fx") {
+    renderFxRatios();
+    return;
+  }
+
+  if (currentMarketCategory === "futuros_dlk") {
+    renderFuturosDlk();
+    return;
+  }
+
   marketTableHead.innerHTML = `
     <tr>
       <th scope="col">Ticker</th>
@@ -272,6 +282,119 @@ function renderQuotes() {
       </tr>
     `;
   }).join("");
+}
+
+async function renderFxRatios() {
+  marketTableHead.innerHTML = `
+    <tr>
+      <th>Par</th>
+      <th>Tipo</th>
+      <th class="text-end">Bono ARS (last)</th>
+      <th class="text-end">Bono USD/Cable (last)</th>
+      <th class="text-end">Ratio</th>
+      <th class="text-end">Hora</th>
+    </tr>
+  `;
+  quotesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Cargando ratios FX...</td></tr>';
+  try {
+    const response = await fetch("/api/fx/ratios");
+    if (!response.ok) throw new Error("ratios");
+    const payload = await response.json();
+    const items = payload.items || [];
+    if (!items.length) {
+      quotesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Sin datos para calcular ratios</td></tr>';
+      return;
+    }
+    quotesBody.innerHTML = items.map((item) => `
+      <tr>
+        <td><strong>${item.name}</strong></td>
+        <td>${item.label}</td>
+        <td class="text-end">${formatNumber(item.ars_last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(item.fx_last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end"><strong>${formatNumber(item.ratio, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</strong></td>
+        <td class="text-end">${item.updated_at ? formatTime(item.updated_at) : '<span class="empty-cell">s/d</span>'}</td>
+      </tr>
+    `).join("");
+  } catch (error) {
+    quotesBody.innerHTML = '<tr><td colspan="6" class="empty-state">No se pudieron leer ratios FX</td></tr>';
+  }
+}
+
+async function renderFuturosDlk() {
+  marketTableHead.innerHTML = `
+    <tr>
+      <th>Ticker</th>
+      <th>Tipo</th>
+      <th>Vencimiento</th>
+      <th class="text-end">Compra</th>
+      <th class="text-end">Venta</th>
+      <th class="text-end">Ultimo</th>
+      <th class="text-end">Var %</th>
+      <th class="text-end">Volumen</th>
+      <th class="text-end">Hora</th>
+    </tr>
+  `;
+  quotesBody.innerHTML = '<tr><td colspan="9" class="empty-state">Cargando futuros y DLK...</td></tr>';
+
+  // DLK desde el snapshot normal (categoria=dlk)
+  const text = searchInput.value.trim().toUpperCase();
+  const dlkRows = latestQuotes
+    .filter((q) => q.category === "dlk")
+    .filter((q) => !text || (q.symbol || "").includes(text) || (q.family || "").includes(text))
+    .map((q) => ({
+      symbol: q.symbol,
+      tipo: "DLK",
+      vencimiento: "-",
+      bid: q.bid,
+      ask: q.ask,
+      last: q.last,
+      change: q.change,
+      volume: q.volume,
+      updated_at: q.updated_at,
+    }));
+
+  // Futuros desde endpoint
+  let futuresRows = [];
+  try {
+    const response = await fetch("/api/futures");
+    if (response.ok) {
+      const payload = await response.json();
+      futuresRows = (payload.items || [])
+        .filter((q) => !text || (q.symbol || "").includes(text))
+        .map((q) => ({
+          symbol: q.symbol,
+          tipo: q.underlying ? `Futuro ${q.underlying}` : "Futuro",
+          vencimiento: q.expiration ? String(q.expiration).slice(0, 10) : "-",
+          bid: q.bid,
+          ask: q.ask,
+          last: q.last,
+          change: q.change,
+          volume: q.volume,
+          updated_at: q.updated_at,
+        }));
+    }
+  } catch (_) {
+    /* no hay futuros disponibles, sigo */
+  }
+
+  const combined = [...dlkRows, ...futuresRows];
+  if (!combined.length) {
+    quotesBody.innerHTML = '<tr><td colspan="9" class="empty-state">Sin futuros ni DLK con datos. Esperar a que pyRofex termine de suscribir.</td></tr>';
+    return;
+  }
+  quotesBody.innerHTML = combined.map((row) => `
+    <tr>
+      <td><strong>${row.symbol}</strong></td>
+      <td>${row.tipo}</td>
+      <td>${row.vencimiento}</td>
+      <td class="text-end">${formatNumber(row.bid, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.ask, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.change, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</td>
+      <td class="text-end">${formatNumber(row.volume)}</td>
+      <td class="text-end">${row.updated_at ? formatTime(row.updated_at) : '<span class="empty-cell">s/d</span>'}</td>
+    </tr>
+  `).join("");
 }
 
 function renderLecapMarket() {

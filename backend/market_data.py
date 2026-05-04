@@ -26,10 +26,12 @@ class MarketDataService:
         self._quotes: dict[str, dict[str, Any]] = {}
         self._lecap_quotes: dict[str, dict[str, dict[str, Any]]] = {}
         self._caucion_quotes: dict[str, dict[str, Any]] = {}
+        self._futures_quotes: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._mock_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
         self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
+        self._futures_provider_to_symbol: dict[str, str] = {}
         self._build_provider_symbol_map()
 
     async def start(self) -> None:
@@ -95,6 +97,11 @@ class MarketDataService:
                 ),
             )[0]
         )
+
+    def futures_quotes(self) -> list[dict[str, Any]]:
+        with self._lock:
+            quotes = list(self._futures_quotes.values())
+        return [dict(quote) for quote in sorted(quotes, key=lambda q: str(q.get("symbol") or ""))]
 
     def caucion_quotes(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -284,6 +291,7 @@ class MarketDataService:
         )
 
         self._load_caucion_instrument(pyRofex, environment)
+        self._load_futures_catalog(pyRofex, environment)
         self._load_initial_rest_snapshot(pyRofex, entries)
         pyRofex.init_websocket_connection(
             market_data_handler=self._on_market_data,
@@ -299,12 +307,24 @@ class MarketDataService:
     def _subscribe_in_chunks(self, pyRofex: Any, environment: Any, entries: list[Any], chunk_size: int = 8) -> None:
         """Suscribe los instrumentos en chunks pequeños para que un simbolo
         invalido no rompa toda la subscripcion del resto."""
-        all_symbols = list(self._rofex_to_quote.keys())
-        market = self._market(pyRofex)
+        bonds_symbols = list(self._rofex_to_quote.keys())
+        futures_symbols = list(self._futures_provider_to_symbol.keys())
+        market_bonds = self._market(pyRofex)
+        market_rofx = getattr(pyRofex.Market, "ROFX", market_bonds)
         self._subscription_failed: list[str] = []
         self._subscription_succeeded: list[str] = []
-        for i in range(0, len(all_symbols), chunk_size):
-            chunk = all_symbols[i:i + chunk_size]
+        self._subscribe_symbol_chunk(pyRofex, environment, entries, bonds_symbols, market_bonds, chunk_size)
+        if futures_symbols:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, futures_symbols, market_rofx, chunk_size)
+        logger.info(
+            "subscripcion pyRofex: %d ok / %d fallaron",
+            len(self._subscription_succeeded),
+            len(self._subscription_failed),
+        )
+
+    def _subscribe_symbol_chunk(self, pyRofex: Any, environment: Any, entries: list[Any], symbols: list[str], market: Any, chunk_size: int) -> None:
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i:i + chunk_size]
             try:
                 pyRofex.market_data_subscription(
                     tickers=chunk,
@@ -316,7 +336,6 @@ class MarketDataService:
                 self._subscription_succeeded.extend(chunk)
             except Exception as exc:
                 logger.warning("subscripcion fallo para chunk %s: %s", chunk, exc)
-                # Reintenta uno por uno para identificar cual rompe
                 for symbol in chunk:
                     try:
                         pyRofex.market_data_subscription(
@@ -330,11 +349,6 @@ class MarketDataService:
                     except Exception as exc_inner:
                         logger.warning("subscripcion fallo para %s: %s", symbol, exc_inner)
                         self._subscription_failed.append(symbol)
-        logger.info(
-            "subscripcion pyRofex: %d ok / %d fallaron",
-            len(self._subscription_succeeded),
-            len(self._subscription_failed),
-        )
 
     def quotes_status(self) -> dict[str, Any]:
         """Diagnostico por instrumento: tiene cotizacion, cuando, provider symbol, etc."""
@@ -475,6 +489,8 @@ class MarketDataService:
                 current = self._caucion_quotes[local_symbol]
             elif category == "lecap" and settlement_type:
                 current = self._lecap_quotes[settlement_type][local_symbol]
+            elif category == "future":
+                current = self._futures_quotes[local_symbol]
             else:
                 current = self._quotes[local_symbol]
             updates = {
@@ -512,6 +528,9 @@ class MarketDataService:
     def _quote_ref(self, provider_symbol: str | None) -> tuple[str, str, str | None] | None:
         if not provider_symbol:
             return None
+
+        if provider_symbol in self._futures_provider_to_symbol:
+            return ("future", provider_symbol, None)
 
         if provider_symbol in self._rofex_to_quote:
             return self._rofex_to_quote[provider_symbol]
@@ -565,6 +584,86 @@ class MarketDataService:
             "t0": self.settings.rofex_settlement_t0,
             "t1": self.settings.rofex_settlement_t1,
         }
+
+    def _load_futures_catalog(self, pyRofex: Any, environment: Any) -> None:
+        """Descubre los futuros disponibles (DLR/MMMYY, etc.) y los registra
+        para suscripcion en el market ROFX."""
+        try:
+            response = pyRofex.get_all_instruments(environment=environment)
+        except Exception as exc:
+            logger.warning("No se pudo descubrir futuros: %s", exc)
+            return
+        instruments = self._instrument_rows(response)
+        now = now_argentina_iso()
+        registered = 0
+        for instrument in instruments:
+            symbol = self._instrument_symbol(instrument)
+            if not symbol:
+                continue
+            cficode = self._instrument_cficode(instrument)
+            if not self._is_future_instrument(symbol, cficode):
+                continue
+            self._futures_provider_to_symbol[symbol] = symbol
+            if symbol not in self._futures_quotes:
+                self._futures_quotes[symbol] = {
+                    "symbol": symbol,
+                    "provider_symbol": symbol,
+                    "category": "futuro",
+                    "currency": "ARS",
+                    "underlying": self._futures_underlying(symbol),
+                    "expiration": self._futures_expiration_str(instrument),
+                    "last": None,
+                    "last_volume": None,
+                    "cumulative_volume": None,
+                    "bid": None,
+                    "ask": None,
+                    "change": None,
+                    "volume": None,
+                    "previous_close": None,
+                    "opening_price": None,
+                    "updated_at": now,
+                    "raw": {},
+                }
+                registered += 1
+        logger.info("Futuros descubiertos para suscripcion: %d", registered)
+
+    @staticmethod
+    def _instrument_cficode(instrument: Any) -> str:
+        if isinstance(instrument, dict):
+            value = instrument.get("cficode") or instrument.get("CFICode") or instrument.get("cfiCode")
+            if value:
+                return str(value).upper()
+        return ""
+
+    @staticmethod
+    def _is_future_instrument(symbol: str, cficode: str) -> bool:
+        # CFI codes que empiezan con F suelen ser futuros (FF, FXXXSX, etc.)
+        if cficode and cficode.startswith("F"):
+            return True
+        # Heuristica por simbolo: contiene "/" y termina en codigo mes/año (DLR/MAY26, ORO/JUN26, etc.)
+        if "/" in symbol and len(symbol) >= 8:
+            parts = symbol.split("/", 1)
+            if len(parts) == 2 and parts[1] and any(ch.isdigit() for ch in parts[1]):
+                return True
+        return False
+
+    @staticmethod
+    def _futures_underlying(symbol: str) -> str:
+        if "/" in symbol:
+            return symbol.split("/", 1)[0]
+        return symbol
+
+    @staticmethod
+    def _futures_expiration_str(instrument: Any) -> str | None:
+        if isinstance(instrument, dict):
+            value = (
+                instrument.get("maturityDate")
+                or instrument.get("MaturityDate")
+                or instrument.get("expirationDate")
+            )
+            if value:
+                return str(value)
+        return None
 
     def _load_caucion_instrument(self, pyRofex: Any, environment: Any) -> None:
         try:

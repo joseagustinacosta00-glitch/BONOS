@@ -10,6 +10,8 @@ class BondCategory(StrEnum):
     CER = "cer"
     TAMAR = "tamar"
     DUAL = "dual"
+    DLK = "dlk"
+    FUTURO = "futuro"
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,14 @@ DUAL_TICKERS: tuple[BondTicker, ...] = (
     BondTicker("TMG27", "TMG27", "ARS", BondCategory.DUAL),
 )
 
+# Bonos Dollar-Linked (DLK). Solo pesos.
+DLK_TICKERS: tuple[BondTicker, ...] = (
+    BondTicker("D30S6", "D30S6", "ARS", BondCategory.DLK),
+    BondTicker("TZV26", "TZV26", "ARS", BondCategory.DLK),
+    BondTicker("TZV27", "TZV27", "ARS", BondCategory.DLK),
+    BondTicker("TZV28", "TZV28", "ARS", BondCategory.DLK),
+)
+
 
 BOND_TICKERS: tuple[BondTicker, ...] = (
     HARD_DOLLAR_TICKERS
@@ -102,6 +112,7 @@ BOND_TICKERS: tuple[BondTicker, ...] = (
     + CER_TICKERS
     + TAMAR_TICKERS
     + DUAL_TICKERS
+    + DLK_TICKERS
 )
 
 TICKER_SYMBOLS: tuple[str, ...] = tuple(ticker.symbol for ticker in BOND_TICKERS)
@@ -114,4 +125,6 @@ CATEGORY_LABELS: dict[BondCategory, str] = {
     BondCategory.CER: "CER",
     BondCategory.TAMAR: "TAMAR",
     BondCategory.DUAL: "Duales",
+    BondCategory.DLK: "Dollar-Linked",
+    BondCategory.FUTURO: "Futuros",
 }

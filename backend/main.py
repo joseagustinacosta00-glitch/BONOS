@@ -348,6 +348,60 @@ async def market_shortest_caucion() -> dict:
     }
 
 
+@app.get("/api/futures")
+async def market_futures() -> dict:
+    items = market.futures_quotes()
+    return {
+        "status": market.status,
+        "source": market.settings.market_source,
+        "updated_at": now_argentina_iso(),
+        "items": items,
+    }
+
+
+@app.get("/api/fx/ratios")
+async def fx_ratios() -> dict:
+    """Calcula ratios MEP/CCL desde el snapshot actual (precio ARS / precio USD o Cable)."""
+    snapshot = market.snapshot()
+    by_symbol = {q.get("symbol"): q for q in snapshot.get("quotes", [])}
+
+    pairs = [
+        ("AL30", "AL30D", "MEP"),
+        ("AL30", "AL30C", "CCL"),
+    ]
+
+    items = []
+    for ars_symbol, fx_symbol, label in pairs:
+        ars_quote = by_symbol.get(ars_symbol)
+        fx_quote = by_symbol.get(fx_symbol)
+        if not ars_quote or not fx_quote:
+            continue
+        ars_last = ars_quote.get("last")
+        fx_last = fx_quote.get("last")
+        ratio = None
+        if ars_last is not None and fx_last not in (None, 0):
+            try:
+                ratio = float(ars_last) / float(fx_last)
+            except (TypeError, ValueError, ZeroDivisionError):
+                ratio = None
+        items.append({
+            "name": f"{ars_symbol}/{fx_symbol}",
+            "label": label,
+            "ars_symbol": ars_symbol,
+            "ars_last": ars_last,
+            "fx_symbol": fx_symbol,
+            "fx_last": fx_last,
+            "ratio": ratio,
+            "updated_at": ars_quote.get("updated_at") or fx_quote.get("updated_at"),
+        })
+    return {
+        "source": market.settings.market_source,
+        "status": market.status,
+        "updated_at": now_argentina_iso(),
+        "items": items,
+    }
+
+
 @app.get("/api/market/cauciones")
 async def market_cauciones() -> dict:
     items = market.caucion_quotes()
