@@ -127,6 +127,15 @@ function clearOwnChart() {
   });
   ownOverlays = [];
   renderOverlayList();
+  if (typeof ownIndicators !== "undefined") {
+    ownIndicators.forEach((ind) => {
+      ind.series.forEach((s) => {
+        try { ownChart.removeSeries(s); } catch (_) {}
+      });
+    });
+    ownIndicators = [];
+    if (typeof renderIndicatorList === "function") renderIndicatorList();
+  }
 }
 
 function buildSeriesKey(spec) {
@@ -166,6 +175,101 @@ async function fetchSeriesPoints(spec) {
     }
   }
   return unique;
+}
+
+// ===== Indicadores tecnicos (calculo puro) =====
+
+function calcSMA(points, n) {
+  const result = [];
+  if (!points.length || n < 1) return result;
+  let sum = 0;
+  const queue = [];
+  for (const p of points) {
+    queue.push(p.value);
+    sum += p.value;
+    if (queue.length > n) sum -= queue.shift();
+    if (queue.length === n) result.push({ time: p.time, value: sum / n });
+  }
+  return result;
+}
+
+function calcEMA(points, n) {
+  const result = [];
+  if (points.length < n) return result;
+  const k = 2 / (n + 1);
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += points[i].value;
+  let ema = sum / n;
+  result.push({ time: points[n - 1].time, value: ema });
+  for (let i = n; i < points.length; i++) {
+    ema = points[i].value * k + ema * (1 - k);
+    result.push({ time: points[i].time, value: ema });
+  }
+  return result;
+}
+
+function calcBollinger(points, n, k = 2) {
+  const upper = [], mid = [], lower = [];
+  if (points.length < n) return { upper, mid, lower };
+  const queue = [];
+  for (const p of points) {
+    queue.push(p.value);
+    if (queue.length > n) queue.shift();
+    if (queue.length === n) {
+      const avg = queue.reduce((a, b) => a + b, 0) / n;
+      const variance = queue.reduce((a, b) => a + (b - avg) ** 2, 0) / n;
+      const sd = Math.sqrt(variance);
+      mid.push({ time: p.time, value: avg });
+      upper.push({ time: p.time, value: avg + k * sd });
+      lower.push({ time: p.time, value: avg - k * sd });
+    }
+  }
+  return { upper, mid, lower };
+}
+
+function calcRSI(points, n = 14) {
+  const result = [];
+  if (points.length <= n) return result;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= n; i++) {
+    const change = points[i].value - points[i - 1].value;
+    if (change > 0) gains += change; else losses -= change;
+  }
+  let avgGain = gains / n;
+  let avgLoss = losses / n;
+  const firstRs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  result.push({ time: points[n].time, value: avgLoss === 0 ? 100 : 100 - 100 / (1 + firstRs) });
+  for (let i = n + 1; i < points.length; i++) {
+    const change = points[i].value - points[i - 1].value;
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? -change : 0;
+    avgGain = (avgGain * (n - 1) + gain) / n;
+    avgLoss = (avgLoss * (n - 1) + loss) / n;
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    result.push({ time: points[i].time, value: avgLoss === 0 ? 100 : 100 - 100 / (1 + rs) });
+  }
+  return result;
+}
+
+function calcMACD(points, fast = 12, slow = 26, signal = 9) {
+  const fastEma = calcEMA(points, fast);
+  const slowEma = calcEMA(points, slow);
+  const slowMap = new Map(slowEma.map((p) => [p.time, p.value]));
+  const macdLine = [];
+  for (const p of fastEma) {
+    if (slowMap.has(p.time)) {
+      macdLine.push({ time: p.time, value: p.value - slowMap.get(p.time) });
+    }
+  }
+  const signalLine = calcEMA(macdLine, signal);
+  const sigMap = new Map(signalLine.map((p) => [p.time, p.value]));
+  const histogram = [];
+  for (const p of macdLine) {
+    if (sigMap.has(p.time)) {
+      histogram.push({ time: p.time, value: p.value - sigMap.get(p.time), color: (p.value - sigMap.get(p.time)) >= 0 ? "#22d3ee" : "#fb7185" });
+    }
+  }
+  return { macd: macdLine, signal: signalLine, histogram };
 }
 
 function aggregateOhlc(points, bucket) {
@@ -376,6 +480,154 @@ function renderSeriesList(items, ticker) {
     });
   });
 }
+
+// ===== Aplicar indicadores al chart =====
+
+const ownIndicatorType = document.querySelector("#ownIndicatorType");
+const ownIndicatorParam1 = document.querySelector("#ownIndicatorParam1");
+const ownIndicatorParam2 = document.querySelector("#ownIndicatorParam2");
+const ownIndicatorParam3 = document.querySelector("#ownIndicatorParam3");
+const ownAddIndicator = document.querySelector("#ownAddIndicator");
+const ownIndicatorList = document.querySelector("#ownIndicatorList");
+
+let ownIndicators = [];
+
+const INDICATOR_COLORS = {
+  sma: "#facc15",
+  ema: "#a78bfa",
+  bollinger_upper: "#34d399",
+  bollinger_mid: "#94a3b8",
+  bollinger_lower: "#34d399",
+  rsi: "#fb923c",
+  macd_line: "#38bdf8",
+  macd_signal: "#fb7185",
+  macd_hist: "#475569",
+};
+
+function getMainSeriesPoints() {
+  if (!ownOverlays.length) return null;
+  const main = ownOverlays[0];
+  const data = main.series.data?.() ?? null;
+  if (data && data.length) {
+    // Para velas convertimos close a value para indicadores
+    if (typeof data[0].close !== "undefined") {
+      return data.map((d) => ({ time: d.time, value: d.close }));
+    }
+    return data.map((d) => ({ time: d.time, value: d.value }));
+  }
+  return null;
+}
+
+function applyIndicator(type, params) {
+  const chart = ensureOwnChart();
+  if (!chart) return;
+  const points = getMainSeriesPoints();
+  if (!points || !points.length) {
+    setOwnStatus("error", "Primero grafica una serie principal");
+    return;
+  }
+
+  const id = `ind_${Date.now()}`;
+  const created = [];
+
+  if (type === "sma") {
+    const n = Math.max(2, parseInt(params.p1, 10) || 20);
+    const series = chart.addLineSeries({ color: INDICATOR_COLORS.sma, lineWidth: 2, priceLineVisible: false });
+    series.setData(calcSMA(points, n));
+    created.push(series);
+    ownIndicators.push({ id, type, label: `SMA(${n})`, color: INDICATOR_COLORS.sma, series: created });
+  } else if (type === "ema") {
+    const n = Math.max(2, parseInt(params.p1, 10) || 20);
+    const series = chart.addLineSeries({ color: INDICATOR_COLORS.ema, lineWidth: 2, priceLineVisible: false });
+    series.setData(calcEMA(points, n));
+    created.push(series);
+    ownIndicators.push({ id, type, label: `EMA(${n})`, color: INDICATOR_COLORS.ema, series: created });
+  } else if (type === "bollinger") {
+    const n = Math.max(2, parseInt(params.p1, 10) || 20);
+    const k = Math.max(1, parseFloat(params.p2) || 2);
+    const bands = calcBollinger(points, n, k);
+    const upper = chart.addLineSeries({ color: INDICATOR_COLORS.bollinger_upper, lineWidth: 1, priceLineVisible: false });
+    const mid = chart.addLineSeries({ color: INDICATOR_COLORS.bollinger_mid, lineWidth: 1, lineStyle: 2, priceLineVisible: false });
+    const lower = chart.addLineSeries({ color: INDICATOR_COLORS.bollinger_lower, lineWidth: 1, priceLineVisible: false });
+    upper.setData(bands.upper);
+    mid.setData(bands.mid);
+    lower.setData(bands.lower);
+    created.push(upper, mid, lower);
+    ownIndicators.push({ id, type, label: `Bollinger(${n},${k})`, color: INDICATOR_COLORS.bollinger_upper, series: created });
+  } else if (type === "rsi") {
+    const n = Math.max(2, parseInt(params.p1, 10) || 14);
+    const series = chart.addLineSeries({
+      color: INDICATOR_COLORS.rsi,
+      lineWidth: 2,
+      priceLineVisible: false,
+      pane: 1,
+    });
+    series.setData(calcRSI(points, n));
+    // Lineas de referencia 70/30
+    series.createPriceLine({ price: 70, color: "#475569", lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    series.createPriceLine({ price: 30, color: "#475569", lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    created.push(series);
+    ownIndicators.push({ id, type, label: `RSI(${n})`, color: INDICATOR_COLORS.rsi, series: created });
+  } else if (type === "macd") {
+    const fast = Math.max(2, parseInt(params.p1, 10) || 12);
+    const slow = Math.max(fast + 1, parseInt(params.p2, 10) || 26);
+    const signal = Math.max(2, parseInt(params.p3, 10) || 9);
+    const result = calcMACD(points, fast, slow, signal);
+    const macdLine = chart.addLineSeries({ color: INDICATOR_COLORS.macd_line, lineWidth: 2, priceLineVisible: false, pane: 2 });
+    const signalLine = chart.addLineSeries({ color: INDICATOR_COLORS.macd_signal, lineWidth: 2, priceLineVisible: false, pane: 2 });
+    const histogram = chart.addHistogramSeries({ priceLineVisible: false, pane: 2 });
+    macdLine.setData(result.macd);
+    signalLine.setData(result.signal);
+    histogram.setData(result.histogram);
+    created.push(macdLine, signalLine, histogram);
+    ownIndicators.push({ id, type, label: `MACD(${fast},${slow},${signal})`, color: INDICATOR_COLORS.macd_line, series: created });
+  } else {
+    setOwnStatus("error", "Tipo de indicador no soportado");
+    return;
+  }
+
+  renderIndicatorList();
+  setOwnStatus("ok", `Indicador agregado`);
+}
+
+function removeIndicator(id) {
+  const idx = ownIndicators.findIndex((i) => i.id === id);
+  if (idx === -1) return;
+  const ind = ownIndicators[idx];
+  for (const s of ind.series) {
+    try { ownChart.removeSeries(s); } catch (_) {}
+  }
+  ownIndicators.splice(idx, 1);
+  renderIndicatorList();
+}
+
+function renderIndicatorList() {
+  if (!ownIndicators.length) {
+    ownIndicatorList.innerHTML = '<span class="tv-subtle">Sin indicadores aplicados.</span>';
+    return;
+  }
+  ownIndicatorList.innerHTML = ownIndicators.map((i) => `
+    <span class="tv-chip" style="border-color:${i.color}">
+      <span class="tv-chip-dot" style="background:${i.color}"></span>
+      ${i.label}
+      <button type="button" class="tv-chip-x" data-indicator-id="${i.id}" title="Quitar">×</button>
+    </span>
+  `).join("");
+  ownIndicatorList.querySelectorAll("[data-indicator-id]").forEach((btn) => {
+    btn.addEventListener("click", () => removeIndicator(btn.dataset.indicatorId));
+  });
+}
+
+ownAddIndicator?.addEventListener("click", () => {
+  const type = ownIndicatorType.value;
+  applyIndicator(type, {
+    p1: ownIndicatorParam1.value,
+    p2: ownIndicatorParam2.value,
+    p3: ownIndicatorParam3.value,
+  });
+});
+
+renderIndicatorList();
 
 async function loadOwnTickerOptions() {
   try {
