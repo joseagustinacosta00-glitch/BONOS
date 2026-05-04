@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd27 cargado - HD: 'Devenga desde' visible + gracia colapsable");
+console.log("[Monitor] app.js v=hd28 cargado - HD: step-down + diferimiento de primer pago");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -93,6 +93,11 @@ const hdFixedCoupon = document.querySelector("#hdFixedCoupon");
 const hdStepUpSection = document.querySelector("#hdStepUpSection");
 const hdStepUpRows = document.querySelector("#hdStepUpRows");
 const hdAmortizationSection = document.querySelector("#hdAmortizationSection");
+const hdDeferredSection = document.querySelector("#hdDeferredSection");
+const hdDeferredPeriod = document.querySelector("#hdDeferredPeriod");
+const hdDeferredApply = document.querySelector("#hdDeferredApply");
+const hdDeferredReset = document.querySelector("#hdDeferredReset");
+const hdDeferredStatus = document.querySelector("#hdDeferredStatus");
 const hdGraceSection = document.querySelector("#hdGraceSection");
 const hdGraceMode = document.querySelector("#hdGraceMode");
 const hdGracePeriodWrap = document.querySelector("#hdGracePeriodWrap");
@@ -1092,13 +1097,22 @@ function setHdSaveStatus(kind, text) {
 }
 
 function renderHardDollarCouponInputs() {
-  const isStepUp = hdCouponType.value === "step_up";
-  hdFixedCouponWrap.classList.toggle("d-none", isStepUp);
-  hdStepUpSection.classList.toggle("d-none", !isStepUp);
+  const couponType = hdCouponType.value;
+  const isStepLike = couponType === "step_up" || couponType === "step_down";
+  hdFixedCouponWrap.classList.toggle("d-none", isStepLike);
+  hdStepUpSection.classList.toggle("d-none", !isStepLike);
   const isAmortizable = hdBondType.value === "amortizable";
   hdAmortizationSection.classList.toggle("d-none", !isAmortizable);
 
-  if (!isStepUp) {
+  // Actualizar titulo de la seccion segun el tipo
+  const stepHeading = hdStepUpSection?.querySelector("h3");
+  if (stepHeading) {
+    stepHeading.textContent = couponType === "step_down"
+      ? "Cupon step-down por año"
+      : "Cupon step-up por año";
+  }
+
+  if (!isStepLike) {
     hdStepUpRows.innerHTML = "";
   } else {
     const years = hardDollarYearLabels();
@@ -1137,13 +1151,88 @@ function hardDollarYearLabels() {
 }
 
 function getHdAnnualRateForYear(year) {
-  const isStepUp = hdCouponType.value === "step_up";
-  if (!isStepUp) {
+  const couponType = hdCouponType.value;
+  const isStepLike = couponType === "step_up" || couponType === "step_down";
+  if (!isStepLike) {
     return parseFloat(hdFixedCoupon.value) || 0;
   }
   const input = hdStepUpRows.querySelector(`input[data-hd-step-year="${year}"]`);
   if (!input || input.value === "") return 0;
   return parseFloat(input.value) || 0;
+}
+
+// Snapshot de cupones originales (antes de aplicar diferimiento) para poder
+// restaurar. Se setea cuando se generan/importan los cupones.
+let hdCouponsOriginal = null;
+
+// Inicio de pagos: ELIMINA los flujos previos al primer flujo que paga, asi el
+// nuevo primer flujo acumula naturalmente desde la fecha de emision (el backend
+// usa issue_date como period_start del primer cupon).
+function snapshotHdCouponsOriginal() {
+  hdCouponsOriginal = hdCoupons.map((c) => ({ ...c }));
+}
+
+function renderHdDeferredControls() {
+  if (!hdDeferredSection) return;
+  if (!hdCoupons.length) {
+    hdDeferredSection.classList.add("d-none");
+    return;
+  }
+  hdDeferredSection.classList.remove("d-none");
+  if (hdDeferredPeriod) {
+    const refList = hdCouponsOriginal && hdCouponsOriginal.length >= hdCoupons.length ? hdCouponsOriginal : hdCoupons;
+    hdDeferredPeriod.innerHTML = refList.map((c, i) =>
+      `<option value="${i}">Flujo ${i + 1} - ${formatDateDisplay(c.payment_date)}</option>`
+    ).join("");
+  }
+}
+
+function applyHdDeferredStart() {
+  if (!hdCouponsOriginal || !hdCouponsOriginal.length) {
+    setHdStatus("error", "Generar cupones primero");
+    return;
+  }
+  const idx = parseInt(hdDeferredPeriod?.value, 10);
+  if (!Number.isFinite(idx) || idx < 0 || idx >= hdCouponsOriginal.length) {
+    setHdStatus("error", "Seleccionar un flujo valido");
+    return;
+  }
+  // Eliminar los primeros idx flujos. El nuevo flujo 1 acumulara desde issue_date.
+  hdCoupons = hdCouponsOriginal.slice(idx).map((c) => ({ ...c }));
+  if (hdDeferredStatus) {
+    if (idx === 0) {
+      hdDeferredStatus.textContent = "Sin diferimiento";
+    } else {
+      hdDeferredStatus.textContent = `Eliminados ${idx} flujos previos. Nuevo flujo 1 acumula desde la emision.`;
+    }
+  }
+  // Recalcular tasas para los flujos restantes
+  hdCoupons = hdCoupons.map((c) => ({
+    ...c,
+    annual_rate_percent: c.payment_date ? getHdAnnualRateForYear(c.payment_date.slice(0, 4)) : 0,
+    in_grace: false,
+  }));
+  recomputePeriodAmortizations();
+  renderHdAnnualAmortRows();
+  renderHdGraceControls();
+  applyHdGracePeriod();
+  renderHdCouponsTable();
+}
+
+function resetHdDeferredStart() {
+  if (!hdCouponsOriginal || !hdCouponsOriginal.length) return;
+  hdCoupons = hdCouponsOriginal.map((c) => ({ ...c, in_grace: false }));
+  if (hdDeferredPeriod) hdDeferredPeriod.value = "0";
+  if (hdDeferredStatus) hdDeferredStatus.textContent = "Restaurado a todos los flujos";
+  hdCoupons = hdCoupons.map((c) => ({
+    ...c,
+    annual_rate_percent: c.payment_date ? getHdAnnualRateForYear(c.payment_date.slice(0, 4)) : 0,
+  }));
+  recomputePeriodAmortizations();
+  renderHdAnnualAmortRows();
+  renderHdGraceControls();
+  applyHdGracePeriod();
+  renderHdCouponsTable();
 }
 
 // Periodo de gracia: marca cupones anteriores al "primer flujo que paga" como
@@ -1266,8 +1355,10 @@ async function generateHdSchedule() {
       amortization_percent: 0,
       in_grace: false,
     }));
+    snapshotHdCouponsOriginal();
     renderHdAnnualAmortRows();
     recomputePeriodAmortizations();
+    renderHdDeferredControls();
     renderHdGraceControls();
     applyHdGracePeriod();
     renderHdCouponsTable();
@@ -1830,8 +1921,10 @@ async function importHdDates() {
       amortization_percent: 0,
       in_grace: false,
     }));
+    snapshotHdCouponsOriginal();
     renderHdAnnualAmortRows();
     recomputePeriodAmortizations();
+    renderHdDeferredControls();
     renderHdGraceControls();
     applyHdGracePeriod();
     renderHdCouponsTable();
@@ -2330,6 +2423,10 @@ hdGraceApply?.addEventListener("click", applyHdGracePeriod);
 hdGracePeriod?.addEventListener("change", applyHdGracePeriod);
 hdGraceYear?.addEventListener("change", applyHdGracePeriod);
 hdGraceMonth?.addEventListener("change", applyHdGracePeriod);
+
+// Inicio de pagos (diferimiento del primer pago, caso GD35)
+hdDeferredApply?.addEventListener("click", applyHdDeferredStart);
+hdDeferredReset?.addEventListener("click", resetHdDeferredStart);
 
 if (!hdGenerateSchedule || !hdCalculate) {
   console.warn("[Bono HD] elementos de la calculadora no encontrados; revisa que index.html esté actualizado y limpia cache.");
