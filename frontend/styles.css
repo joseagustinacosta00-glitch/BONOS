@@ -393,7 +393,14 @@ tbody td {
   margin-bottom: 14px;
 }
 
+.hd-saved-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
 .hd-saved-item {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -409,6 +416,16 @@ tbody td {
 .hd-saved-item:hover {
   background: #eef7fb;
   border-color: var(--accent);
+}
+
+.hd-saved-delete {
+  align-self: stretch;
+}
+
+.hd-import-ocr {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
 }
 
 .hd-saved-item small {

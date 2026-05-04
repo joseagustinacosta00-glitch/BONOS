@@ -96,6 +96,8 @@ const hdCouponsBody = document.querySelector("#hdCouponsBody");
 const hdDatesFile = document.querySelector("#hdDatesFile");
 const hdDatesText = document.querySelector("#hdDatesText");
 const hdImportDates = document.querySelector("#hdImportDates");
+const hdOcrFile = document.querySelector("#hdOcrFile");
+const hdOcrSubmit = document.querySelector("#hdOcrSubmit");
 const hdCashflowBody = document.querySelector("#hdCashflowBody");
 const hdGenerateSchedule = document.querySelector("#hdGenerateSchedule");
 const hdCalculate = document.querySelector("#hdCalculate");
@@ -1094,13 +1096,22 @@ function renderHdSavedList(items) {
     return;
   }
   hdSavedList.innerHTML = filtered.map((item) => `
-    <button type="button" class="hd-saved-item" data-hd-saved-ticker="${item.ticker}">
-      <strong>${item.ticker}</strong>
-      <small>${formatDateDisplay(item.issue_date)} → ${formatDateDisplay(item.maturity_date)} · ${item.bond_type} · ${item.frequency}</small>
-    </button>
+    <div class="hd-saved-row">
+      <button type="button" class="hd-saved-item" data-hd-saved-ticker="${item.ticker}">
+        <strong>${item.ticker}</strong>
+        <small>${formatDateDisplay(item.issue_date)} → ${formatDateDisplay(item.maturity_date)} · ${item.bond_type} · ${item.frequency}</small>
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-danger hd-saved-delete" data-hd-saved-delete="${item.ticker}" title="Eliminar">x</button>
+    </div>
   `).join("");
   hdSavedList.querySelectorAll("[data-hd-saved-ticker]").forEach((button) => {
     button.addEventListener("click", () => loadHdSaved(button.dataset.hdSavedTicker));
+  });
+  hdSavedList.querySelectorAll("[data-hd-saved-delete]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteHdSaved(button.dataset.hdSavedDelete);
+    });
   });
 }
 
@@ -1184,6 +1195,89 @@ async function saveHdCashflow() {
   } catch (error) {
     setHdSaveStatus("error", error.message || "Error al guardar");
     console.error("[Bono HD] guardar", error);
+  }
+}
+
+let tesseractLoadPromise = null;
+function loadTesseractJs() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (tesseractLoadPromise) return tesseractLoadPromise;
+  tesseractLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.Tesseract) resolve(window.Tesseract);
+      else reject(new Error("Tesseract no inicializo"));
+    };
+    script.onerror = () => {
+      tesseractLoadPromise = null;
+      reject(new Error("No se pudo cargar tesseract.js"));
+    };
+    document.head.appendChild(script);
+  });
+  return tesseractLoadPromise;
+}
+
+async function ocrImportHdDates() {
+  const file = hdOcrFile?.files?.[0];
+  if (!file) {
+    setHdStatus("error", "Subir una imagen para OCR");
+    return;
+  }
+  setHdStatus("draft", "Cargando OCR...");
+  let Tesseract;
+  try {
+    Tesseract = await loadTesseractJs();
+  } catch (error) {
+    setHdStatus("error", "No se pudo cargar el motor OCR");
+    console.error("[Bono HD] cargar tesseract", error);
+    return;
+  }
+  setHdStatus("draft", "Extrayendo texto de la imagen (puede tardar)...");
+  let recognized;
+  try {
+    recognized = await Tesseract.recognize(file, "spa", {
+      logger: (info) => {
+        if (info && info.status) {
+          setHdStatus("draft", `OCR: ${info.status} ${info.progress ? `${Math.round(info.progress * 100)}%` : ""}`);
+        }
+      },
+    });
+  } catch (error) {
+    setHdStatus("error", "OCR fallo, probar con otra imagen");
+    console.error("[Bono HD] OCR recognize", error);
+    return;
+  }
+  const extractedText = (recognized?.data?.text || "").trim();
+  if (!extractedText) {
+    setHdStatus("error", "OCR no detecto texto");
+    return;
+  }
+  if (hdDatesText) {
+    const previous = hdDatesText.value.trim();
+    hdDatesText.value = previous ? `${previous}\n\n${extractedText}` : extractedText;
+  }
+  await importHdDates();
+}
+
+async function deleteHdSaved(ticker) {
+  if (!ticker) return;
+  if (!window.confirm(`Eliminar bono HD guardado: ${ticker}?`)) return;
+  try {
+    const response = await fetch(`/api/calculators/bond-hd/saved/${encodeURIComponent(ticker)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo eliminar");
+    }
+    setHdSaveStatus("ok", `${ticker} eliminado`);
+    if (hdSavedDetail) hdSavedDetail.classList.add("d-none");
+    await fetchHdSavedList();
+  } catch (error) {
+    setHdSaveStatus("error", error.message || "Error al eliminar");
+    console.error("[Bono HD] eliminar guardado", error);
   }
 }
 
@@ -1641,6 +1735,13 @@ hdImportDates?.addEventListener("click", () => {
   importHdDates().catch((err) => {
     console.error("[Bono HD] importar fechas fallo", err);
     setHdStatus("error", "Error al importar fechas");
+  });
+});
+hdOcrSubmit?.addEventListener("click", () => {
+  console.log("[Bono HD] click OCR");
+  ocrImportHdDates().catch((err) => {
+    console.error("[Bono HD] OCR fallo", err);
+    setHdStatus("error", "Error en OCR");
   });
 });
 
