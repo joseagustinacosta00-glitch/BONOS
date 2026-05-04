@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd30 cargado - HD: 180/360 ahora siempre dias reales / 360");
+console.log("[Monitor] app.js v=hd31 cargado - HD: 30/360 day count + secciones inicio/gracia abiertas");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -1192,6 +1192,17 @@ function renderHdDeferredControls() {
   }
 }
 
+// Las secciones <details> arrancan colapsadas por inline d-none.
+// Las marcamos visibles + abiertas tras generar los cupones para que el
+// usuario las vea siempre y no piense que desaparecieron.
+function ensureHdDetailsVisible() {
+  for (const el of [hdDeferredSection, hdGraceSection]) {
+    if (!el) continue;
+    el.classList.remove("d-none");
+    if (el.tagName === "DETAILS") el.open = true;
+  }
+}
+
 function applyHdDeferredStart() {
   if (!hdCouponsOriginal || !hdCouponsOriginal.length) {
     setHdStatus("error", "Generar cupones primero");
@@ -1366,6 +1377,7 @@ async function generateHdSchedule() {
     renderHdDeferredControls();
     renderHdGraceControls();
     applyHdGracePeriod();
+    ensureHdDetailsVisible();
     renderHdCouponsTable();
     hdCouponsSection.classList.remove("d-none");
     hdCalculate.disabled = hdCoupons.length === 0;
@@ -1932,6 +1944,7 @@ async function importHdDates() {
     renderHdDeferredControls();
     renderHdGraceControls();
     applyHdGracePeriod();
+    ensureHdDetailsVisible();
     renderHdCouponsTable();
     hdCouponsSection.classList.remove("d-none");
     if (hdCalculate) hdCalculate.disabled = false;

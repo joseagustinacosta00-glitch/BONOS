@@ -407,8 +407,8 @@ HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
 HD_CONVENTION_LABELS: dict[BondHdConvention, str] = {
     BondHdConvention.THIRTY_360_EU: "30/360 EU",
     BondHdConvention.THIRTY_360_US: "30/360 US",
-    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU (dias reales / 360)",
-    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US (dias reales / 360)",
+    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU (DAYS360 EU / 360)",
+    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US (DAYS360 US / 360 - como Excel)",
     BondHdConvention.ACT_360: "Act/360",
     BondHdConvention.ACT_365: "Act/365",
     BondHdConvention.ACT_ACT: "Act/Act",
@@ -491,6 +491,21 @@ class BondHdCalculation:
         }
 
 
+def _days_30_360(start: date, end: date, us: bool) -> int:
+    """Day count 30/360. EU: cap dia a 30 en ambos. US (DAYS360 de Excel):
+    si d1==31 -> 30; si d2==31 y d1>=30 -> 30."""
+    d1, d2 = start.day, end.day
+    if us:
+        if d1 == 31:
+            d1 = 30
+        if d2 == 31 and d1 >= 30:
+            d2 = 30
+    else:
+        d1 = min(d1, 30)
+        d2 = min(d2, 30)
+    return (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
+
+
 def hd_year_fraction(
     start: date,
     end: date,
@@ -500,11 +515,11 @@ def hd_year_fraction(
     if end < start:
         return 0.0
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
-        # Siempre prorratea por dias calendario reales sobre 360.
-        # Mensual ~30/31 dias, semestral ~180/183, etc. — el interes da
-        # decimales segun los dias reales de cada periodo. Asi tasa anual
-        # 6% en un periodo de 31 dias da 6 * 31/360 = 0.5167%, no 0.5%.
-        return (end - start).days / 360.0
+        # 30/360 day count (equivalente a DAYS360 de Excel) sobre 360. Cada
+        # mes vale 30 dias, asi 30/07 -> 31/08 son 30 dias y dan exactamente
+        # 1/12 del año. Periodos largos como 30/06 -> 31/08 dan 60 dias.
+        us = convention == BondHdConvention.ONE_EIGHTY_360_US
+        return _days_30_360(start, end, us=us) / 360.0
     if convention == BondHdConvention.ACT_360:
         return (end - start).days / 360
     if convention == BondHdConvention.ACT_365:
@@ -534,7 +549,8 @@ def hd_period_days(
     frequency: BondHdFrequency | None = None,
 ) -> int:
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
-        return (end - start).days
+        us = convention == BondHdConvention.ONE_EIGHTY_360_US
+        return _days_30_360(start, end, us=us)
     if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
         if convention == BondHdConvention.THIRTY_360_EU:
             d1 = min(start.day, 30)
