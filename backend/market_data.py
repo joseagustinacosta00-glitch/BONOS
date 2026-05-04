@@ -186,6 +186,31 @@ class MarketDataService:
                 if self.settings.market_source == "mock" and quote["last"] is None:
                     quote["last"] = 35.0 + int(quote.get("term_days") or 1) * 0.05
 
+            # Sembrar futuros DLR mensuales para que aparezcan tickers aunque
+            # pyRofex no descubra (cuenta sin permisos derivados, modo mock, etc.).
+            for symbol in self._fallback_futures_symbols():
+                if symbol in self._futures_quotes:
+                    continue
+                self._futures_quotes[symbol] = {
+                    "symbol": symbol,
+                    "provider_symbol": symbol,
+                    "category": "futuro",
+                    "currency": "ARS",
+                    "underlying": self._futures_underlying(symbol),
+                    "expiration": None,
+                    "last": None,
+                    "last_volume": None,
+                    "cumulative_volume": None,
+                    "bid": None,
+                    "ask": None,
+                    "change": None,
+                    "volume": None,
+                    "previous_close": None,
+                    "opening_price": None,
+                    "updated_at": now,
+                    "raw": {},
+                }
+
     async def _mock_loop(self) -> None:
         base_prices = {
             "AO27": 78.0,
@@ -587,13 +612,27 @@ class MarketDataService:
 
     def _load_futures_catalog(self, pyRofex: Any, environment: Any) -> None:
         """Descubre los futuros disponibles (DLR/MMMYY, etc.) y los registra
-        para suscripcion en el market ROFX."""
+        para suscripcion en el market ROFX. Si la API no devuelve nada, usa
+        un fallback hardcodeado de DLR mensuales."""
+        instruments: list[Any] = []
+
+        # Intento 1: con detalle (suele tener cficode)
         try:
-            response = pyRofex.get_all_instruments(environment=environment)
+            response = pyRofex.get_detailed_instruments(environment=environment)
+            instruments = self._instrument_rows(response)
+            logger.info("get_detailed_instruments devolvio %d instrumentos", len(instruments))
         except Exception as exc:
-            logger.warning("No se pudo descubrir futuros: %s", exc)
-            return
-        instruments = self._instrument_rows(response)
+            logger.info("get_detailed_instruments no disponible: %s", exc)
+
+        # Intento 2: get_all_instruments
+        if not instruments:
+            try:
+                response = pyRofex.get_all_instruments(environment=environment)
+                instruments = self._instrument_rows(response)
+                logger.info("get_all_instruments devolvio %d instrumentos", len(instruments))
+            except Exception as exc:
+                logger.warning("No se pudo descubrir instrumentos: %s", exc)
+
         now = now_argentina_iso()
         registered = 0
         for instrument in instruments:
@@ -625,7 +664,50 @@ class MarketDataService:
                     "raw": {},
                 }
                 registered += 1
-        logger.info("Futuros descubiertos para suscripcion: %d", registered)
+        logger.info("Futuros descubiertos automaticamente: %d", registered)
+
+        # Fallback: si la API no devolvio futuros, registramos un set comun de DLR mensuales.
+        # pyRofex puede limitar segun permisos de cuenta; estos simbolos son los standar de Matba.
+        if registered == 0:
+            fallback_symbols = self._fallback_futures_symbols()
+            logger.warning(
+                "API no devolvio futuros, usando fallback hardcoded de %d simbolos",
+                len(fallback_symbols),
+            )
+            for symbol in fallback_symbols:
+                self._futures_provider_to_symbol[symbol] = symbol
+                self._futures_quotes[symbol] = {
+                    "symbol": symbol,
+                    "provider_symbol": symbol,
+                    "category": "futuro",
+                    "currency": "ARS",
+                    "underlying": self._futures_underlying(symbol),
+                    "expiration": None,
+                    "last": None,
+                    "last_volume": None,
+                    "cumulative_volume": None,
+                    "bid": None,
+                    "ask": None,
+                    "change": None,
+                    "volume": None,
+                    "previous_close": None,
+                    "opening_price": None,
+                    "updated_at": now,
+                    "raw": {},
+                }
+
+    @staticmethod
+    def _fallback_futures_symbols() -> list[str]:
+        """Set comun de futuros DLR (dolar) en Matba Rofex. 12 meses corridos."""
+        meses = [
+            "ENE", "FEB", "MAR", "ABR", "MAY", "JUN",
+            "JUL", "AGO", "SEP", "OCT", "NOV", "DIC",
+        ]
+        symbols: list[str] = []
+        for year_short in ("26", "27"):
+            for mes in meses:
+                symbols.append(f"DLR/{mes}{year_short}")
+        return symbols
 
     @staticmethod
     def _instrument_cficode(instrument: Any) -> str:

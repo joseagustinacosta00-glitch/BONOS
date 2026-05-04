@@ -3,9 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=hd18">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd25">
   </head>
   <body>
     <main class="app-shell">
@@ -144,6 +147,41 @@
             <tr><td class="ticker">AL41D</td><td>AL41</td><td><span class="currency-pill">USD</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
             <tr><td class="ticker">AL41C</td><td>AL41</td><td><span class="currency-pill">Cable</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td><td class="text-end"><span class="empty-cell">s/d</span></td></tr>
             </tbody>
+          </table>
+        </section>
+
+        <section id="fxTableWrap" class="table-wrap" aria-label="Ratios FX" style="display:none;">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Par</th>
+                <th scope="col">Tipo</th>
+                <th scope="col" class="text-end">Bono ARS (last)</th>
+                <th scope="col" class="text-end">Bono USD/Cable (last)</th>
+                <th scope="col" class="text-end">Ratio</th>
+                <th scope="col" class="text-end">Hora</th>
+              </tr>
+            </thead>
+            <tbody id="fxBody"></tbody>
+          </table>
+        </section>
+
+        <section id="futTableWrap" class="table-wrap" aria-label="Futuros y DLK" style="display:none;">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Ticker</th>
+                <th scope="col">Tipo</th>
+                <th scope="col">Vencimiento</th>
+                <th scope="col" class="text-end">Compra</th>
+                <th scope="col" class="text-end">Venta</th>
+                <th scope="col" class="text-end">Ultimo</th>
+                <th scope="col" class="text-end">Var %</th>
+                <th scope="col" class="text-end">Volumen</th>
+                <th scope="col" class="text-end">Hora</th>
+              </tr>
+            </thead>
+            <tbody id="futBody"></tbody>
           </table>
         </section>
       </section>
@@ -855,6 +893,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=hd18"></script>
+    <script src="/app-bundle.js?v=hd25"></script>
   </body>
 </html>

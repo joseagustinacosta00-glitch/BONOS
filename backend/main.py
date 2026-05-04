@@ -207,24 +207,49 @@ async def shutdown() -> None:
     await market.stop()
 
 
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE_HEADERS)
+
+
+@app.get("/app-bundle.js")
+async def app_bundle_js() -> FileResponse:
+    return FileResponse(
+        FRONTEND_DIR / "app.js",
+        media_type="application/javascript",
+        headers=_NO_CACHE_HEADERS,
+    )
+
+
+@app.get("/styles-bundle.css")
+async def styles_bundle_css() -> FileResponse:
+    return FileResponse(
+        FRONTEND_DIR / "styles.css",
+        media_type="text/css",
+        headers=_NO_CACHE_HEADERS,
+    )
 
 
 @app.get("/charts-demo")
 async def charts_demo() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "charts-demo.html")
+    return FileResponse(FRONTEND_DIR / "charts-demo.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/ai-demo")
 async def ai_demo() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "ai-demo.html")
+    return FileResponse(FRONTEND_DIR / "ai-demo.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/tradingview")
 async def tradingview() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "tradingview.html")
+    return FileResponse(FRONTEND_DIR / "tradingview.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/api/tickers")
@@ -663,6 +688,39 @@ _RECURRENT_HINT_PATTERN = re.compile(
 _DAY_MONTH_PATTERN = re.compile(r"\b(\d{1,2})[\/\-\.](\d{1,2})\b(?!\s*[\/\-\.]\s*\d)")
 _NUMERIC_DATE_PATTERN = re.compile(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})")
 _ISO_DATE_PATTERN = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+# "9 de julio" / "9 enero" sin año explicito (para detectar dia+mes recurrente)
+_DAY_SPANISH_MONTH_PATTERN = re.compile(
+    r"\b(\d{1,2})\s*(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b",
+    re.IGNORECASE,
+)
+# "primer pago ... en julio del 2021" / "primer pago ... 2021" / "comienza ... 2021" / "empieza ... 2021"
+_FIRST_PAYMENT_YEAR_PATTERN = re.compile(
+    r"(?:primer(?:o)?\s+(?:pago|cupon|cup[oó]n)|comienza(?:n)?|empieza(?:n)?|inicia(?:n)?|arranca(?:n)?)"
+    r"[^.\n]*?(\d{4})",
+    re.IGNORECASE,
+)
+_FIRST_PAYMENT_MONTH_YEAR_PATTERN = re.compile(
+    r"(?:primer(?:o)?\s+(?:pago|cupon|cup[oó]n)|comienza(?:n)?|empieza(?:n)?|inicia(?:n)?|arranca(?:n)?)"
+    r"[^.\n]*?(?:en|de|del)\s+"
+    r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)"
+    r"\s*(?:de\s+|del\s+)?(\d{4})",
+    re.IGNORECASE,
+)
+
+
+def _detect_first_payment(text: str) -> tuple[int | None, int | None]:
+    """Devuelve (year, month) del primer pago si lo encuentra explicitamente.
+    month puede ser None si solo se indico el año."""
+    m = _FIRST_PAYMENT_MONTH_YEAR_PATTERN.search(text)
+    if m:
+        month_name = m.group(1).lower()
+        year = int(m.group(2))
+        month = SPANISH_MONTHS.get(month_name)
+        return year, month
+    m = _FIRST_PAYMENT_YEAR_PATTERN.search(text)
+    if m:
+        return int(m.group(1)), None
+    return None, None
 
 
 def _expand_recurring_day_month(
@@ -670,16 +728,20 @@ def _expand_recurring_day_month(
     issue_date: date | None,
     maturity_date: date | None,
 ) -> set[date]:
-    """Detecta patrones tipo '10/07 y 09/01 de cada año' y expande las fechas
-    dentro del rango emision-vencimiento. Necesita rango definido."""
-    if issue_date is None or maturity_date is None:
+    """Detecta patrones tipo '10/07 y 09/01 de cada año' o
+    '9 de julio y 9 de enero de cada año, primer pago en julio del 2021'
+    y expande las fechas dentro del rango. Necesita maturity_date para saber
+    hasta donde extender. issue_date se usa como fallback de inicio si no hay
+    'primer pago en YYYY' explicito."""
+    if maturity_date is None:
         return set()
     if not _RECURRENT_HINT_PATTERN.search(text):
         return set()
+
     pairs: set[tuple[int, int]] = set()
+    # 1) Pares numericos tipo 10/07
     for match in _DAY_MONTH_PATTERN.finditer(text):
         a, b = int(match.group(1)), int(match.group(2))
-        # Decidir cual es dia y cual mes: si uno > 12 es seguro
         if a > 12 and 1 <= b <= 12:
             day, month = a, b
         elif b > 12 and 1 <= a <= 12:
@@ -690,20 +752,46 @@ def _expand_recurring_day_month(
             continue
         if 1 <= day <= 31 and 1 <= month <= 12:
             pairs.add((day, month))
+
+    # 2) Pares en español tipo "9 de julio" / "9 enero"
+    for match in _DAY_SPANISH_MONTH_PATTERN.finditer(text):
+        day = int(match.group(1))
+        month = SPANISH_MONTHS.get(match.group(2).lower())
+        if month and 1 <= day <= 31:
+            pairs.add((day, month))
+
     if not pairs:
         return set()
-    results: set[date] = set()
+
+    # Detectar año/mes de primer pago si se indico
+    first_year, first_month = _detect_first_payment(text)
+
+    # Decidir año de inicio
+    if first_year is not None:
+        start_year = first_year
+    elif issue_date is not None:
+        start_year = issue_date.year
+    else:
+        start_year = maturity_date.year - 50  # fallback razonable
+
+    # Si tenemos primer mes, filtrar el primer año a fechas >= ese mes
     from calendar import monthrange
-    for year in range(issue_date.year, maturity_date.year + 1):
+    results: set[date] = set()
+    for year in range(start_year, maturity_date.year + 1):
         for day, month in pairs:
+            if year == start_year and first_month is not None and month < first_month:
+                continue
             last_day = monthrange(year, month)[1]
             actual_day = min(day, last_day)
             try:
                 candidate = date(year, month, actual_day)
             except ValueError:
                 continue
-            if issue_date <= candidate <= maturity_date:
-                results.add(candidate)
+            if candidate > maturity_date:
+                continue
+            if issue_date is not None and candidate < issue_date and first_year is None:
+                continue
+            results.add(candidate)
     return results
 
 

@@ -1,5 +1,11 @@
+console.log("[Monitor] app.js v=hd25 cargado - tablas FX/Futuros separadas");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
+const fxBody = document.querySelector("#fxBody");
+const fxTableWrap = document.querySelector("#fxTableWrap");
+const futBody = document.querySelector("#futBody");
+const futTableWrap = document.querySelector("#futTableWrap");
+const mainTableWrap = quotesBody ? quotesBody.closest(".table-wrap") : null;
 const sourceLabel = document.querySelector("#sourceLabel");
 const updatedAt = document.querySelector("#updatedAt");
 const instrumentCount = document.querySelector("#instrumentCount");
@@ -161,6 +167,19 @@ const DEFAULT_QUOTES = [
 let latestQuotes = [...DEFAULT_QUOTES];
 let ws;
 
+// Caches para evitar parpadeo: las funciones de render son sincronicas
+// y se pintan desde estos caches. Los pollers actualizan los caches
+// y llaman a renderQuotes() cuando hay cambios.
+let fxRatiosCache = null;       // null = todavia no llego, [] = sin datos, [...] = items
+let fxRatiosLoadedOnce = false;
+let futuresCache = null;
+let futuresLoadedOnce = false;
+
+// Track del layout actual de la tabla de mercado para no re-renderizar el header
+// y poder diferenciar ediciones in place vs reemplazo total.
+let currentTableLayout = "";
+let lastQuotesHtml = "";        // body html anterior para no reescribir si no cambio
+
 const BOND_MODEL_LABELS = {
   lecap: "Lecap",
   hard_dollar: "Bono HD",
@@ -225,23 +244,113 @@ function formatDate(value) {
   return `${day}/${month}/${year}`;
 }
 
+function setMarketTableLayout(layoutKey, headerHtml) {
+  // Solo reescribe el header si cambia el layout. El body NO se blanquea
+  // unconditionally: patchMarketBody se encarga de remover lo que no aplica
+  // y de mantener firmes las filas con datos.
+  if (currentTableLayout === layoutKey) return false;
+  marketTableHead.innerHTML = headerHtml;
+  currentTableLayout = layoutKey;
+  lastQuotesHtml = "";
+  // Al cambiar de layout (cantidad de columnas distinta) si o si hay que limpiar
+  // las filas viejas porque sus celdas no coinciden con los headers nuevos.
+  quotesBody.innerHTML = "";
+  return true;
+}
+
+function writeQuotesBody(html) {
+  // Solo escribe si el HTML cambia (usado SOLO para placeholder de carga / vacio).
+  // NUNCA pisa filas que ya tienen data-key (datos reales): si hay filas,
+  // ignoramos el placeholder asi no tapamos los valores.
+  if (quotesBody.querySelector("tr[data-key]")) return;
+  if (html === lastQuotesHtml) return;
+  quotesBody.innerHTML = html;
+  lastQuotesHtml = html;
+}
+
+// Patch del cuerpo celda por celda: NO destruye los <tr>, solo actualiza el
+// textContent/innerHTML de la celda cuyo valor cambio. Asi nunca queda en
+// blanco la tabla entre updates.
+function patchMarketBody(rows, columns, keyOf) {
+  lastQuotesHtml = ""; // invalida el cache de innerHTML
+  const tbody = quotesBody;
+
+  // 1) Quitar SOLO los nodos que sean placeholders (sin data-key), preservando
+  // los <tr> existentes con datos para no parpadear.
+  for (const child of Array.from(tbody.children)) {
+    if (!(child.dataset && child.dataset.key)) child.remove();
+  }
+
+  // 2) Indexar filas existentes por key
+  const existing = new Map();
+  for (const tr of Array.from(tbody.children)) {
+    existing.set(tr.dataset.key, tr);
+  }
+
+  // 3) Construir/actualizar in place
+  let lastSibling = null;
+  for (const row of rows) {
+    const key = String(keyOf(row));
+    let tr = existing.get(key);
+    let isNew = false;
+    if (!tr) {
+      tr = document.createElement("tr");
+      tr.dataset.key = key;
+      for (let i = 0; i < columns.length; i++) {
+        tr.appendChild(document.createElement("td"));
+      }
+      isNew = true;
+    } else {
+      existing.delete(key);
+    }
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      const td = tr.children[i];
+      const newHtml = col.html(row);
+      if (td.innerHTML !== newHtml) td.innerHTML = newHtml;
+      const cls = typeof col.className === "function" ? col.className(row) : (col.className || "");
+      const trimmed = String(cls || "").trim();
+      if (td.className !== trimmed) td.className = trimmed;
+    }
+    // Posicionar en orden (insertBefore mueve nodos sin recrearlos)
+    const expectedAfter = lastSibling ? lastSibling.nextSibling : tbody.firstChild;
+    if (tr !== expectedAfter) {
+      tbody.insertBefore(tr, expectedAfter);
+    }
+    lastSibling = tr;
+  }
+  // 4) Borrar filas que ya no estan
+  for (const tr of existing.values()) tr.remove();
+}
+
+function showMarketTable(which) {
+  // which: "main" | "fx" | "fut"
+  if (mainTableWrap) mainTableWrap.style.display = which === "main" ? "" : "none";
+  if (fxTableWrap)   fxTableWrap.style.display   = which === "fx"   ? "" : "none";
+  if (futTableWrap)  futTableWrap.style.display  = which === "fut"  ? "" : "none";
+}
+
 function renderQuotes() {
   if (currentMarketList === "lecaps") {
+    showMarketTable("main");
     renderLecapMarket();
     return;
   }
 
   if (currentMarketCategory === "fx") {
+    showMarketTable("fx");
     renderFxRatios();
     return;
   }
 
   if (currentMarketCategory === "futuros_dlk") {
+    showMarketTable("fut");
     renderFuturosDlk();
     return;
   }
 
-  marketTableHead.innerHTML = `
+  showMarketTable("main");
+  setMarketTableLayout("general", `
     <tr>
       <th scope="col">Ticker</th>
       <th scope="col">Familia</th>
@@ -254,7 +363,7 @@ function renderQuotes() {
       <th scope="col" class="text-end">TIR</th>
       <th scope="col" class="text-end">Hora</th>
     </tr>
-  `;
+  `);
 
   const text = searchInput.value.trim().toUpperCase();
   const rows = latestQuotes.filter((quote) => {
@@ -265,140 +374,201 @@ function renderQuotes() {
   });
 
   instrumentCount.textContent = latestQuotes.length;
-  quotesBody.innerHTML = rows.map((quote) => {
-    const changeClass = quote.change > 0 ? "positive" : quote.change < 0 ? "negative" : "";
-    return `
-      <tr>
-        <td class="ticker">${quote.symbol}</td>
-        <td>${quote.family}</td>
-        <td><span class="currency-pill">${quote.currency}</span></td>
-        <td class="text-end">${formatNumber(quote.bid, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td class="text-end">${formatNumber(quote.ask, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td class="text-end">${formatNumber(quote.last, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td class="text-end ${changeClass}">${formatNumber(quote.change, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td class="text-end">${formatNumber(quote.volume)}</td>
-        <td class="text-end">${formatPercent(quote.ytm, 2)}</td>
-        <td class="text-end">${formatTime(quote.updated_at)}</td>
-      </tr>
-    `;
-  }).join("");
+  patchMarketBody(rows, [
+    { html: (q) => q.symbol, className: "ticker" },
+    { html: (q) => q.family },
+    { html: (q) => `<span class="currency-pill">${q.currency}</span>` },
+    { html: (q) => formatNumber(q.bid, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), className: "text-end" },
+    { html: (q) => formatNumber(q.ask, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), className: "text-end" },
+    { html: (q) => formatNumber(q.last, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), className: "text-end" },
+    {
+      html: (q) => formatNumber(q.change, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      className: (q) => "text-end " + (q.change > 0 ? "positive" : q.change < 0 ? "negative" : ""),
+    },
+    { html: (q) => formatNumber(q.volume), className: "text-end" },
+    { html: (q) => formatPercent(q.ytm, 2), className: "text-end" },
+    { html: (q) => formatTime(q.updated_at), className: "text-end" },
+  ], (q) => q.symbol);
 }
 
-async function renderFxRatios() {
-  marketTableHead.innerHTML = `
-    <tr>
-      <th>Par</th>
-      <th>Tipo</th>
-      <th class="text-end">Bono ARS (last)</th>
-      <th class="text-end">Bono USD/Cable (last)</th>
-      <th class="text-end">Ratio</th>
-      <th class="text-end">Hora</th>
-    </tr>
-  `;
-  quotesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Cargando ratios FX...</td></tr>';
+// Tabla FX: filas y celdas se crean UNA sola vez y se guardan referencias.
+// Despues solo se modifica td.textContent. NUNCA innerHTML, NUNCA blanqueo.
+const fxRowRefs = new Map(); // key -> { tr, cells: {ars, fx, ratio, time} }
+
+function fxFormatNum(value, dec) {
+  if (value === null || value === undefined || value === "") return "s/d";
+  return new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(value);
+}
+function fxFormatTime(value) {
+  if (!value) return "s/d";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleTimeString("es-AR", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    timeZone: "America/Argentina/Buenos_Aires",
+  });
+}
+
+function ensureFxRow(name, label) {
+  let ref = fxRowRefs.get(name);
+  if (ref) return ref;
+  const tr = document.createElement("tr");
+  tr.dataset.key = name;
+  const tdName = document.createElement("td");
+  tdName.innerHTML = `<strong>${name}</strong>`;
+  const tdLabel = document.createElement("td");
+  tdLabel.textContent = label || "";
+  const tdArs = document.createElement("td");  tdArs.className = "text-end";  tdArs.textContent = "s/d";
+  const tdFx = document.createElement("td");   tdFx.className = "text-end";   tdFx.textContent = "s/d";
+  const tdRatio = document.createElement("td"); tdRatio.className = "text-end";
+  const ratioStrong = document.createElement("strong");
+  ratioStrong.textContent = "s/d";
+  tdRatio.appendChild(ratioStrong);
+  const tdTime = document.createElement("td"); tdTime.className = "text-end"; tdTime.textContent = "s/d";
+  tr.append(tdName, tdLabel, tdArs, tdFx, tdRatio, tdTime);
+  fxBody.appendChild(tr);
+  ref = { tr, label: tdLabel, cells: { ars: tdArs, fx: tdFx, ratioStrong, time: tdTime } };
+  fxRowRefs.set(name, ref);
+  return ref;
+}
+
+// Pre-seed las dos filas conocidas asi la tabla NUNCA esta vacia.
+function seedFxRows() {
+  ensureFxRow("AL30/AL30D", "MEP");
+  ensureFxRow("AL30/AL30C", "CCL");
+}
+
+function renderFxRatios() {
+  // Garantia de que las filas existen siempre (no depende de cache).
+  if (!fxRowRefs.size) seedFxRows();
+  if (!fxRatiosCache || !fxRatiosCache.length) return;
+
+  for (const item of fxRatiosCache) {
+    const ref = ensureFxRow(item.name, item.label);
+    if (item.label && ref.label.textContent !== item.label) ref.label.textContent = item.label;
+    const ars = fxFormatNum(item.ars_last, 4);
+    const fx = fxFormatNum(item.fx_last, 4);
+    const ratio = fxFormatNum(item.ratio, 4);
+    const time = fxFormatTime(item.updated_at);
+    if (ref.cells.ars.textContent !== ars) ref.cells.ars.textContent = ars;
+    if (ref.cells.fx.textContent !== fx) ref.cells.fx.textContent = fx;
+    if (ref.cells.ratioStrong.textContent !== ratio) ref.cells.ratioStrong.textContent = ratio;
+    if (ref.cells.time.textContent !== time) ref.cells.time.textContent = time;
+  }
+}
+
+// Tabla Futuros y DLK: misma estrategia que FX.
+const futRowRefs = new Map(); // key -> { tr, cells: {tipo, venc, bid, ask, last, change, volume, time} }
+
+function ensureFutRow(symbol) {
+  let ref = futRowRefs.get(symbol);
+  if (ref) return ref;
+  const tr = document.createElement("tr");
+  tr.dataset.key = symbol;
+  const tdSym = document.createElement("td");
+  tdSym.innerHTML = `<strong>${symbol}</strong>`;
+  const tdTipo = document.createElement("td"); tdTipo.textContent = "-";
+  const tdVenc = document.createElement("td"); tdVenc.textContent = "-";
+  const tdBid = document.createElement("td");  tdBid.className = "text-end";  tdBid.textContent = "s/d";
+  const tdAsk = document.createElement("td");  tdAsk.className = "text-end";  tdAsk.textContent = "s/d";
+  const tdLast = document.createElement("td"); tdLast.className = "text-end"; tdLast.textContent = "s/d";
+  const tdChg = document.createElement("td");  tdChg.className = "text-end";  tdChg.textContent = "s/d";
+  const tdVol = document.createElement("td");  tdVol.className = "text-end";  tdVol.textContent = "s/d";
+  const tdTime = document.createElement("td"); tdTime.className = "text-end"; tdTime.textContent = "s/d";
+  tr.append(tdSym, tdTipo, tdVenc, tdBid, tdAsk, tdLast, tdChg, tdVol, tdTime);
+  futBody.appendChild(tr);
+  ref = { tr, cells: { tipo: tdTipo, venc: tdVenc, bid: tdBid, ask: tdAsk, last: tdLast, chg: tdChg, vol: tdVol, time: tdTime } };
+  futRowRefs.set(symbol, ref);
+  return ref;
+}
+
+function seedFutRows() {
+  // DLK siempre presentes
+  for (const sym of ["D30S6", "TZV26", "TZV27", "TZV28"]) {
+    const ref = ensureFutRow(sym);
+    ref.cells.tipo.textContent = "DLK";
+  }
+}
+
+function applyFutRow(row) {
+  const ref = ensureFutRow(row.symbol);
+  if (ref.cells.tipo.textContent !== row.tipo) ref.cells.tipo.textContent = row.tipo;
+  if (ref.cells.venc.textContent !== row.venc) ref.cells.venc.textContent = row.venc;
+  const bidTxt = fxFormatNum(row.bid, 4);
+  const askTxt = fxFormatNum(row.ask, 4);
+  const lastTxt = fxFormatNum(row.last, 4);
+  const chgTxt = (row.change === null || row.change === undefined) ? "s/d" : `${fxFormatNum(row.change, 2)}%`;
+  const volTxt = (row.volume === null || row.volume === undefined) ? "s/d" : new Intl.NumberFormat("es-AR").format(row.volume);
+  const timeTxt = fxFormatTime(row.updated_at);
+  const chgCls = "text-end " + (row.change > 0 ? "positive" : row.change < 0 ? "negative" : "");
+  if (ref.cells.bid.textContent !== bidTxt) ref.cells.bid.textContent = bidTxt;
+  if (ref.cells.ask.textContent !== askTxt) ref.cells.ask.textContent = askTxt;
+  if (ref.cells.last.textContent !== lastTxt) ref.cells.last.textContent = lastTxt;
+  if (ref.cells.chg.textContent !== chgTxt) ref.cells.chg.textContent = chgTxt;
+  if (ref.cells.chg.className !== chgCls) ref.cells.chg.className = chgCls;
+  if (ref.cells.vol.textContent !== volTxt) ref.cells.vol.textContent = volTxt;
+  if (ref.cells.time.textContent !== timeTxt) ref.cells.time.textContent = timeTxt;
+}
+
+function renderFuturosDlk() {
+  if (!futRowRefs.size) seedFutRows();
+
+  const dlkRows = latestQuotes
+    .filter((q) => q.category === "dlk")
+    .map((q) => ({
+      symbol: q.symbol, tipo: "DLK", venc: "-",
+      bid: q.bid, ask: q.ask, last: q.last, change: q.change,
+      volume: q.volume, updated_at: q.updated_at,
+    }));
+  const futuresRows = (futuresCache || []).map((q) => ({
+    symbol: q.symbol,
+    tipo: q.underlying ? `Futuro ${q.underlying}` : "Futuro",
+    venc: q.expiration ? String(q.expiration).slice(0, 10) : "-",
+    bid: q.bid, ask: q.ask, last: q.last, change: q.change,
+    volume: q.volume, updated_at: q.updated_at,
+  }));
+
+  for (const row of dlkRows) applyFutRow(row);
+  for (const row of futuresRows) applyFutRow(row);
+}
+
+async function pollFxRatios() {
   try {
     const response = await fetch("/api/fx/ratios");
     if (!response.ok) throw new Error("ratios");
     const payload = await response.json();
-    const items = payload.items || [];
-    if (!items.length) {
-      quotesBody.innerHTML = '<tr><td colspan="6" class="empty-state">Sin datos para calcular ratios</td></tr>';
-      return;
+    fxRatiosCache = payload.items || [];
+  } catch (_) {
+    if (fxRatiosCache === null) fxRatiosCache = [];
+  } finally {
+    fxRatiosLoadedOnce = true;
+    if (currentMarketCategory === "fx" && currentMarketList !== "lecaps") {
+      renderFxRatios();
     }
-    quotesBody.innerHTML = items.map((item) => `
-      <tr>
-        <td><strong>${item.name}</strong></td>
-        <td>${item.label}</td>
-        <td class="text-end">${formatNumber(item.ars_last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(item.fx_last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end"><strong>${formatNumber(item.ratio, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</strong></td>
-        <td class="text-end">${item.updated_at ? formatTime(item.updated_at) : '<span class="empty-cell">s/d</span>'}</td>
-      </tr>
-    `).join("");
-  } catch (error) {
-    quotesBody.innerHTML = '<tr><td colspan="6" class="empty-state">No se pudieron leer ratios FX</td></tr>';
   }
 }
 
-async function renderFuturosDlk() {
-  marketTableHead.innerHTML = `
-    <tr>
-      <th>Ticker</th>
-      <th>Tipo</th>
-      <th>Vencimiento</th>
-      <th class="text-end">Compra</th>
-      <th class="text-end">Venta</th>
-      <th class="text-end">Ultimo</th>
-      <th class="text-end">Var %</th>
-      <th class="text-end">Volumen</th>
-      <th class="text-end">Hora</th>
-    </tr>
-  `;
-  quotesBody.innerHTML = '<tr><td colspan="9" class="empty-state">Cargando futuros y DLK...</td></tr>';
-
-  // DLK desde el snapshot normal (categoria=dlk)
-  const text = searchInput.value.trim().toUpperCase();
-  const dlkRows = latestQuotes
-    .filter((q) => q.category === "dlk")
-    .filter((q) => !text || (q.symbol || "").includes(text) || (q.family || "").includes(text))
-    .map((q) => ({
-      symbol: q.symbol,
-      tipo: "DLK",
-      vencimiento: "-",
-      bid: q.bid,
-      ask: q.ask,
-      last: q.last,
-      change: q.change,
-      volume: q.volume,
-      updated_at: q.updated_at,
-    }));
-
-  // Futuros desde endpoint
-  let futuresRows = [];
+async function pollFutures() {
   try {
     const response = await fetch("/api/futures");
-    if (response.ok) {
-      const payload = await response.json();
-      futuresRows = (payload.items || [])
-        .filter((q) => !text || (q.symbol || "").includes(text))
-        .map((q) => ({
-          symbol: q.symbol,
-          tipo: q.underlying ? `Futuro ${q.underlying}` : "Futuro",
-          vencimiento: q.expiration ? String(q.expiration).slice(0, 10) : "-",
-          bid: q.bid,
-          ask: q.ask,
-          last: q.last,
-          change: q.change,
-          volume: q.volume,
-          updated_at: q.updated_at,
-        }));
-    }
+    if (!response.ok) throw new Error("futures");
+    const payload = await response.json();
+    futuresCache = payload.items || [];
   } catch (_) {
-    /* no hay futuros disponibles, sigo */
+    if (futuresCache === null) futuresCache = [];
+  } finally {
+    futuresLoadedOnce = true;
+    if (currentMarketCategory === "futuros_dlk" && currentMarketList !== "lecaps") {
+      renderFuturosDlk();
+    }
   }
-
-  const combined = [...dlkRows, ...futuresRows];
-  if (!combined.length) {
-    quotesBody.innerHTML = '<tr><td colspan="9" class="empty-state">Sin futuros ni DLK con datos. Esperar a que pyRofex termine de suscribir.</td></tr>';
-    return;
-  }
-  quotesBody.innerHTML = combined.map((row) => `
-    <tr>
-      <td><strong>${row.symbol}</strong></td>
-      <td>${row.tipo}</td>
-      <td>${row.vencimiento}</td>
-      <td class="text-end">${formatNumber(row.bid, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(row.ask, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(row.last, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(row.change, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</td>
-      <td class="text-end">${formatNumber(row.volume)}</td>
-      <td class="text-end">${row.updated_at ? formatTime(row.updated_at) : '<span class="empty-cell">s/d</span>'}</td>
-    </tr>
-  `).join("");
 }
 
 function renderLecapMarket() {
-  marketTableHead.innerHTML = `
+  setMarketTableLayout("lecap", `
     <tr>
       <th scope="col">Ticker</th>
       <th scope="col">Vencimiento</th>
@@ -417,37 +587,35 @@ function renderLecapMarket() {
       <th scope="col" class="text-end">Convexity</th>
       <th scope="col" class="text-end">Hora</th>
     </tr>
-  `;
+  `);
 
   const text = searchInput.value.trim().toUpperCase();
   const rows = latestLecapMarket.filter((item) => !text || item.ticker.includes(text));
   instrumentCount.textContent = rows.length;
 
   if (!rows.length) {
-    quotesBody.innerHTML = '<tr><td colspan="16" class="empty-state">Sin LECAPs guardadas para mostrar</td></tr>';
+    writeQuotesBody('<tr><td colspan="16" class="empty-state">Sin LECAPs guardadas para mostrar</td></tr>');
     return;
   }
 
-  quotesBody.innerHTML = rows.map((item) => `
-    <tr>
-      <td class="ticker">${item.ticker}</td>
-      <td>${formatDate(item.maturity_date)}</td>
-      <td>${formatDate(item.effective_payment_date)}</td>
-      <td class="text-end">${formatNumber(item.days_to_payment)}</td>
-      <td class="text-end">${formatNumber(item.bid, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-      <td class="text-end">${formatNumber(item.offer, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-      <td class="text-end">${formatNumber(item.last, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-      <td class="text-end">${formatPercent(item.tna_bid, 2)}</td>
-      <td class="text-end">${formatPercent(item.tna_offer, 2)}</td>
-      <td class="text-end">${formatPercent(item.tna_last, 2)}</td>
-      <td class="text-end">${formatPercent(item.tir_last, 2)}</td>
-      <td class="text-end">${formatPercent(item.tem_last, 2)}</td>
-      <td class="text-end">${formatNumber(item.duration, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(item.modified_duration, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(item.convexity, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatTime(item.updated_at)}</td>
-    </tr>
-  `).join("");
+  patchMarketBody(rows, [
+    { html: (it) => it.ticker, className: "ticker" },
+    { html: (it) => formatDate(it.maturity_date) },
+    { html: (it) => formatDate(it.effective_payment_date) },
+    { html: (it) => formatNumber(it.days_to_payment), className: "text-end" },
+    { html: (it) => formatNumber(it.bid, { minimumFractionDigits: 3, maximumFractionDigits: 3 }), className: "text-end" },
+    { html: (it) => formatNumber(it.offer, { minimumFractionDigits: 3, maximumFractionDigits: 3 }), className: "text-end" },
+    { html: (it) => formatNumber(it.last, { minimumFractionDigits: 3, maximumFractionDigits: 3 }), className: "text-end" },
+    { html: (it) => formatPercent(it.tna_bid, 2), className: "text-end" },
+    { html: (it) => formatPercent(it.tna_offer, 2), className: "text-end" },
+    { html: (it) => formatPercent(it.tna_last, 2), className: "text-end" },
+    { html: (it) => formatPercent(it.tir_last, 2), className: "text-end" },
+    { html: (it) => formatPercent(it.tem_last, 2), className: "text-end" },
+    { html: (it) => formatNumber(it.duration, { minimumFractionDigits: 4, maximumFractionDigits: 4 }), className: "text-end" },
+    { html: (it) => formatNumber(it.modified_duration, { minimumFractionDigits: 4, maximumFractionDigits: 4 }), className: "text-end" },
+    { html: (it) => formatNumber(it.convexity, { minimumFractionDigits: 4, maximumFractionDigits: 4 }), className: "text-end" },
+    { html: (it) => formatTime(it.updated_at), className: "text-end" },
+  ], (it) => it.ticker);
 }
 
 function renderBcraSeries(payload) {
@@ -1881,6 +2049,9 @@ document.querySelectorAll("[data-market-category]").forEach((button) => {
       candidate.classList.toggle("btn-outline-dark", !active);
     });
     renderQuotes();
+    // Poll inmediato al entrar al sub-tab para no esperar al intervalo
+    if (currentMarketCategory === "fx") pollFxRatios();
+    if (currentMarketCategory === "futuros_dlk") pollFutures();
   });
 });
 
@@ -2053,6 +2224,12 @@ fetchSnapshot()
     renderQuotes();
     setConnection("error", "Sin backend");
   });
+
+// Pollers de FX y Futuros: independientes del WebSocket para no parpadear.
+pollFxRatios();
+pollFutures();
+window.setInterval(pollFxRatios, 3000);
+window.setInterval(pollFutures, 5000);
 
 tplusRate.disabled = tplusAutoRate.checked;
 renderQuotes();
