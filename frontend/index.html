@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=hd8">
+    <link rel="stylesheet" href="/static/styles.css?v=hd9">
   </head>
   <body>
     <main class="app-shell">
@@ -418,8 +418,11 @@
                 <div id="hdAmortYearRows" class="step-up-grid"></div>
               </section>
 
-              <section id="hdImportSection" class="cashflow-preview" aria-label="Importar fechas">
-                <h3>Importar fechas de pago</h3>
+              <details id="hdImportSection" class="cashflow-preview hd-import-toggle" aria-label="Importar fechas">
+                <summary>
+                  <span class="hd-import-summary-title">Importar fechas de pago (opcional)</span>
+                  <span class="hd-import-summary-hint">Click para abrir</span>
+                </summary>
                 <p class="hd-help">Subir un archivo (imagen, Excel, CSV, TXT) o pegar el texto del prospecto. Si subis imagen se corre OCR automatico (la primera vez baja ~10 MB del motor en español). Reemplaza las fechas actuales.</p>
                 <div class="hd-import-grid">
                   <label class="hd-import-field">
@@ -434,7 +437,7 @@
                 <div class="hd-import-actions">
                   <button id="hdImportDates" type="button" class="btn btn-sm btn-dark">Importar fechas y autocompletar</button>
                 </div>
-              </section>
+              </details>
 
               <section id="hdCouponsSection" class="cashflow-preview d-none" aria-label="Cupones por periodo">
                 <h3>Cupones por periodo</h3>
@@ -768,6 +771,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=hd8"></script>
+    <script src="/static/app.js?v=hd9"></script>
   </body>
 </html>
