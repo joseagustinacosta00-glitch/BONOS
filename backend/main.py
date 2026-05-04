@@ -180,6 +180,14 @@ class AssistantMessageRequest(BaseModel):
 @app.on_event("startup")
 async def startup() -> None:
     storage.initialize()
+    try:
+        backup_path = storage.auto_backup(retention=30)
+        if backup_path:
+            import logging
+            logging.getLogger(__name__).info("backup automatico creado: %s", backup_path)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("backup automatico fallo: %s", exc)
     await market.start()
     if settings.market_history_enabled:
         try:
@@ -1086,6 +1094,74 @@ async def assistant_message(payload: AssistantMessageRequest) -> dict:
         memory_notes=memory,
         app_context=_build_ai_context(include_docs=False),
     )
+
+
+@app.get("/api/data/backup/download")
+async def data_backup_download() -> FileResponse:
+    """Descarga la base SQLite completa como backup binario."""
+    from datetime import datetime
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = ROOT_DIR / "data" / "backups" / f"download_{stamp}.db"
+    try:
+        storage.backup_to(tmp_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    filename = f"user_data_backup_{stamp}.db"
+    return FileResponse(
+        tmp_path,
+        media_type="application/octet-stream",
+        filename=filename,
+    )
+
+
+@app.get("/api/data/backup/json")
+async def data_backup_json() -> dict:
+    """Exporta todas las tablas relevantes como JSON portable."""
+    return storage.export_all_json()
+
+
+@app.get("/api/data/backups")
+async def data_backups_list() -> dict:
+    """Lista los backups automaticos disponibles en data/backups/."""
+    return {"items": storage.list_backups()}
+
+
+@app.post("/api/data/backup/now")
+async def data_backup_now() -> dict:
+    """Crea un backup manual ahora mismo."""
+    try:
+        path = storage.auto_backup(retention=30)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if path is None:
+        raise HTTPException(status_code=404, detail="No hay base para backupear todavia.")
+    return {"created": path.name}
+
+
+@app.post("/api/data/restore")
+async def data_restore(file: UploadFile = File(...)) -> dict:
+    """Restaura la base desde un .db subido. Hace backup defensivo de la base actual."""
+    if not file.filename:
+        raise HTTPException(status_code=422, detail="Archivo sin nombre.")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in {".db", ".sqlite", ".sqlite3"}:
+        raise HTTPException(status_code=422, detail="Solo se acepta archivo .db/.sqlite.")
+    from datetime import datetime
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    incoming = ROOT_DIR / "data" / "backups" / f"incoming_{stamp}.db"
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    content = await file.read()
+    incoming.write_bytes(content)
+    try:
+        storage.restore_from(incoming)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        try:
+            incoming.unlink()
+        except OSError:
+            pass
+    return {"restored": True, "filename": file.filename, "size_bytes": len(content)}
 
 
 @app.get("/api/market-history/health")

@@ -1837,3 +1837,105 @@ fetchSnapshot()
 
 tplusRate.disabled = tplusAutoRate.checked;
 renderQuotes();
+
+// ===== Backup / restore de la base de datos =====
+const backupDownload = document.querySelector("#backupDownload");
+const backupDownloadJson = document.querySelector("#backupDownloadJson");
+const backupCreate = document.querySelector("#backupCreate");
+const backupRestoreFile = document.querySelector("#backupRestoreFile");
+const backupRestore = document.querySelector("#backupRestore");
+const backupStatus = document.querySelector("#backupStatus");
+const backupList = document.querySelector("#backupList");
+
+function setBackupStatus(kind, text) {
+  if (!backupStatus) return;
+  backupStatus.dataset.kind = kind;
+  backupStatus.textContent = text;
+}
+
+async function refreshBackupList() {
+  if (!backupList) return;
+  try {
+    const response = await fetch("/api/data/backups");
+    if (!response.ok) throw new Error("No se pudo leer backups");
+    const payload = await response.json();
+    const items = payload.items || [];
+    if (!items.length) {
+      backupList.innerHTML = '<li class="empty-cell">Sin backups todavia</li>';
+      return;
+    }
+    backupList.innerHTML = items.map((item) => {
+      const sizeKb = (item.size_bytes / 1024).toFixed(1);
+      const date = new Date(item.modified_at * 1000).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+      return `<li><strong>${item.name}</strong> · ${sizeKb} KB · ${date}</li>`;
+    }).join("");
+  } catch (error) {
+    backupList.innerHTML = '<li class="empty-cell">No se pudieron leer backups</li>';
+  }
+}
+
+backupDownload?.addEventListener("click", () => {
+  setBackupStatus("draft", "Generando .db...");
+  window.location.href = "/api/data/backup/download";
+  setBackupStatus("ok", "Descarga iniciada");
+});
+
+backupDownloadJson?.addEventListener("click", async () => {
+  setBackupStatus("draft", "Generando JSON...");
+  try {
+    const response = await fetch("/api/data/backup/json");
+    if (!response.ok) throw new Error("No se pudo generar el backup JSON");
+    const payload = await response.json();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.href = url;
+    a.download = `user_data_backup_${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setBackupStatus("ok", "Descargado JSON");
+  } catch (error) {
+    setBackupStatus("error", error.message || "Error al generar JSON");
+  }
+});
+
+backupCreate?.addEventListener("click", async () => {
+  setBackupStatus("draft", "Creando backup en el server...");
+  try {
+    const response = await fetch("/api/data/backup/now", { method: "POST" });
+    if (!response.ok) throw new Error("No se pudo crear backup");
+    const payload = await response.json();
+    setBackupStatus("ok", `Creado: ${payload.created}`);
+    await refreshBackupList();
+  } catch (error) {
+    setBackupStatus("error", error.message || "Error al crear backup");
+  }
+});
+
+backupRestore?.addEventListener("click", async () => {
+  const file = backupRestoreFile?.files?.[0];
+  if (!file) {
+    setBackupStatus("error", "Eligi un archivo .db para restaurar");
+    return;
+  }
+  if (!window.confirm(`Restaurar la base con ${file.name}? La base actual se reemplaza (se hace un backup defensivo previo).`)) return;
+  setBackupStatus("draft", "Subiendo y restaurando...");
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/data/restore", { method: "POST", body: formData });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo restaurar");
+    }
+    setBackupStatus("ok", "Restaurado. Recarga la pagina para ver los datos.");
+    await refreshBackupList();
+  } catch (error) {
+    setBackupStatus("error", error.message || "Error al restaurar");
+  }
+});
+
+if (backupList) refreshBackupList();

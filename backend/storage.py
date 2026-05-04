@@ -664,6 +664,97 @@ class CalculatorStorage:
         connection.row_factory = sqlite3.Row
         return connection
 
+    def backup_to(self, target_path: Path) -> Path:
+        """Crea una copia consistente de la base SQLite usando la API oficial
+        sqlite3.backup. Es seguro hacerlo aunque la app este escribiendo."""
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"No existe la base origen: {self.db_path}")
+        with closing(sqlite3.connect(self.db_path)) as source, closing(sqlite3.connect(target)) as dest:
+            source.backup(dest)
+        return target
+
+    def restore_from(self, source_path: Path) -> Path:
+        """Reemplaza la base actual con el archivo source. Hace un backup
+        defensivo de la base previa antes de pisarla."""
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(f"No existe el archivo a restaurar: {source}")
+        # Backup defensivo de la base actual antes de pisar
+        if self.db_path.exists():
+            from datetime import datetime
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pre_restore = self.db_path.parent / "backups" / f"pre_restore_{stamp}.db"
+            try:
+                self.backup_to(pre_restore)
+            except Exception:
+                pass
+        # Validar que el archivo origen sea SQLite valido
+        with closing(sqlite3.connect(source)) as test:
+            test.execute("SELECT 1")
+        # Reemplazar
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copy2(source, self.db_path)
+        return self.db_path
+
+    def auto_backup(self, retention: int = 30) -> Path | None:
+        """Crea un backup en data/backups/ con timestamp y rota los mas viejos."""
+        if not self.db_path.exists():
+            return None
+        from datetime import datetime
+        backups_dir = self.db_path.parent / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = backups_dir / f"user_data_{stamp}.db"
+        self.backup_to(target)
+        # Rotacion: mantener los ultimos N
+        existing = sorted(backups_dir.glob("user_data_*.db"))
+        if len(existing) > retention:
+            for old in existing[:-retention]:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        return target
+
+    def list_backups(self) -> list[dict[str, object]]:
+        backups_dir = self.db_path.parent / "backups"
+        if not backups_dir.exists():
+            return []
+        items = []
+        for path in sorted(backups_dir.glob("*.db"), reverse=True):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            items.append({
+                "name": path.name,
+                "size_bytes": stat.st_size,
+                "modified_at": stat.st_mtime,
+            })
+        return items
+
+    def export_all_json(self) -> dict:
+        """Exporta TODAS las tablas relevantes a un dict JSON-serializable.
+        Util como backup portable independiente del binario SQLite."""
+        with closing(self._connect()) as connection:
+            data: dict[str, list[dict]] = {}
+            for table in ("lecap_calculators", "calculator_cashflows", "historical_data",
+                          "bond_hd_calculations", "ai_memory_notes"):
+                try:
+                    rows = connection.execute(f"SELECT * FROM {table}").fetchall()
+                    data[table] = [dict(row) for row in rows]
+                except sqlite3.Error:
+                    data[table] = []
+        from datetime import datetime
+        return {
+            "version": 1,
+            "generated_at": datetime.now().isoformat(),
+            "tables": data,
+        }
+
     @staticmethod
     def _migrate_historical_data(connection: sqlite3.Connection) -> None:
         columns = {

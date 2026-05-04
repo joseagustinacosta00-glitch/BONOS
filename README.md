@@ -196,6 +196,50 @@ Series iniciales:
 
 El cliente esta en `backend/bcra_client.py`, pagina hasta 3000 registros por request y guarda cache en memoria por `BCRA_CACHE_TTL_SECONDS`.
 
+## Como NO perder los datos cargados (politica de backups)
+
+Los datos del usuario (LECAPs guardadas, Bonos HD calculados, series historicas, notas IA) viven en SQLite, en `APP_DB_PATH` (default `data/user_data.db`). Esa base esta fuera del repo (`.gitignore` la cubre). Capas de defensa para que no se pierdan:
+
+### 1. Backup automatico en cada arranque
+
+Cada vez que el backend levanta, copia la base actual a `data/backups/user_data_YYYYMMDD_HHMMSS.db` (rotacion: mantiene los ultimos 30). Si la base principal se rompe, podes recuperar el ultimo backup desde el server.
+
+### 2. Backup descargable en la UI
+
+En la pestaña `Datos historicos` hay un panel "Backup y restauracion" con tres acciones:
+
+- **Descargar backup ahora (.db)**: baja la base entera como `user_data_backup_YYYYMMDD_HHMMSS.db` a tu PC.
+- **Descargar backup JSON**: exporta todas las tablas como JSON portable (independiente del binario SQLite).
+- **Crear backup en el server**: dispara una copia manual a `data/backups/`.
+
+Los `.db` descargados son tu copia "sagrada". Guardalos en Drive/Dropbox/disco externo.
+
+### 3. Restauracion
+
+En el mismo panel, "Restaurar desde archivo .db" sube un backup previo. Antes de pisar la base actual, el server hace un backup defensivo de la base existente (`data/backups/pre_restore_*.db`), asi nunca se pierde lo previo.
+
+### 4. Render con disco persistente (CRITICO si deployas)
+
+**Sin disco persistente, cada redeploy de Render borra el filesystem y por lo tanto la base.** Para evitar:
+
+1. Render Dashboard -> tu servicio web -> Disks -> Add Disk.
+2. Mount path: `/var/data` (o el que prefieras).
+3. Tamaño: 1 GB es suficiente para empezar.
+4. En Environment, configurar `APP_DB_PATH=/var/data/user_data.db`.
+5. Re-deploy.
+
+Costo: el disco mas chico (1 GB) cuesta ~$0.25/mes en Render.
+
+Sin disco persistente, las dos defensas anteriores se pierden tambien (los backups en `data/backups/` viven en el filesystem efimero).
+
+### 5. Endpoints utiles
+
+- `GET /api/data/backup/download` -> descarga `.db`.
+- `GET /api/data/backup/json` -> exporta JSON.
+- `GET /api/data/backups` -> lista de backups en el server.
+- `POST /api/data/backup/now` -> dispara backup manual.
+- `POST /api/data/restore` -> restaura desde `.db` subido (multipart/form-data, campo `file`).
+
 ## Base historica de mercado propia
 
 La app puede grabar ticks de mercado en su propia base Postgres durante el horario operativo (10:30-17:00 ART, dias habiles segun `data/market_holidays.csv`) y calcular un resumen diario al cierre con OHLC, VWAP, monto operado y VN operados por instrumento.
