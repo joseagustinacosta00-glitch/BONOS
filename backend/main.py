@@ -43,6 +43,8 @@ from backend.config import get_settings
 from backend.hard_dollar import calculate_hard_dollar_ytm, hard_dollar_bond
 from backend.market_calendar import market_calendar, parse_date
 from backend.market_data import MarketDataService
+from backend.market_scheduler import MarketHistoryScheduler
+from backend.market_storage import MarketHistoryStorage
 from backend.storage import HISTORICAL_METRIC_TYPES, CalculatorStorage
 from backend.time_utils import now_argentina_iso
 from backend.time_utils import now_argentina
@@ -57,6 +59,14 @@ settings = get_settings()
 market = MarketDataService(settings)
 bcra = BcraClient(settings)
 storage = CalculatorStorage(ROOT_DIR / settings.app_db_path)
+market_history_storage = MarketHistoryStorage(settings.market_history_database_url)
+market_scheduler = MarketHistoryScheduler(
+    market=market,
+    storage=market_history_storage,
+    market_open=settings.market_open_local,
+    market_close=settings.market_close_local,
+    batch_seconds=settings.market_history_batch_seconds,
+)
 
 app = FastAPI(title="Monitor de Bonos", version="0.1.0")
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
@@ -171,10 +181,21 @@ class AssistantMessageRequest(BaseModel):
 async def startup() -> None:
     storage.initialize()
     await market.start()
+    if settings.market_history_enabled:
+        try:
+            await market_scheduler.start()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("market scheduler no arranco: %s", exc)
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    if settings.market_history_enabled:
+        try:
+            await market_scheduler.stop()
+        except Exception:
+            pass
     await market.stop()
 
 
@@ -1064,6 +1085,139 @@ async def assistant_message(payload: AssistantMessageRequest) -> dict:
         payload.message,
         memory_notes=memory,
         app_context=_build_ai_context(include_docs=False),
+    )
+
+
+@app.get("/api/market-history/health")
+async def market_history_health() -> dict:
+    info = await market_history_storage.health()
+    info["scheduler_status"] = market_scheduler.status
+    return info
+
+
+@app.get("/api/market-history/instruments")
+async def market_history_instruments() -> dict:
+    items = await market_history_storage.list_instruments()
+    return {"items": [item.to_dict() for item in items]}
+
+
+@app.get("/api/market-history/ticks")
+async def market_history_ticks(
+    symbol: str,
+    date_from: datetime,
+    date_to: datetime,
+    interval_seconds: int | None = None,
+    limit: Annotated[int, Query(ge=1, le=20000)] = 5000,
+) -> dict:
+    instrument = await market_history_storage.get_instrument_by_symbol(symbol)
+    if instrument is None:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado.")
+    if interval_seconds:
+        rows = await market_history_storage.fetch_ticks_bucketed(
+            instrument_id=instrument.id,
+            date_from=date_from,
+            date_to=date_to,
+            interval_seconds=interval_seconds,
+            limit=limit,
+        )
+    else:
+        rows = await market_history_storage.fetch_ticks(
+            instrument_id=instrument.id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+    return {
+        "symbol": instrument.symbol,
+        "category": instrument.category,
+        "interval_seconds": interval_seconds,
+        "items": rows,
+    }
+
+
+@app.get("/api/market-history/daily")
+async def market_history_daily(
+    symbol: str,
+    date_from: date,
+    date_to: date,
+) -> dict:
+    instrument = await market_history_storage.get_instrument_by_symbol(symbol)
+    if instrument is None:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado.")
+    rows = await market_history_storage.fetch_daily_summary(
+        instrument_id=instrument.id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return {
+        "symbol": instrument.symbol,
+        "category": instrument.category,
+        "items": [row.to_dict() for row in rows],
+    }
+
+
+@app.post("/api/market-history/rollup")
+async def market_history_rollup(target: date | None = None) -> dict:
+    target_date = target or now_argentina().date()
+    count = await market_scheduler.force_rollup(target_date)
+    return {"date": target_date.isoformat(), "instruments_rolled": count}
+
+
+@app.get("/api/market-history/export")
+async def market_history_export(
+    symbol: str,
+    date_from: datetime,
+    date_to: datetime,
+    format: str = Query(default="csv", pattern="^(csv|parquet)$"),
+) -> StreamingResponse:
+    instrument = await market_history_storage.get_instrument_by_symbol(symbol)
+    if instrument is None:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado.")
+    rows = await market_history_storage.fetch_ticks(
+        instrument_id=instrument.id,
+        date_from=date_from,
+        date_to=date_to,
+        limit=20000,
+    )
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ts", "symbol", "last", "delta_volume", "cumulative_volume"])
+        for row in rows:
+            writer.writerow([
+                row["ts"],
+                instrument.symbol,
+                row["last"],
+                row["delta_volume"],
+                row["cumulative_volume"],
+            ])
+        filename = f"{instrument.symbol}_ticks.csv"
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise HTTPException(status_code=422, detail="pyarrow no instalado.") from exc
+
+    table = pa.table({
+        "ts": [row["ts"] for row in rows],
+        "symbol": [instrument.symbol for _ in rows],
+        "last": [row["last"] for row in rows],
+        "delta_volume": [row["delta_volume"] for row in rows],
+        "cumulative_volume": [row["cumulative_volume"] for row in rows],
+    })
+    buffer = io.BytesIO()
+    pq.write_table(table, buffer, compression="snappy")
+    buffer.seek(0)
+    filename = f"{instrument.symbol}_ticks.parquet"
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

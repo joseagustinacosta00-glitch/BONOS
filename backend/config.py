@@ -37,6 +37,11 @@ class Settings:
     bcra_base_url: str
     bcra_cache_ttl_seconds: int
     app_db_path: str
+    market_history_database_url: str | None
+    market_history_enabled: bool
+    market_open_local: str
+    market_close_local: str
+    market_history_batch_seconds: int
 
 
 def get_settings() -> Settings:
@@ -60,4 +65,9 @@ def get_settings() -> Settings:
         bcra_base_url=os.getenv("BCRA_BASE_URL", "https://api.bcra.gob.ar"),
         bcra_cache_ttl_seconds=int(os.getenv("BCRA_CACHE_TTL_SECONDS", "21600")),
         app_db_path=os.getenv("APP_DB_PATH", "data/user_data.db"),
+        market_history_database_url=os.getenv("MARKET_HISTORY_DATABASE_URL") or os.getenv("DATABASE_URL"),
+        market_history_enabled=os.getenv("MARKET_HISTORY_ENABLED", "true").lower() not in {"false", "0", "no"},
+        market_open_local=os.getenv("MARKET_OPEN_LOCAL", "10:30"),
+        market_close_local=os.getenv("MARKET_CLOSE_LOCAL", "17:00"),
+        market_history_batch_seconds=int(os.getenv("MARKET_HISTORY_BATCH_SECONDS", "15")),
     )

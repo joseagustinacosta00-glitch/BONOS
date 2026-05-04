@@ -196,6 +196,65 @@ Series iniciales:
 
 El cliente esta en `backend/bcra_client.py`, pagina hasta 3000 registros por request y guarda cache en memoria por `BCRA_CACHE_TTL_SECONDS`.
 
+## Base historica de mercado propia
+
+La app puede grabar ticks de mercado en su propia base Postgres durante el horario operativo (10:30-17:00 ART, dias habiles segun `data/market_holidays.csv`) y calcular un resumen diario al cierre con OHLC, VWAP, monto operado y VN operados por instrumento.
+
+### Schema (time-series friendly, compatible con TimescaleDB)
+
+- `instruments`: catalogo (symbol, family, category, currency, snapshot_interval_seconds, metadata).
+- `market_ticks`: registros (ts, instrument_id, last, delta_volume, cumulative_volume). PK (ts, instrument_id), indice (instrument_id, ts DESC).
+- `daily_summary`: agregado diario (trade_date, instrument_id, open/high/low/close, vwap, total_amount, total_volume_nominal, trades_count). PK (trade_date, instrument_id).
+
+El esquema se crea solo en el primer arranque con `CREATE TABLE IF NOT EXISTS`. Para escalar a TimescaleDB en el futuro:
+
+```sql
+CREATE EXTENSION timescaledb;
+SELECT create_hypertable('market_ticks', 'ts', migrate_data => TRUE);
+ALTER TABLE market_ticks SET (timescaledb.compress);
+SELECT add_compression_policy('market_ticks', INTERVAL '30 days');
+```
+
+Sin tocar codigo: el SQL del scheduler funciona en Postgres comun y en TimescaleDB.
+
+### Cadencias por categoria
+
+- `bond_hd`: 1 segundo
+- `caucion`: 1 segundo
+- `lecap`, `cer`, `tamar`, `dual`, `bond_other`: 5 segundos
+
+El scheduler solo graba cuando cambia el `last` o aumenta el `cumulative_volume`. Snapshots redundantes se descartan, asi VWAP queda exacto.
+
+### Setup en Render
+
+1. En el panel Render, crear una base **PostgreSQL** (free tier 90 dias, despues ~$7/mes).
+2. Copiar el `Internal Database URL` que da Render.
+3. En el servicio web, env var: `DATABASE_URL=<el connection string>` (o `MARKET_HISTORY_DATABASE_URL` si preferis explicito).
+4. La app necesita estar siempre encendida durante el horario de mercado: usar plan **Starter** (~$7/mes) y desactivar auto-sleep.
+
+### Variables de entorno
+
+```env
+MARKET_HISTORY_ENABLED=true              # default true; ponelo en false para apagar el pipeline
+DATABASE_URL=postgresql://...            # connection string de Postgres
+MARKET_OPEN_LOCAL=10:30                  # horario ART de apertura (HH:MM)
+MARKET_CLOSE_LOCAL=17:00                 # horario ART de cierre (HH:MM)
+MARKET_HISTORY_BATCH_SECONDS=15          # cada cuantos segundos se vuelca el batch a la DB
+```
+
+### Endpoints
+
+- `GET /api/market-history/health`: estado del pipeline (conectado, ticks_today, last_tick_ts, last_summary_date, scheduler_status).
+- `GET /api/market-history/instruments`: listado de instrumentos catalogados.
+- `GET /api/market-history/ticks?symbol=AL30D&date_from=...&date_to=...&interval_seconds=60`: ticks crudos o agregados por bucket.
+- `GET /api/market-history/daily?symbol=AL30D&date_from=...&date_to=...`: resumen diario.
+- `POST /api/market-history/rollup?target=YYYY-MM-DD`: recalcula manualmente el daily_summary de un dia (idempotente).
+- `GET /api/market-history/export?symbol=...&date_from=...&date_to=...&format=csv|parquet`: descarga.
+
+### Sobre VWAP
+
+VWAP del dia se calcula como `Σ(last × delta_volume) / Σ(delta_volume)` usando los ticks reales (no los snapshots redundantes). Se ejecuta automaticamente a las 17:05 ART (5 minutos despues del cierre) y queda persistido en `daily_summary`.
+
 ## Deploy
 
 La app esta preparada para deploy como proceso web persistente. No conviene usar serverless puro porque el market data real mantiene una conexion WebSocket contra Primary.

@@ -138,6 +138,8 @@ class MarketDataService:
                     "currency": ticker.currency,
                     "law": ticker.law,
                     "last": None,
+                    "last_volume": None,
+                    "cumulative_volume": None,
                     "bid": None,
                     "ask": None,
                     "change": None,
@@ -158,6 +160,8 @@ class MarketDataService:
                         "settlement_type": settlement_key,
                         "settlement": settlement_label,
                         "last": None,
+                        "last_volume": None,
+                        "cumulative_volume": None,
                         "bid": None,
                         "ask": None,
                         "change": None,
@@ -195,13 +199,19 @@ class MarketDataService:
                     move = random.uniform(-0.35, 0.35)
                     last = max(base + move, 0.01)
                     spread = max(last * random.uniform(0.001, 0.003), 0.01)
-                    self._quotes[ticker.symbol].update(
+                    current = self._quotes[ticker.symbol]
+                    last_size = random.randint(1_000, 50_000) if random.random() < 0.6 else 0
+                    cumulative_prev = current.get("cumulative_volume") or 0
+                    cumulative_new = cumulative_prev + last_size
+                    current.update(
                         {
                             "last": round(last, 2),
+                            "last_volume": last_size if last_size else current.get("last_volume"),
+                            "cumulative_volume": cumulative_new,
                             "bid": round(last - spread, 2),
                             "ask": round(last + spread, 2),
                             "change": round(random.uniform(-1.4, 1.4), 2),
-                            "volume": random.randint(50_000, 2_500_000),
+                            "volume": cumulative_new,
                             "updated_at": now,
                             "raw": {"mock": True},
                         }
@@ -214,22 +224,33 @@ class MarketDataService:
                         move = random.uniform(-0.08, 0.08)
                         last = max(base + move, 0.01)
                         spread = max(last * random.uniform(0.0004, 0.0012), 0.01)
-                        rows[ticker].update(
+                        current = rows[ticker]
+                        last_size = random.randint(500, 20_000) if random.random() < 0.5 else 0
+                        cumulative_prev = current.get("cumulative_volume") or 0
+                        cumulative_new = cumulative_prev + last_size
+                        current.update(
                             {
                                 "last": round(last, 3),
+                                "last_volume": last_size if last_size else current.get("last_volume"),
+                                "cumulative_volume": cumulative_new,
                                 "bid": round(last - spread, 3),
                                 "ask": round(last + spread, 3),
                                 "change": round(random.uniform(-0.25, 0.25), 3),
-                                "volume": random.randint(5_000, 500_000),
+                                "volume": cumulative_new,
                                 "updated_at": now,
                                 "raw": {"mock": True},
                             }
                         )
                 for quote in self._caucion_quotes.values():
                     term_days = int(quote.get("term_days") or 1)
+                    last_size = random.randint(100_000, 5_000_000) if random.random() < 0.7 else 0
+                    cumulative_prev = quote.get("cumulative_volume") or 0
+                    cumulative_new = cumulative_prev + last_size
                     quote.update(
                         {
                             "last": round(35 + term_days * 0.05 + random.uniform(-0.25, 0.25), 2),
+                            "last_volume": last_size if last_size else quote.get("last_volume"),
+                            "cumulative_volume": cumulative_new,
                             "updated_at": now,
                             "raw": {"mock": True},
                         }
@@ -344,6 +365,7 @@ class MarketDataService:
         bid = self._entry_price(market_data.get("BI"))
         ask = self._entry_price(market_data.get("OF"))
         last = self._entry_price(market_data.get("LA"))
+        last_volume = self._entry_size(market_data.get("LA"))
         volume = self._entry_value(market_data.get("TV"))
         now = now_argentina_iso()
 
@@ -359,6 +381,8 @@ class MarketDataService:
                     "bid": bid if bid is not None else current["bid"],
                     "ask": ask if ask is not None else current["ask"],
                     "last": last if last is not None else current["last"],
+                    "last_volume": last_volume if last_volume is not None else current.get("last_volume"),
+                    "cumulative_volume": volume if volume is not None else current.get("cumulative_volume"),
                     "volume": volume if volume is not None else current["volume"],
                     "updated_at": now,
                     "raw": self._json_safe(message),
@@ -509,6 +533,8 @@ class MarketDataService:
             "term_days": term_days,
             "currency": "ARS",
             "last": current.get("last"),
+            "last_volume": current.get("last_volume"),
+            "cumulative_volume": current.get("cumulative_volume"),
             "bid": current.get("bid"),
             "ask": current.get("ask"),
             "volume": current.get("volume"),
@@ -671,6 +697,18 @@ class MarketDataService:
             return cls._read_number(entry, "size", "volume", "value", "price")
 
         return cls._coerce_number(entry)
+
+    @classmethod
+    def _entry_size(cls, entry: Any) -> float | int | None:
+        if isinstance(entry, list):
+            if not entry:
+                return None
+            entry = entry[0]
+
+        if isinstance(entry, dict):
+            return cls._read_number(entry, "size", "volume")
+
+        return None
 
     @staticmethod
     def _read_first(row: dict[str, Any], *names: str) -> Any:
