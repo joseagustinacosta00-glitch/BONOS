@@ -75,6 +75,7 @@ const hdStepUpSection = document.querySelector("#hdStepUpSection");
 const hdStepUpRows = document.querySelector("#hdStepUpRows");
 const hdAmortizationSection = document.querySelector("#hdAmortizationSection");
 const hdAmortFromYear = document.querySelector("#hdAmortFromYear");
+const hdAmortFromPeriod = document.querySelector("#hdAmortFromPeriod");
 const hdAmortYearRows = document.querySelector("#hdAmortYearRows");
 const hdAmortDistribute = document.querySelector("#hdAmortDistribute");
 const hdCouponsSection = document.querySelector("#hdCouponsSection");
@@ -885,12 +886,37 @@ function recomputePeriodAmortizations() {
   });
 }
 
+function getHdPeriodIndicesForYear(year) {
+  const indices = [];
+  hdCoupons.forEach((coupon, index) => {
+    if (coupon.payment_date && coupon.payment_date.startsWith(year)) {
+      indices.push(index);
+    }
+  });
+  return indices;
+}
+
+function refreshHdAmortFromPeriodOptions() {
+  if (!hdAmortFromPeriod || !hdAmortFromYear) return;
+  const year = hdAmortFromYear.value;
+  if (!year) {
+    hdAmortFromPeriod.innerHTML = "";
+    return;
+  }
+  const indices = getHdPeriodIndicesForYear(year);
+  hdAmortFromPeriod.innerHTML = indices.map((globalIdx, localIdx) => {
+    const coupon = hdCoupons[globalIdx];
+    return `<option value="${globalIdx}">Periodo ${localIdx + 1} - ${formatDateDisplay(coupon.payment_date)}</option>`;
+  }).join("");
+}
+
 function renderHdAnnualAmortRows() {
   if (!hdAmortYearRows || !hdAmortFromYear) return;
   const years = getHdYearsFromCoupons();
   if (!years.length) {
     hdAmortYearRows.innerHTML = '<span class="empty-cell">Generar la tabla de cupones primero.</span>';
     hdAmortFromYear.innerHTML = "";
+    if (hdAmortFromPeriod) hdAmortFromPeriod.innerHTML = "";
     return;
   }
   const currentFrom = hdAmortFromYear.value;
@@ -898,6 +924,7 @@ function renderHdAnnualAmortRows() {
     .map((year) => `<option value="${year}" ${year === currentFrom ? "selected" : ""}>${year}</option>`)
     .join("");
   if (!hdAmortFromYear.value) hdAmortFromYear.value = years[0];
+  refreshHdAmortFromPeriodOptions();
 
   for (const year of years) {
     if (!(year in hdAnnualAmortByYear)) hdAnnualAmortByYear[year] = 0;
@@ -909,7 +936,7 @@ function renderHdAnnualAmortRows() {
   hdAmortYearRows.innerHTML = years.map((year) => `
     <label>
       <span>${year}</span>
-      <input class="form-control form-control-sm" type="number" step="0.0001" min="0" data-hd-amort-year="${year}" value="${hdAnnualAmortByYear[year] || 0}">
+      <input class="form-control form-control-sm" type="number" step="0.0001" min="0" data-hd-amort-year="${year}" value="${(hdAnnualAmortByYear[year] || 0).toFixed(4)}">
     </label>
   `).join("");
 
@@ -932,26 +959,30 @@ function distributeAmortization() {
     setHdStatus("error", "Distribucion solo disponible para bonos amortizables");
     return;
   }
-  const years = getHdYearsFromCoupons();
-  if (!years.length) {
-    setHdStatus("error", "No hay años para amortizar");
+  const fromGlobalIndex = parseInt(hdAmortFromPeriod?.value, 10);
+  if (Number.isNaN(fromGlobalIndex) || fromGlobalIndex < 0 || fromGlobalIndex >= hdCoupons.length) {
+    setHdStatus("error", "Periodo desde invalido");
     return;
   }
-  const fromYear = hdAmortFromYear.value || years[0];
-  const eligible = years.filter((year) => year >= fromYear);
-  if (!eligible.length) {
-    setHdStatus("error", "Año desde invalido");
-    return;
-  }
-  const each = 100 / eligible.length;
+  const remaining = hdCoupons.length - fromGlobalIndex;
+  const eachPerPeriod = 100 / remaining;
+  hdCoupons = hdCoupons.map((coupon, index) => ({
+    ...coupon,
+    amortization_percent: index >= fromGlobalIndex ? eachPerPeriod : 0,
+  }));
   hdAnnualAmortByYear = {};
-  years.forEach((year) => {
-    hdAnnualAmortByYear[year] = eligible.includes(year) ? each : 0;
-  });
+  for (const coupon of hdCoupons) {
+    if (!coupon.payment_date) continue;
+    const year = coupon.payment_date.slice(0, 4);
+    hdAnnualAmortByYear[year] = (hdAnnualAmortByYear[year] || 0) + coupon.amortization_percent;
+  }
   renderHdAnnualAmortRows();
-  recomputePeriodAmortizations();
   renderHdCouponsTable();
-  setHdStatus("ok", `Amortizacion distribuida desde ${fromYear} en ${eligible.length} año(s)`);
+  const startCoupon = hdCoupons[fromGlobalIndex];
+  setHdStatus(
+    "ok",
+    `Amortizacion distribuida en ${remaining} cupones desde ${formatDateDisplay(startCoupon.payment_date)}`
+  );
 }
 
 function renderHdCouponsTable() {
@@ -1394,6 +1425,7 @@ hdGenerateSchedule?.addEventListener("click", () => {
     setHdStatus("error", "Error al generar cupones");
   });
 });
+hdAmortFromYear?.addEventListener("change", refreshHdAmortFromPeriodOptions);
 hdAmortDistribute?.addEventListener("click", distributeAmortization);
 hdCalculate?.addEventListener("click", () => {
   console.log("[Bono HD] click calcular");
