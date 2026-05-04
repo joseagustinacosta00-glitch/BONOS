@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd25 cargado - tablas FX/Futuros separadas");
+console.log("[Monitor] app.js v=hd26 cargado - HD: periodo de gracia + tablas FX/Futuros separadas");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -93,6 +93,16 @@ const hdFixedCoupon = document.querySelector("#hdFixedCoupon");
 const hdStepUpSection = document.querySelector("#hdStepUpSection");
 const hdStepUpRows = document.querySelector("#hdStepUpRows");
 const hdAmortizationSection = document.querySelector("#hdAmortizationSection");
+const hdGraceSection = document.querySelector("#hdGraceSection");
+const hdGraceMode = document.querySelector("#hdGraceMode");
+const hdGracePeriodWrap = document.querySelector("#hdGracePeriodWrap");
+const hdGracePeriod = document.querySelector("#hdGracePeriod");
+const hdGraceYearWrap = document.querySelector("#hdGraceYearWrap");
+const hdGraceYear = document.querySelector("#hdGraceYear");
+const hdGraceMonthWrap = document.querySelector("#hdGraceMonthWrap");
+const hdGraceMonth = document.querySelector("#hdGraceMonth");
+const hdGraceApply = document.querySelector("#hdGraceApply");
+const hdGraceStatus = document.querySelector("#hdGraceStatus");
 const hdAmortFromYear = document.querySelector("#hdAmortFromYear");
 const hdAmortFromPeriod = document.querySelector("#hdAmortFromPeriod");
 const hdAmortPctPerPeriod = document.querySelector("#hdAmortPctPerPeriod");
@@ -1136,11 +1146,92 @@ function getHdAnnualRateForYear(year) {
   return parseFloat(input.value) || 0;
 }
 
+// Periodo de gracia: marca cupones anteriores al "primer flujo que paga" como
+// in_grace=true y setea su annual_rate_percent en 0.
+let hdGraceConfig = { mode: "none", first_period_index: null };
+
+function findFirstPaymentIndex() {
+  const mode = hdGraceMode?.value || "none";
+  if (mode === "none" || !hdCoupons.length) return 0;
+  if (mode === "period") {
+    const idx = parseInt(hdGracePeriod?.value, 10);
+    if (!Number.isFinite(idx)) return 0;
+    return Math.max(0, Math.min(idx, hdCoupons.length - 1));
+  }
+  if (mode === "year") {
+    const targetYear = String(hdGraceYear?.value || "");
+    if (!targetYear) return 0;
+    const found = hdCoupons.findIndex((c) => c.payment_date && c.payment_date.slice(0, 4) >= targetYear);
+    return found === -1 ? hdCoupons.length : found;
+  }
+  if (mode === "year_month") {
+    const targetYear = String(hdGraceYear?.value || "");
+    const targetMonth = parseInt(hdGraceMonth?.value, 10);
+    if (!targetYear || !Number.isFinite(targetMonth)) return 0;
+    const targetKey = `${targetYear}-${String(targetMonth).padStart(2, "0")}`;
+    const found = hdCoupons.findIndex((c) => c.payment_date && c.payment_date.slice(0, 7) >= targetKey);
+    return found === -1 ? hdCoupons.length : found;
+  }
+  return 0;
+}
+
+function applyHdGracePeriod() {
+  if (!hdCoupons.length) return;
+  const firstIdx = findFirstPaymentIndex();
+  hdGraceConfig = { mode: hdGraceMode?.value || "none", first_period_index: firstIdx };
+  hdCoupons = hdCoupons.map((coupon, index) => {
+    const inGrace = index < firstIdx;
+    const yearRate = coupon.payment_date ? getHdAnnualRateForYear(coupon.payment_date.slice(0, 4)) : 0;
+    return {
+      ...coupon,
+      in_grace: inGrace,
+      annual_rate_percent: inGrace ? 0 : yearRate,
+    };
+  });
+  if (hdGraceStatus) {
+    if (firstIdx === 0) {
+      hdGraceStatus.textContent = "Sin gracia (paga desde flujo 1)";
+    } else {
+      hdGraceStatus.textContent = `${firstIdx} flujos en gracia, primer pago en flujo ${firstIdx + 1}`;
+    }
+  }
+  renderHdCouponsTable();
+}
+
+function renderHdGraceControls() {
+  if (!hdGraceSection) return;
+  if (!hdCoupons.length) {
+    hdGraceSection.classList.add("d-none");
+    return;
+  }
+  hdGraceSection.classList.remove("d-none");
+
+  // Poblar select de "primer flujo que paga"
+  if (hdGracePeriod) {
+    hdGracePeriod.innerHTML = hdCoupons.map((c, i) =>
+      `<option value="${i}">Flujo ${i + 1} - ${formatDateDisplay(c.payment_date)}</option>`
+    ).join("");
+  }
+  // Poblar select de "primer año"
+  if (hdGraceYear) {
+    const years = getHdYearsFromCoupons();
+    const currentYear = hdGraceYear.value;
+    hdGraceYear.innerHTML = years
+      .map((y) => `<option value="${y}" ${y === currentYear ? "selected" : ""}>${y}</option>`)
+      .join("");
+  }
+  // Mostrar/ocultar inputs segun modo
+  const mode = hdGraceMode?.value || "none";
+  hdGracePeriodWrap?.classList.toggle("d-none", mode !== "period");
+  hdGraceYearWrap?.classList.toggle("d-none", mode !== "year" && mode !== "year_month");
+  hdGraceMonthWrap?.classList.toggle("d-none", mode !== "year_month");
+}
+
 function refreshHdCouponRates() {
   if (!hdCoupons.length) return;
   hdCoupons = hdCoupons.map((coupon) => ({
     ...coupon,
-    annual_rate_percent: getHdAnnualRateForYear(coupon.payment_date.slice(0, 4)),
+    annual_rate_percent: coupon.in_grace ? 0 : getHdAnnualRateForYear(coupon.payment_date.slice(0, 4)),
   }));
   recomputePeriodAmortizations();
   renderHdCouponsTable();
@@ -1173,9 +1264,12 @@ async function generateHdSchedule() {
       payment_date: paymentDate,
       annual_rate_percent: getHdAnnualRateForYear(paymentDate.slice(0, 4)),
       amortization_percent: 0,
+      in_grace: false,
     }));
     renderHdAnnualAmortRows();
     recomputePeriodAmortizations();
+    renderHdGraceControls();
+    applyHdGracePeriod();
     renderHdCouponsTable();
     hdCouponsSection.classList.remove("d-none");
     hdCalculate.disabled = hdCoupons.length === 0;
@@ -1354,21 +1448,28 @@ function distributeAmortization() {
 
 function renderHdCouponsTable() {
   if (!hdCoupons.length) {
-    hdCouponsBody.innerHTML = '<tr><td colspan="4" class="empty-state">Generar tabla con la frecuencia elegida</td></tr>';
+    hdCouponsBody.innerHTML = '<tr><td colspan="5" class="empty-state">Generar tabla con la frecuencia elegida</td></tr>';
     return;
   }
-  hdCouponsBody.innerHTML = hdCoupons.map((coupon, index) => `
-    <tr>
+  hdCouponsBody.innerHTML = hdCoupons.map((coupon, index) => {
+    const inGrace = coupon.in_grace === true;
+    const stateBadge = inGrace
+      ? '<span class="badge bg-secondary">GRACIA</span>'
+      : '<span class="badge bg-success">PAGA</span>';
+    return `
+    <tr class="${inGrace ? 'hd-grace-row' : ''}">
       <td>${index + 1}</td>
       <td>
         <input type="text" inputmode="numeric" maxlength="10" placeholder="DD/MM/AAAA" autocomplete="off" class="form-control form-control-sm" data-hd-coupon-date="${index}" value="${formatDateDisplay(coupon.payment_date)}">
       </td>
+      <td>${stateBadge}</td>
       <td class="text-end"><span class="hd-derived" data-hd-coupon-rate-display="${index}">${formatNumber(coupon.annual_rate_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</span></td>
       <td class="text-end">
         <input type="number" step="0.0001" min="0" class="form-control form-control-sm text-end hd-amort-input" data-hd-coupon-amort="${index}" value="${(coupon.amortization_percent || 0).toFixed(4)}" ${hdBondType.value === "amortizable" ? "" : "disabled"}>
       </td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   hdCouponsBody.querySelectorAll("input[data-hd-coupon-date]").forEach((input) => {
     attachDdmmAutoformat(input);
@@ -1714,9 +1815,12 @@ async function importHdDates() {
       payment_date: paymentDate,
       annual_rate_percent: getHdAnnualRateForYear(paymentDate.slice(0, 4)),
       amortization_percent: 0,
+      in_grace: false,
     }));
     renderHdAnnualAmortRows();
     recomputePeriodAmortizations();
+    renderHdGraceControls();
+    applyHdGracePeriod();
     renderHdCouponsTable();
     hdCouponsSection.classList.remove("d-none");
     if (hdCalculate) hdCalculate.disabled = false;
@@ -2203,6 +2307,16 @@ hdCalculate?.addEventListener("click", () => {
     setHdStatus("error", "Error al calcular");
   });
 });
+
+// Periodo de gracia
+hdGraceMode?.addEventListener("change", () => {
+  renderHdGraceControls();
+  if (hdGraceMode.value === "none") applyHdGracePeriod();
+});
+hdGraceApply?.addEventListener("click", applyHdGracePeriod);
+hdGracePeriod?.addEventListener("change", applyHdGracePeriod);
+hdGraceYear?.addEventListener("change", applyHdGracePeriod);
+hdGraceMonth?.addEventListener("change", applyHdGracePeriod);
 
 if (!hdGenerateSchedule || !hdCalculate) {
   console.warn("[Bono HD] elementos de la calculadora no encontrados; revisa que index.html esté actualizado y limpia cache.");

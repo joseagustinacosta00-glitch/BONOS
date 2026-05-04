@@ -930,3 +930,6 @@ tbody td {
     grid-template-columns: 1fr;
   }
 }
+
+.hd-grace-row { background-color: #f3f4f6; color: #6b7280; }
+.hd-grace-row input { background-color: #f9fafb; }
