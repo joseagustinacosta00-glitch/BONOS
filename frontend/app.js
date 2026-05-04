@@ -80,6 +80,9 @@ const hdAmortYearRows = document.querySelector("#hdAmortYearRows");
 const hdAmortDistribute = document.querySelector("#hdAmortDistribute");
 const hdCouponsSection = document.querySelector("#hdCouponsSection");
 const hdCouponsBody = document.querySelector("#hdCouponsBody");
+const hdDatesFile = document.querySelector("#hdDatesFile");
+const hdDatesText = document.querySelector("#hdDatesText");
+const hdImportDates = document.querySelector("#hdImportDates");
 const hdCashflowBody = document.querySelector("#hdCashflowBody");
 const hdGenerateSchedule = document.querySelector("#hdGenerateSchedule");
 const hdCalculate = document.querySelector("#hdCalculate");
@@ -1021,6 +1024,48 @@ function renderHdCouponsTable() {
   });
 }
 
+async function importHdDates() {
+  const file = hdDatesFile?.files?.[0];
+  const text = (hdDatesText?.value || "").trim();
+  if (!file && !text) {
+    setHdStatus("error", "Subir archivo o pegar texto con fechas");
+    return;
+  }
+  setHdStatus("draft", "Parseando fechas...");
+  const formData = new FormData();
+  if (file) formData.append("file", file);
+  if (text) formData.append("text", text);
+  try {
+    const response = await fetch("/api/calculators/bond-hd/parse-dates", {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudieron parsear fechas");
+    }
+    const payload = await response.json();
+    const dates = payload.dates || [];
+    if (!dates.length) {
+      setHdStatus("error", "No se detectaron fechas");
+      return;
+    }
+    hdCoupons = dates.map((paymentDate) => ({
+      payment_date: paymentDate,
+      annual_rate_percent: getHdAnnualRateForYear(paymentDate.slice(0, 4)),
+      amortization_percent: 0,
+    }));
+    renderHdAnnualAmortRows();
+    recomputePeriodAmortizations();
+    renderHdCouponsTable();
+    hdCouponsSection.classList.remove("d-none");
+    if (hdCalculate) hdCalculate.disabled = false;
+    setHdStatus("ok", `Importadas ${dates.length} fechas`);
+  } catch (error) {
+    setHdStatus("error", error.message || "Error al parsear fechas");
+  }
+}
+
 async function calculateHdCashflow() {
   if (!hdCoupons.length) {
     setHdStatus("error", "Generar la tabla de cupones primero");
@@ -1427,6 +1472,13 @@ hdGenerateSchedule?.addEventListener("click", () => {
 });
 hdAmortFromYear?.addEventListener("change", refreshHdAmortFromPeriodOptions);
 hdAmortDistribute?.addEventListener("click", distributeAmortization);
+hdImportDates?.addEventListener("click", () => {
+  console.log("[Bono HD] click importar fechas");
+  importHdDates().catch((err) => {
+    console.error("[Bono HD] importar fechas fallo", err);
+    setHdStatus("error", "Error al importar fechas");
+  });
+});
 hdCalculate?.addEventListener("click", () => {
   console.log("[Bono HD] click calcular");
   calculateHdCashflow().catch((err) => {

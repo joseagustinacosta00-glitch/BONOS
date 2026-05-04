@@ -361,6 +361,20 @@ tbody td {
   margin: 0 0 8px;
 }
 
+.hd-import-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hd-import-controls textarea {
+  font-family: inherit;
+}
+
+.hd-import-controls button {
+  justify-self: start;
+}
+
 .calc-status[data-kind="error"] {
   color: #b91c1c;
   font-weight: 600;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import re
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
@@ -544,6 +545,124 @@ async def calculator_bond_hd_schedule(payload: BondHdScheduleRequest) -> dict:
         "maturity_date": payload.maturity_date.isoformat(),
         "frequency": payload.frequency,
         "payment_dates": [item.isoformat() for item in dates],
+    }
+
+
+SPANISH_MONTHS: dict[str, int] = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4,
+    "mayo": 5, "junio": 6, "julio": 7, "agosto": 8,
+    "septiembre": 9, "setiembre": 9, "octubre": 10,
+    "noviembre": 11, "diciembre": 12,
+}
+
+_SPANISH_MONTH_PATTERN = re.compile(
+    r"(\d{1,2})\s*(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s*(?:de|del)?\s*(\d{4}))?",
+    re.IGNORECASE,
+)
+_TODOS_DE_PATTERN = re.compile(r"todos?\s*(?:de|del)\s*(\d{4})", re.IGNORECASE)
+_NUMERIC_DATE_PATTERN = re.compile(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})")
+_ISO_DATE_PATTERN = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+
+
+def _extract_dates_from_text(text: str) -> list[date]:
+    if not text:
+        return []
+    normalized = re.sub(r"\s+", " ", text)
+    found: set[date] = set()
+
+    todos_markers = [(m.start(), int(m.group(1))) for m in _TODOS_DE_PATTERN.finditer(normalized)]
+
+    for match in _SPANISH_MONTH_PATTERN.finditer(normalized):
+        day = int(match.group(1))
+        month_name = match.group(2).lower()
+        explicit_year = match.group(3)
+        if explicit_year:
+            year = int(explicit_year)
+        else:
+            year = next((y for pos, y in todos_markers if pos > match.start()), None)
+            if year is None:
+                continue
+        try:
+            found.add(date(year, SPANISH_MONTHS[month_name], day))
+        except (ValueError, KeyError):
+            continue
+
+    for match in _ISO_DATE_PATTERN.finditer(normalized):
+        try:
+            found.add(date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+        except ValueError:
+            continue
+
+    iso_spans = [match.span() for match in _ISO_DATE_PATTERN.finditer(normalized)]
+
+    def _inside_iso(start: int, end: int) -> bool:
+        return any(s <= start < e or s < end <= e for s, e in iso_spans)
+
+    for match in _NUMERIC_DATE_PATTERN.finditer(normalized):
+        if _inside_iso(match.start(), match.end()):
+            continue
+        a, b, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        if a > 12 and 1 <= b <= 12:
+            day, month = a, b
+        elif b > 12 and 1 <= a <= 12:
+            day, month = b, a
+        else:
+            day, month = a, b
+        try:
+            found.add(date(year, month, day))
+        except ValueError:
+            continue
+
+    return sorted(found)
+
+
+@app.post("/api/calculators/bond-hd/parse-dates")
+async def calculator_bond_hd_parse_dates(
+    text: Annotated[str | None, Form()] = None,
+    file: Annotated[UploadFile | None, File()] = None,
+) -> dict:
+    if not text and (file is None or not file.filename):
+        raise HTTPException(status_code=422, detail="Subir archivo o pegar texto con fechas.")
+
+    found: set[date] = set()
+
+    if file is not None and file.filename:
+        try:
+            rows = await _read_historical_upload(file)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"No se pudo leer el archivo: {exc}") from exc
+
+        for row in rows:
+            try:
+                found.add(_parse_historical_date(row))
+                continue
+            except (ValueError, KeyError):
+                pass
+            for value in row.values():
+                if value is None:
+                    continue
+                if isinstance(value, datetime):
+                    found.add(value.date())
+                    continue
+                if isinstance(value, date):
+                    found.add(value)
+                    continue
+                for parsed in _extract_dates_from_text(str(value)):
+                    found.add(parsed)
+
+    if text:
+        for parsed in _extract_dates_from_text(text):
+            found.add(parsed)
+
+    if not found:
+        raise HTTPException(status_code=422, detail="No se detectaron fechas en el contenido.")
+
+    sorted_dates = sorted(found)
+    return {
+        "count": len(sorted_dates),
+        "dates": [item.isoformat() for item in sorted_dates],
     }
 
 
