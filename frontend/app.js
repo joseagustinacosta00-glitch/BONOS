@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd29 cargado - HD: long-first-coupon fix + UI colapsable + calc abajo");
+console.log("[Monitor] app.js v=hd30 cargado - HD: 180/360 ahora siempre dias reales / 360");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
