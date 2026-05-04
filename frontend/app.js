@@ -62,8 +62,21 @@ const historicalSeries = document.querySelector("#historicalSeries");
 const historicalSeriesSearch = document.querySelector("#historicalSeriesSearch");
 const historicalDownload = document.querySelector("#historicalDownload");
 const hardDollarForm = document.querySelector("#hardDollarForm");
+const hdTicker = document.querySelector("#hdTicker");
 const hdIssueDate = document.querySelector("#hdIssueDate");
 const hdMaturityDate = document.querySelector("#hdMaturityDate");
+const hdModeSwitch = document.querySelector("#hdModeSwitch");
+const hdSearchPanel = document.querySelector("#hdSearchPanel");
+const hdNewPanel = document.querySelector("#hdNewPanel");
+const hdSearchTicker = document.querySelector("#hdSearchTicker");
+const hdSearchSubmit = document.querySelector("#hdSearchSubmit");
+const hdSavedList = document.querySelector("#hdSavedList");
+const hdSavedDetail = document.querySelector("#hdSavedDetail");
+const hdSavedDetailTitle = document.querySelector("#hdSavedDetailTitle");
+const hdSavedDetailMeta = document.querySelector("#hdSavedDetailMeta");
+const hdSavedDetailBody = document.querySelector("#hdSavedDetailBody");
+const hdSaveCashflow = document.querySelector("#hdSaveCashflow");
+const hdSaveStatus = document.querySelector("#hdSaveStatus");
 const hdFaceValue = document.querySelector("#hdFaceValue");
 const hdFrequency = document.querySelector("#hdFrequency");
 const hdBondType = document.querySelector("#hdBondType");
@@ -439,6 +452,7 @@ function setBondModel(model) {
     calculatorPlaceholder.textContent = "";
   } else if (isHardDollar) {
     renderHardDollarCouponInputs();
+    setHdMode("search");
   } else if (isDual) {
     calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
   } else {
@@ -757,6 +771,20 @@ function attachDdmmAutoformat(input) {
 function getHdIssueIso() { return parseDdmmYyyy(hdIssueDate?.value); }
 function getHdMaturityIso() { return parseDdmmYyyy(hdMaturityDate?.value); }
 
+function normalizeFamilyTicker(value) {
+  const ticker = String(value || "").toUpperCase().trim();
+  if (ticker.length > 1 && (ticker.endsWith("D") || ticker.endsWith("C")) && /\d/.test(ticker.slice(0, -1))) {
+    return ticker.slice(0, -1);
+  }
+  return ticker;
+}
+
+function setHdSaveStatus(kind, text) {
+  if (!hdSaveStatus) return;
+  hdSaveStatus.dataset.kind = kind;
+  hdSaveStatus.textContent = text;
+}
+
 function renderHardDollarCouponInputs() {
   const isStepUp = hdCouponType.value === "step_up";
   hdFixedCouponWrap.classList.toggle("d-none", isStepUp);
@@ -1024,6 +1052,141 @@ function renderHdCouponsTable() {
   });
 }
 
+function setHdMode(mode) {
+  if (!hdSearchPanel || !hdNewPanel) return;
+  const isSearch = mode === "search";
+  hdSearchPanel.classList.toggle("d-none", !isSearch);
+  hdNewPanel.classList.toggle("d-none", isSearch);
+  hdModeSwitch?.querySelectorAll("[data-hd-mode]").forEach((button) => {
+    const active = button.dataset.hdMode === mode;
+    button.classList.toggle("active", active);
+    button.classList.toggle("btn-dark", active);
+    button.classList.toggle("btn-outline-dark", !active);
+  });
+  if (isSearch) fetchHdSavedList().catch(() => {});
+}
+
+async function fetchHdSavedList() {
+  if (!hdSavedList) return;
+  try {
+    const response = await fetch("/api/calculators/bond-hd/saved");
+    if (!response.ok) throw new Error("No se pudo leer la lista");
+    const payload = await response.json();
+    renderHdSavedList(payload.items || []);
+  } catch (error) {
+    hdSavedList.innerHTML = '<span class="empty-cell">No se pudo leer la lista de bonos guardados</span>';
+    console.error("[Bono HD] lista guardados", error);
+  }
+}
+
+function renderHdSavedList(items) {
+  if (!hdSavedList) return;
+  if (!items.length) {
+    hdSavedList.innerHTML = '<span class="empty-cell">Todavia no guardaste ningun Bono HD.</span>';
+    return;
+  }
+  const filter = (hdSearchTicker?.value || "").trim().toUpperCase();
+  const filtered = filter
+    ? items.filter((item) => String(item.ticker || "").toUpperCase().includes(filter))
+    : items;
+  if (!filtered.length) {
+    hdSavedList.innerHTML = '<span class="empty-cell">Sin resultados para ese ticker.</span>';
+    return;
+  }
+  hdSavedList.innerHTML = filtered.map((item) => `
+    <button type="button" class="hd-saved-item" data-hd-saved-ticker="${item.ticker}">
+      <strong>${item.ticker}</strong>
+      <small>${formatDateDisplay(item.issue_date)} → ${formatDateDisplay(item.maturity_date)} · ${item.bond_type} · ${item.frequency}</small>
+    </button>
+  `).join("");
+  hdSavedList.querySelectorAll("[data-hd-saved-ticker]").forEach((button) => {
+    button.addEventListener("click", () => loadHdSaved(button.dataset.hdSavedTicker));
+  });
+}
+
+async function loadHdSaved(ticker) {
+  if (!ticker) return;
+  setHdSaveStatus("draft", "Cargando...");
+  try {
+    const response = await fetch(`/api/calculators/bond-hd/saved/${encodeURIComponent(ticker)}`);
+    if (!response.ok) throw new Error("No se pudo cargar el bono");
+    const payload = await response.json();
+    const item = payload.item || {};
+    renderHdSavedDetail(item);
+    setHdSaveStatus("ok", `${item.ticker} cargado`);
+  } catch (error) {
+    setHdSaveStatus("error", "Error al cargar");
+    console.error("[Bono HD] cargar guardado", error);
+  }
+}
+
+function renderHdSavedDetail(item) {
+  if (!hdSavedDetail || !hdSavedDetailBody) return;
+  hdSavedDetail.classList.remove("d-none");
+  if (hdSavedDetailTitle) hdSavedDetailTitle.textContent = `Cashflow guardado · ${item.ticker || ""}`;
+  if (hdSavedDetailMeta) {
+    hdSavedDetailMeta.textContent = `Emision ${formatDateDisplay(item.issue_date)} · Vencimiento ${formatDateDisplay(item.maturity_date)} · VNO ${item.face_value} · ${item.bond_type} · ${item.frequency} · ${item.convention}`;
+  }
+  const cashflows = (item.payload && item.payload.cashflows) || [];
+  if (!cashflows.length) {
+    hdSavedDetailBody.innerHTML = '<tr><td colspan="10" class="empty-state">El cashflow guardado esta vacio</td></tr>';
+    return;
+  }
+  hdSavedDetailBody.innerHTML = cashflows.map((row) => `
+    <tr>
+      <td>${row.number}</td>
+      <td>${formatDate(row.payment_date)}</td>
+      <td>${formatDate(row.effective_payment_date)}</td>
+      <td class="text-end">${formatNumber(row.amortization_vn_percent, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.residual_vn_percent, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.annual_rate_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.period_rate_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+      <td class="text-end">${formatNumber(row.amortization_per_100, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.interest_per_100, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+      <td class="text-end">${formatNumber(row.total_per_100, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+    </tr>
+  `).join("");
+}
+
+async function saveHdCashflow() {
+  if (!hdLastCalculation) {
+    setHdSaveStatus("error", "Calcula el cashflow primero");
+    return;
+  }
+  const ticker = normalizeFamilyTicker(hdTicker?.value);
+  if (!ticker) {
+    setHdSaveStatus("error", "Cargar ticker (ej: AL30)");
+    hdTicker?.focus();
+    return;
+  }
+  setHdSaveStatus("draft", "Guardando...");
+  try {
+    const response = await fetch("/api/calculators/bond-hd/saved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        issue_date: hdLastCalculation.issue_date,
+        maturity_date: hdLastCalculation.maturity_date,
+        face_value: hdLastCalculation.face_value,
+        bond_type: hdLastCalculation.bond_type,
+        frequency: hdLastCalculation.frequency,
+        convention: hdLastCalculation.convention,
+        payload: hdLastCalculation,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo guardar");
+    }
+    setHdSaveStatus("ok", `${ticker} guardado`);
+    fetchHdSavedList().catch(() => {});
+  } catch (error) {
+    setHdSaveStatus("error", error.message || "Error al guardar");
+    console.error("[Bono HD] guardar", error);
+  }
+}
+
 async function importHdDates() {
   const file = hdDatesFile?.files?.[0];
   const text = (hdDatesText?.value || "").trim();
@@ -1104,6 +1267,7 @@ async function calculateHdCashflow() {
     }
     hdLastCalculation = await response.json();
     renderHdCashflowTable(hdLastCalculation);
+    if (hdSaveCashflow) hdSaveCashflow.disabled = false;
     setHdStatus("ok", "Cashflow calculado");
   } catch (error) {
     setHdStatus("error", error.message || "Error al calcular");
@@ -1477,6 +1641,22 @@ hdImportDates?.addEventListener("click", () => {
   importHdDates().catch((err) => {
     console.error("[Bono HD] importar fechas fallo", err);
     setHdStatus("error", "Error al importar fechas");
+  });
+});
+
+hdModeSwitch?.querySelectorAll("[data-hd-mode]").forEach((button) => {
+  button.addEventListener("click", () => setHdMode(button.dataset.hdMode));
+});
+hdSearchSubmit?.addEventListener("click", () => {
+  fetchHdSavedList().catch(() => setHdSaveStatus("error", "No se pudo buscar"));
+});
+hdSearchTicker?.addEventListener("input", () => {
+  fetchHdSavedList().catch(() => {});
+});
+hdSaveCashflow?.addEventListener("click", () => {
+  saveHdCashflow().catch((err) => {
+    console.error("[Bono HD] saveHdCashflow fallo", err);
+    setHdSaveStatus("error", "Error al guardar");
   });
 });
 hdCalculate?.addEventListener("click", () => {

@@ -367,6 +367,63 @@ tbody td {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.hd-mode-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.hd-mode-panel {
+  display: block;
+}
+
+.hd-search-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.hd-saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.hd-saved-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #27364a;
+  cursor: pointer;
+}
+
+.hd-saved-item:hover {
+  background: #eef7fb;
+  border-color: var(--accent);
+}
+
+.hd-saved-item small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+.hd-save-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+}
+
 .hd-import-controls textarea {
   font-family: inherit;
 }

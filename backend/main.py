@@ -93,6 +93,17 @@ class BondHdCalculationRequest(BaseModel):
     coupons: list[BondHdCouponPayload] = Field(min_length=1)
 
 
+class BondHdSavePayload(BaseModel):
+    ticker: str = Field(min_length=1, max_length=20)
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
+    bond_type: str = Field(pattern="^(bullet|amortizable|zero_coupon)$")
+    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
+    convention: str = Field(pattern="^(30_360_eu|30_360_us|act_360|act_365|act_act)$")
+    payload: dict
+
+
 class BondHdScheduleRequest(BaseModel):
     issue_date: date
     maturity_date: date
@@ -664,6 +675,45 @@ async def calculator_bond_hd_parse_dates(
         "count": len(sorted_dates),
         "dates": [item.isoformat() for item in sorted_dates],
     }
+
+
+@app.get("/api/calculators/bond-hd/saved")
+async def calculator_bond_hd_saved_list() -> dict:
+    return {"items": [item.to_dict() for item in storage.list_bond_hd()]}
+
+
+@app.get("/api/calculators/bond-hd/saved/{ticker}")
+async def calculator_bond_hd_saved_one(ticker: str) -> dict:
+    saved = storage.get_bond_hd(ticker)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Bono HD no encontrado.")
+    return {"item": saved.to_dict()}
+
+
+@app.post("/api/calculators/bond-hd/saved")
+async def calculator_bond_hd_saved_upsert(payload: BondHdSavePayload) -> dict:
+    import json as _json
+    try:
+        saved = storage.upsert_bond_hd(
+            ticker=payload.ticker,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            bond_type=payload.bond_type,
+            frequency=payload.frequency,
+            convention=payload.convention,
+            payload_json=_json.dumps(payload.payload, ensure_ascii=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"item": saved.to_dict()}
+
+
+@app.delete("/api/calculators/bond-hd/saved/{ticker}")
+async def calculator_bond_hd_saved_delete(ticker: str) -> dict:
+    if not storage.delete_bond_hd(ticker):
+        raise HTTPException(status_code=404, detail="Bono HD no encontrado.")
+    return {"deleted": True}
 
 
 @app.post("/api/calculators/bond-hd")

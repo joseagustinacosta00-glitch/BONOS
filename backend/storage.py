@@ -107,6 +107,41 @@ class HistoricalDataPoint:
 
 
 @dataclass(frozen=True)
+class SavedBondHd:
+    id: int
+    ticker: str
+    issue_date: date
+    maturity_date: date
+    face_value: float
+    bond_type: str
+    frequency: str
+    convention: str
+    payload_json: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        import json
+        try:
+            payload = json.loads(self.payload_json) if self.payload_json else {}
+        except (TypeError, ValueError):
+            payload = {}
+        return {
+            "id": self.id,
+            "ticker": self.ticker,
+            "issue_date": self.issue_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "face_value": self.face_value,
+            "bond_type": self.bond_type,
+            "frequency": self.frequency,
+            "convention": self.convention,
+            "payload": payload,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
 class AiMemoryNote:
     id: int
     title: str
@@ -185,6 +220,23 @@ class CalculatorStorage:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(ticker, metric_type, price_market, settlement_type, value_date)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bond_hd_calculations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL UNIQUE,
+                    issue_date TEXT NOT NULL,
+                    maturity_date TEXT NOT NULL,
+                    face_value REAL NOT NULL,
+                    bond_type TEXT NOT NULL,
+                    frequency TEXT NOT NULL,
+                    convention TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -693,6 +745,120 @@ class CalculatorStorage:
             settlement_type=str(row["settlement_type"]),
             value_date=date.fromisoformat(str(row["value_date"])),
             value=float(row["value"]),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    def list_bond_hd(self) -> list[SavedBondHd]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       bond_type, frequency, convention, payload_json,
+                       created_at, updated_at
+                FROM bond_hd_calculations
+                ORDER BY ticker ASC
+                """
+            ).fetchall()
+        return [self._row_to_bond_hd(row) for row in rows]
+
+    def get_bond_hd(self, ticker: str) -> SavedBondHd | None:
+        normalized = _normalize_base_ticker(ticker)
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       bond_type, frequency, convention, payload_json,
+                       created_at, updated_at
+                FROM bond_hd_calculations
+                WHERE ticker = ?
+                """,
+                (normalized,),
+            ).fetchone()
+        return self._row_to_bond_hd(row) if row else None
+
+    def upsert_bond_hd(
+        self,
+        ticker: str,
+        issue_date: date,
+        maturity_date: date,
+        face_value: float,
+        bond_type: str,
+        frequency: str,
+        convention: str,
+        payload_json: str,
+    ) -> SavedBondHd:
+        now = now_argentina_iso()
+        normalized = _normalize_base_ticker(ticker)
+        if not normalized:
+            raise ValueError("El ticker es obligatorio.")
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO bond_hd_calculations (
+                    ticker, issue_date, maturity_date, face_value,
+                    bond_type, frequency, convention, payload_json,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    issue_date = excluded.issue_date,
+                    maturity_date = excluded.maturity_date,
+                    face_value = excluded.face_value,
+                    bond_type = excluded.bond_type,
+                    frequency = excluded.frequency,
+                    convention = excluded.convention,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    normalized,
+                    issue_date.isoformat(),
+                    maturity_date.isoformat(),
+                    face_value,
+                    bond_type,
+                    frequency,
+                    convention,
+                    payload_json,
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       bond_type, frequency, convention, payload_json,
+                       created_at, updated_at
+                FROM bond_hd_calculations
+                WHERE ticker = ?
+                """,
+                (normalized,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("No se pudo guardar el Bono HD.")
+        return self._row_to_bond_hd(row)
+
+    def delete_bond_hd(self, ticker: str) -> bool:
+        normalized = _normalize_base_ticker(ticker)
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM bond_hd_calculations WHERE ticker = ?",
+                (normalized,),
+            )
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_to_bond_hd(row: sqlite3.Row) -> SavedBondHd:
+        return SavedBondHd(
+            id=int(row["id"]),
+            ticker=str(row["ticker"]),
+            issue_date=date.fromisoformat(str(row["issue_date"])),
+            maturity_date=date.fromisoformat(str(row["maturity_date"])),
+            face_value=float(row["face_value"]),
+            bond_type=str(row["bond_type"]),
+            frequency=str(row["frequency"]),
+            convention=str(row["convention"]),
+            payload_json=str(row["payload_json"] or ""),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
