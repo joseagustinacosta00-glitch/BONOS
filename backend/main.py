@@ -432,6 +432,26 @@ async def market_shortest_caucion() -> dict:
     }
 
 
+@app.post("/api/system/reconnect-ws")
+async def system_reconnect_ws() -> dict:
+    """Fuerza reconexion del WebSocket pyRofex sin necesidad de redeploy.
+    Util cuando los precios estan stale (ej: server arranco en horario de
+    mercado cerrado y nunca reconecto al abrir)."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        await asyncio.to_thread(market._reconnect_pyrofex)
+        last_age = market._seconds_since_last_tick()
+        return {
+            "ok": True,
+            "status": market.status,
+            "last_tick_age_seconds": last_age,
+            "is_market_hours": market._is_market_hours(),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Reconexion fallo: {exc}") from exc
+
+
 @app.get("/api/futures")
 async def market_futures() -> dict:
     items = market.futures_quotes()

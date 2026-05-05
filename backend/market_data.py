@@ -29,9 +29,11 @@ class MarketDataService:
         self._futures_quotes: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._mock_task: asyncio.Task[None] | None = None
+        self._watchdog_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
         self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
         self._futures_provider_to_symbol: dict[str, str] = {}
+        self._last_tick_ts: float | None = None
         self._build_provider_symbol_map()
 
     async def start(self) -> None:
@@ -43,6 +45,9 @@ class MarketDataService:
                 self.status = "error"
                 self.last_error = str(exc)
                 logger.exception("Could not start pyRofex market data: %s", exc)
+            # Arrancar watchdog que reconecta el WS si los precios estan stale
+            # en horario de mercado (10:30-17:00 ART)
+            self._watchdog_task = asyncio.create_task(self._watchdog_loop())
             return
 
         self.status = "mock"
@@ -56,10 +61,84 @@ class MarketDataService:
             except asyncio.CancelledError:
                 pass
 
+        if getattr(self, "_watchdog_task", None):
+            self._watchdog_task.cancel()
+            try:
+                await self._watchdog_task
+            except asyncio.CancelledError:
+                pass
+
         if self._pyrofex is not None:
             await asyncio.to_thread(self._disconnect_pyrofex)
 
         self.status = "stopped"
+
+    async def _watchdog_loop(self) -> None:
+        """Cada 60s verifica que los precios se esten actualizando.
+        Si en horario de mercado (10:30-17:00 ART) pasaron mas de 5 minutos
+        sin tick, reconecta el WS pyRofex.
+        """
+        STALE_THRESHOLD_SECONDS = 300  # 5 min sin ticks = stale
+        CHECK_INTERVAL = 60
+        try:
+            while True:
+                await asyncio.sleep(CHECK_INTERVAL)
+                try:
+                    if not self._is_market_hours():
+                        continue
+                    age = self._seconds_since_last_tick()
+                    if age is None or age < STALE_THRESHOLD_SECONDS:
+                        continue
+                    logger.warning(
+                        "watchdog: precios stale hace %.0fs en horario de mercado, reconectando pyRofex",
+                        age,
+                    )
+                    try:
+                        await asyncio.to_thread(self._reconnect_pyrofex)
+                    except Exception as exc:
+                        logger.exception("watchdog: reconect fallo: %s", exc)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.exception("watchdog: loop error: %s", exc)
+        except asyncio.CancelledError:
+            return
+
+    def _is_market_hours(self) -> bool:
+        """True si estamos dentro de horario de mercado argentino (10:30-17:00 ART
+        en dia habil)."""
+        now = now_argentina()
+        if now.weekday() >= 5:  # sab/dom
+            return False
+        # Usar el calendario explicito si esta disponible
+        try:
+            from backend.market_calendar import market_calendar
+            if not market_calendar.is_business_day(now.date()):
+                return False
+        except Exception:
+            pass
+        minutes = now.hour * 60 + now.minute
+        return 10 * 60 + 30 <= minutes <= 17 * 60
+
+    def _seconds_since_last_tick(self) -> float | None:
+        """Devuelve segundos desde el ultimo tick recibido (cualquier instrumento).
+        None si nunca hubo tick."""
+        with self._lock:
+            ts = getattr(self, "_last_tick_ts", None)
+        if ts is None:
+            return None
+        return (now_argentina().timestamp() - ts)
+
+    def _reconnect_pyrofex(self) -> None:
+        """Cierra la conexion actual y vuelve a inicializar."""
+        try:
+            self._disconnect_pyrofex()
+        except Exception as exc:
+            logger.warning("disconnect pre-reconnect fallo: %s", exc)
+        self._start_pyrofex()
+        with self._lock:
+            self._last_tick_ts = now_argentina().timestamp()
+        logger.info("watchdog: reconexion pyRofex completada")
 
     def snapshot(self) -> dict[str, Any]:
         today = now_argentina().date()
@@ -420,7 +499,12 @@ class MarketDataService:
         with_data = sum(1 for inst in instruments if inst["has_last"])
         without_data = len(instruments) - with_data
         failed_subs = [s for s in (getattr(self, "_subscription_failed", []) or [])]
+        last_age = self._seconds_since_last_tick()
         return {
+            "ws_status": self.status,
+            "ws_last_tick_age_seconds": last_age,
+            "ws_is_market_hours": self._is_market_hours(),
+            "ws_stale": (last_age is not None and last_age > 300 and self._is_market_hours()),
             "total_instruments": len(instruments),
             "with_data": with_data,
             "without_data": without_data,
@@ -469,6 +553,9 @@ class MarketDataService:
     def _on_market_data(self, message: dict[str, Any]) -> None:
         self.status = "connected"
         self.last_error = None
+        # Trackear timestamp del ultimo tick para watchdog
+        with self._lock:
+            self._last_tick_ts = now_argentina().timestamp()
         self._update_quote_from_message(message)
 
     def _on_error(self, message: Any) -> None:
