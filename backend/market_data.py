@@ -781,12 +781,19 @@ class MarketDataService:
                 current = self._spot_quotes_dict[local_symbol]
             else:
                 current = self._quotes[local_symbol]
+            # Para spot en VETA/sandbox: si LA es null pero CL tiene valor,
+            # usar CL como last efectivo (es el cierre del dia previo, mismo
+            # numero que aparece en otras webapps).
+            if category == "spot" and last is None and previous_close is not None:
+                effective_last = previous_close
+            else:
+                effective_last = last
             updates = {
                 "bid": bid if bid is not None else current.get("bid"),
                 "ask": ask if ask is not None else current.get("ask"),
                 "bid_size": bid_size if bid_size is not None else current.get("bid_size"),
                 "ask_size": ask_size if ask_size is not None else current.get("ask_size"),
-                "last": last if last is not None else current.get("last"),
+                "last": effective_last if effective_last is not None else current.get("last"),
                 "last_volume": last_volume if last_volume is not None else current.get("last_volume"),
                 "cumulative_volume": volume if volume is not None else current.get("cumulative_volume"),
                 "volume": volume if volume is not None else current.get("volume"),
@@ -1472,21 +1479,35 @@ class MarketDataService:
                 md = (response or {}).get("marketData") or (response or {}).get("market_data")
                 if md:
                     last = self._entry_price(md.get("LA"))
+                    cl = self._entry_price(md.get("CL"))
+                    bid = self._entry_price(md.get("BI"))
+                    ask = self._entry_price(md.get("OF"))
+                    # FALLBACK: si LA es null pero CL existe, usar CL como
+                    # "last efectivo" (caso pyRofex VETA / sandbox: solo
+                    # devuelve cierre del dia previo, no trades en vivo).
+                    effective_last = last if last is not None else cl
+                    last_source = "LA" if last is not None else ("CL" if cl is not None else None)
                     sym_results.append({
                         "market": mkt_name,
                         "last": last,
+                        "previous_close": cl,
+                        "effective_last": effective_last,
+                        "last_source": last_source,
                         "raw_keys": list(md.keys()) if isinstance(md, dict) else None,
                     })
-                    if last is not None:
-                        # Actualizar el quote en sitio
+                    if effective_last is not None:
                         with self._lock:
                             current = self._spot_quotes_dict.get(symbol, {})
-                            current["last"] = float(last)
-                            current["bid"] = self._entry_price(md.get("BI")) or current.get("bid")
-                            current["ask"] = self._entry_price(md.get("OF")) or current.get("ask")
+                            current["last"] = float(effective_last)
+                            current["last_source"] = last_source  # "LA" o "CL"
+                            current["bid"] = bid or current.get("bid")
+                            current["ask"] = ask or current.get("ask")
+                            current["previous_close"] = cl or current.get("previous_close")
                             current["updated_at"] = now_argentina_iso()
                             current["raw"] = self._json_safe(response)
                             current["fetched_via"] = f"REST market={mkt_name}"
+                            if last_source == "CL":
+                                current["description"] = f"DLR/SPOT (cierre VETA, sin LA en sandbox)"
                             self._spot_quotes_dict[symbol] = current
                 else:
                     sym_results.append({"market": mkt_name, "no_marketData": True, "response_keys": list((response or {}).keys()) if response else None})

@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd54 cargado - SPOT dual: LIVE (pyRofex) + A3500 (BCRA)");
+console.log("[Monitor] app.js v=hd55 cargado - SPOT: usa CL (cierre) si LA es null (caso VETA sandbox)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -712,7 +712,7 @@ function fmtSpotValue(v) {
 }
 
 function renderSpotBanner() {
-  // SPOT LIVE
+  // SPOT LIVE (pyRofex: LA si hay, sino CL como fallback)
   const liveValue = document.querySelector("#spotLiveValue");
   const liveMeta = document.querySelector("#spotLiveMeta");
   if (liveValue && liveMeta) {
@@ -720,7 +720,8 @@ function renderSpotBanner() {
       liveValue.textContent = fmtSpotValue(spotLiveCache.last);
       const sym = spotLiveCache.symbol || "spot";
       const ts = spotLiveCache.updated_at ? formatTime(spotLiveCache.updated_at) : "";
-      liveMeta.textContent = `${sym}${ts ? " · " + ts : ""}`;
+      const source = spotLiveCache.last_source === "CL" ? " · cierre" : "";
+      liveMeta.textContent = `${sym}${ts ? " · " + ts : ""}${source}`;
     } else {
       liveValue.textContent = "—";
       liveMeta.textContent = spotItemsCount === 0
