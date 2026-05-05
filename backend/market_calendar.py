@@ -36,20 +36,32 @@ def read_date_csv(path: Path) -> set[date]:
 class MarketCalendar:
     holidays: frozenset[date]
     explicit_business_days: frozenset[date]
+    explicit_min: date | None = None
+    explicit_max: date | None = None
 
     @classmethod
     def load(cls) -> "MarketCalendar":
+        explicit = read_date_csv(BUSINESS_DAYS_PATH)
+        explicit_min = min(explicit) if explicit else None
+        explicit_max = max(explicit) if explicit else None
         return cls(
             holidays=frozenset(read_date_csv(HOLIDAYS_PATH)),
-            explicit_business_days=frozenset(read_date_csv(BUSINESS_DAYS_PATH)),
+            explicit_business_days=frozenset(explicit),
+            explicit_min=explicit_min,
+            explicit_max=explicit_max,
         )
 
     def is_holiday(self, value: date) -> bool:
         return value in self.holidays
 
     def is_business_day(self, value: date) -> bool:
-        if self.explicit_business_days:
-            return value in self.explicit_business_days
+        # Hibrido: si la fecha cae dentro del rango cubierto por el CSV
+        # explicito, ese listado manda (es la fuente exacta del usuario).
+        # Fuera de ese rango, fallback weekday-minus-holidays para no romper
+        # fechas anteriores o posteriores que no estan en el listado.
+        if self.explicit_business_days and self.explicit_min and self.explicit_max:
+            if self.explicit_min <= value <= self.explicit_max:
+                return value in self.explicit_business_days
         return value.weekday() < 5 and value not in self.holidays
 
     def next_business_day(self, value: date, include_current: bool = False) -> date:
