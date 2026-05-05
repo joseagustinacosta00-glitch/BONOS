@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd51 cargado - SPOT: matchea 'DOLAR USA' + heuristica USA");
+console.log("[Monitor] app.js v=hd52 cargado - SPOT: matchea por description + diag mejorado");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -728,9 +728,9 @@ function renderSpotBanner() {
       : "—";
   }
   if (metaEl) {
-    const sym = spotCache.symbol || "spot";
+    const display = spotCache.description || spotCache.symbol || "spot";
     const ts = spotCache.updated_at ? formatTime(spotCache.updated_at) : "";
-    metaEl.textContent = `${sym}${ts ? " · " + ts : ""}`;
+    metaEl.textContent = `${display}${ts ? " · " + ts : ""}`;
   }
 }
 

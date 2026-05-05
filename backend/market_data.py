@@ -953,7 +953,9 @@ class MarketDataService:
         candidate_set = {s.upper() for s in self.SPOT_SYMBOL_CANDIDATES}
         # Tambien matchear heuristicamente:
         #   - "SPOT" + DLR/DOLAR/USD
-        #   - "USA" + DLR/DOLAR/USD (caso reportado: "DOLAR USA")
+        #   - "USA" + DLR/DOLAR/USD (caso reportado: "DOLAR USA" como description)
+        #   - "TMUSD" en cualquier parte del simbolo
+        #   - El description del instrumento contiene "DOLAR USA" (con o sin tilde)
         now = now_argentina_iso()
         registered: list[str] = []
         for instrument in instruments:
@@ -961,14 +963,30 @@ class MarketDataService:
             if not symbol:
                 continue
             sym_up = symbol.upper()
-            # Excluir explicitamente futuros DLR mensuales (DLR/MMMYY)
+            # Excluir explicitamente futuros DLR mensuales (DLR/MMMYY) y opciones
             if re.match(r"^DLR/[A-Z]{3}\d{2}M?$", sym_up):
                 continue
+            # Description / securityDescription del instrumento
+            description = ""
+            if isinstance(instrument, dict):
+                for key in ("description", "securityDescription", "instrumentDescription", "name"):
+                    val = instrument.get(key)
+                    if val:
+                        description = str(val)
+                        break
+            desc_up = description.upper()
+            # Normalizar tildes para matchear "DOLAR USA" o "DÓLAR USA"
+            desc_norm = (
+                desc_up.replace("Ó", "O").replace("Á", "A")
+                .replace("É", "E").replace("Í", "I").replace("Ú", "U")
+            )
             is_spot = (
                 sym_up in candidate_set
                 or ("SPOT" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
                 or ("USA" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
-                or "TMUSD" in sym_up  # MERV - XMEV - TMUSD - 24hs / CI
+                or "TMUSD" in sym_up
+                or ("DOLAR USA" in desc_norm)
+                or ("DOLAR SPOT" in desc_norm)
             )
             if not is_spot:
                 continue
@@ -977,6 +995,7 @@ class MarketDataService:
                 self._spot_quotes_dict[symbol] = {
                     "symbol": symbol,
                     "provider_symbol": symbol,
+                    "description": description or symbol,
                     "category": "spot",
                     "currency": "ARS",
                     "underlying": "USD",
@@ -986,7 +1005,7 @@ class MarketDataService:
                     "updated_at": now,
                     "raw": {},
                 }
-                registered.append(symbol)
+                registered.append(f"{symbol} [{description or '-'}]")
         logger.info("Dolar spot descubierto: %d simbolo(s) -> %s", len(registered), registered)
 
     def spot_quotes(self) -> list[dict[str, Any]]:

@@ -463,33 +463,51 @@ async def diag_spot_html() -> HTMLResponse:
         return HTMLResponse(f"<h1>get_detailed_instruments fallo: {exc}</h1>", status_code=502)
     candidates = []
     all_dlr_or_usd = []
+    by_desc_dolar_usa = []
     for inst in instruments:
         sym = market._instrument_symbol(inst)
         if not sym:
             continue
         sym_up = sym.upper()
-        if any(k in sym_up for k in ("DLR", "DOLAR", "USD")):
-            all_dlr_or_usd.append(sym)
-            if any(k in sym_up for k in ("SPOT", "/CI", "/T0", "24HS", "USA")):
-                candidates.append(sym)
+        # Description lookup
+        desc = ""
+        if isinstance(inst, dict):
+            for key in ("description", "securityDescription", "instrumentDescription", "name"):
+                v = inst.get(key)
+                if v:
+                    desc = str(v)
+                    break
+        desc_up = desc.upper().replace("Ó", "O").replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ú", "U")
+        line = f"{sym}    [{desc or '-'}]"
+        # Match por description "DOLAR USA"
+        if "DOLAR USA" in desc_up or "DOLAR SPOT" in desc_up:
+            by_desc_dolar_usa.append(line)
+        if any(k in sym_up for k in ("DLR", "DOLAR", "USD")) or "DOLAR" in desc_up or "USD" in desc_up:
+            all_dlr_or_usd.append(line)
+            if any(k in sym_up for k in ("SPOT", "/CI", "/T0", "24HS", "USA", "TMUSD")) or "DOLAR USA" in desc_up:
+                candidates.append(line)
     sub = list(market._spot_provider_to_symbol.keys())
     hardcoded = list(market.SPOT_SYMBOL_CANDIDATES)
     html = f"""<!doctype html><html><head><meta charset=utf-8><title>Diag SPOT</title>
-    <style>body{{font-family:Arial;max-width:900px;margin:24px auto;padding:0 16px;color:#15212f}}
+    <style>body{{font-family:Arial;max-width:1100px;margin:24px auto;padding:0 16px;color:#15212f}}
     h1{{color:#0d6efd}}h2{{color:#475569;margin-top:24px;font-size:1rem;text-transform:uppercase;letter-spacing:.04em}}
-    pre{{background:#f1f5f9;padding:12px 16px;border-radius:6px;overflow-x:auto;font-size:.9rem;white-space:pre-wrap;word-break:break-all}}
+    pre{{background:#f1f5f9;padding:12px 16px;border-radius:6px;overflow-x:auto;font-size:.85rem;white-space:pre;word-break:keep-all;font-family:Consolas,monospace}}
     .ok{{color:#16a34a;font-weight:700}}.err{{color:#dc2626;font-weight:700}}
-    .copy-hint{{color:#64748b;font-size:.85rem;margin-bottom:6px}}</style></head><body>
+    .copy-hint{{color:#64748b;font-size:.85rem;margin-bottom:6px}}
+    .highlight{{background:#fff7ed;border:2px solid #f59e0b;padding:14px 16px;border-radius:6px}}
+    </style></head><body>
     <h1>Diagnostico SPOT</h1>
     <h2>Estado</h2>
     <p>Total instrumentos del catalogo: <strong>{len(instruments)}</strong></p>
-    <p>Simbolos suscriptos como spot ahora mismo: <span class="{'ok' if sub else 'err'}">{', '.join(sub) if sub else '(NINGUNO)'}</span></p>
-    <h2>Candidatos detectados (lo que mi heuristica veria como spot)</h2>
-    <p class="copy-hint">Si esta vacio, ningun simbolo del catalogo contiene SPOT/CI/T0/24HS/USA junto a DLR/DOLAR/USD.</p>
+    <p>Simbolos suscriptos como spot ahora: <span class="{'ok' if sub else 'err'}">{', '.join(sub) if sub else '(NINGUNO)'}</span></p>
+    <h2>Match exacto: instrumentos con descripcion "Dólar USA" o "Dólar Spot"</h2>
+    <p class="copy-hint">Si aparece algo aca, ese es el spot que estamos buscando. El primer campo es el SIMBOLO TECNICO (lo que se suscribe), el segundo es el nombre descriptivo.</p>
+    <div class="highlight"><pre>{chr(10).join(by_desc_dolar_usa) if by_desc_dolar_usa else '(VACIO - no hay nada con descripcion DOLAR USA / DOLAR SPOT)'}</pre></div>
+    <h2>Candidatos detectados (heuristica completa)</h2>
     <pre>{chr(10).join(candidates) if candidates else '(VACIO)'}</pre>
-    <h2>Todos los simbolos con DLR/DOLAR/USD ({len(all_dlr_or_usd)} en total)</h2>
-    <p class="copy-hint">Mandame el que corresponde al SPOT y lo agrego a la lista de candidatos.</p>
-    <pre>{chr(10).join(all_dlr_or_usd[:200])}</pre>
+    <h2>Todos los simbolos relacionados con DOLAR / USD ({len(all_dlr_or_usd)} en total, primeros 250)</h2>
+    <p class="copy-hint">Formato: SIMBOLO    [descripcion]. Mandame el que corresponde al SPOT.</p>
+    <pre>{chr(10).join(all_dlr_or_usd[:250])}</pre>
     <h2>Candidatos hardcoded actualmente</h2>
     <pre>{chr(10).join(hardcoded)}</pre>
     </body></html>"""
