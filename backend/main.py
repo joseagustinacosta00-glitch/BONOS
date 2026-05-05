@@ -694,25 +694,31 @@ CABLE_FAMILIES = {"GD30", "GD35", "GD38", "GD41", "GD46", "GD29"}
 @app.get("/api/bonds/{ticker}/metrics")
 async def bond_metrics(
     ticker: str,
-    price: float,
-    settlement_type: str = "t1",
+    price: float | None = None,
+    tir_target_percent: float | None = None,
+    settlement_days: int = 1,
     as_of_date: date | None = None,
     auto_convert_fx: bool = True,
 ) -> dict:
-    """Calcula TIR, TNA, TEM, Duration, MD y Convexity para un bono dado su
-    precio. Toma el cashflow guardado del bono HD (con fallback al ticker de
-    familia: AO27D -> AO27).
+    """Modo dual:
+      - Precio dado -> calcula TIR, TNA, TEM, Duration, MD, Convexity.
+      - TIR dada -> calcula precio + las demas metricas.
 
-    Si el bono cotiza en ARS pero paga en USD/Cable, divide automaticamente
-    el precio por el FX implicito (MEP para ley local, CCL para GD/NY) antes
-    de calcular las metricas. Pasar auto_convert_fx=false para desactivarlo.
+    Toma el cashflow guardado del bono HD (con fallback al ticker de
+    familia: AO27D -> AO27). Si el ticker cotiza en ARS y paga USD/Cable,
+    aplica conversion FX (MEP para ley local, CCL para GD/NY).
+    settlement_days: T+N con N entero (default 1). Cambia el dia desde
+    el cual se calcula (settlement = as_of_date + N dias habiles).
     """
-    if price <= 0:
+    if price is None and tir_target_percent is None:
+        raise HTTPException(status_code=422, detail="Pasar 'price' o 'tir_target_percent'.")
+    if price is not None and price <= 0:
         raise HTTPException(status_code=422, detail="Precio debe ser positivo.")
+    if not isinstance(settlement_days, int) or settlement_days < 0:
+        raise HTTPException(status_code=422, detail="settlement_days debe ser entero >= 0.")
     today_real = now_argentina().date()
     today = as_of_date if as_of_date is not None else today_real
-    settlement_offset = 0 if str(settlement_type).lower() == "t0" else 1
-    settlement_date = market_calendar.add_business_days(today, settlement_offset)
+    settlement_date = market_calendar.add_business_days(today, settlement_days)
 
     ticker_up = ticker.upper()
     bond_info = TICKER_BY_SYMBOL.get(ticker_up)
@@ -735,7 +741,9 @@ async def bond_metrics(
             "note": f"Sin cashflow guardado para {ticker_up} ni para la familia {family}. Cargar y guardar primero con la calculadora HD.",
         }
 
-    # 2) Conversion FX si el ticker cotiza en ARS y paga en USD/Cable
+    # 2) Resolver FX (MEP/CCL) si aplica. Lo calculamos siempre que el ticker
+    # sea ARS para poder convertir en cualquier sentido (precio_ARS->USD o
+    # precio_USD->ARS si vino TIR como entrada).
     fx_info = {
         "applied": False,
         "currency_quoted": currency,
@@ -745,7 +753,7 @@ async def bond_metrics(
         "usd_converted_price": price,
         "note": None,
     }
-    effective_price = price
+    fx_rate = None
     if auto_convert_fx and currency == "ARS":
         snap = market.snapshot()
         by_symbol = {q.get("symbol"): q for q in snap.get("quotes", [])}
@@ -764,19 +772,31 @@ async def bond_metrics(
             ars_last_f = usd_last_f = None
         if ars_last_f and usd_last_f and usd_last_f > 0:
             fx_rate = ars_last_f / usd_last_f
-            effective_price = price / fx_rate
             fx_info.update({
                 "applied": True,
                 "fx_label": fx_label,
                 "fx_rate": fx_rate,
-                "usd_converted_price": effective_price,
-                "note": f"Precio en ARS dividido por {fx_label} implicito ({family}/{family + ('C' if is_cable else 'D')}) = {fx_rate:.4f}",
+                "note": f"FX implicito {fx_label} = {family}/{family + ('C' if is_cable else 'D')} = {fx_rate:.4f}",
             })
         else:
             fx_info["note"] = (
                 f"No hay FX implicito para {family} (last ARS={ars_last_f}, "
-                f"last {fx_label}-target={usd_last_f}). Usando precio sin convertir."
+                f"last {fx_label}-target={usd_last_f}). Calculando sin conversion."
             )
+
+    # Precio efectivo en USD: si vino price ARS y hay FX, dividir.
+    # Si no se aplica FX (ticker USD/Cable o no hay FX), price ya esta en USD.
+    if price is not None:
+        if fx_rate is not None:
+            effective_price = price / fx_rate
+            fx_info["ars_input_price"] = price
+            fx_info["usd_converted_price"] = effective_price
+        else:
+            effective_price = price
+            fx_info["ars_input_price"] = price if currency == "ARS" else None
+            fx_info["usd_converted_price"] = price
+    else:
+        effective_price = None  # se completara mas adelante (modo TIR -> precio)
 
     payload = saved.payload or {}
     cashflows = payload.get("cashflows") or []
@@ -816,51 +836,63 @@ async def bond_metrics(
     times_years = [(d - settlement_date).days / 365.0 for d, _ in future]
     cashflow_amounts = [cf for _, cf in future]
 
-    # Newton-Raphson para TIR efectiva anual
-    def npv(r: float) -> float:
-        return sum(cf / ((1 + r) ** t) for cf, t in zip(cashflow_amounts, times_years)) - effective_price
-
-    def npv_derivative(r: float) -> float:
-        return sum(-t * cf / ((1 + r) ** (t + 1)) for cf, t in zip(cashflow_amounts, times_years))
-
-    r = 0.30  # seed razonable para bonos arg
-    converged = False
-    for _ in range(200):
-        f = npv(r)
-        if abs(f) < 1e-10:
-            converged = True
-            break
-        df = npv_derivative(r)
-        if df == 0:
-            break
-        r_new = r - f / df
-        if r_new <= -0.99:
-            r_new = -0.99
-        if abs(r_new - r) < 1e-12:
-            r = r_new
-            converged = True
-            break
-        r = r_new
-    tir_annual = r
-
-    # Si no convergio o el precio efectivo no permite TIR razonable, devolver nota
     sum_cf = sum(cashflow_amounts)
-    if not converged or not math.isfinite(tir_annual) or tir_annual <= -0.99:
-        return {
-            "ticker": ticker_up,
-            "price": price,
-            "effective_price": effective_price,
-            "settlement_date": settlement_date.isoformat(),
-            "available": False,
-            "fx_conversion": fx_info,
-            "saved_via": saved_via,
-            "future_cashflow_sum": sum_cf,
-            "note": (
-                f"No converge la TIR. Precio efectivo {effective_price:.4f}, "
-                f"suma de cashflows {sum_cf:.4f}. Verificar el precio (¿esta en USD?) "
-                f"o que el cashflow guardado corresponda al bono."
-            ),
-        }
+    mode = None
+    if price is not None:
+        # Modo: precio -> TIR via Newton-Raphson
+        mode = "price_to_tir"
+        def npv(r: float) -> float:
+            return sum(cf / ((1 + r) ** t) for cf, t in zip(cashflow_amounts, times_years)) - effective_price
+
+        def npv_derivative(r: float) -> float:
+            return sum(-t * cf / ((1 + r) ** (t + 1)) for cf, t in zip(cashflow_amounts, times_years))
+
+        r = 0.30
+        converged = False
+        for _ in range(200):
+            f = npv(r)
+            if abs(f) < 1e-10:
+                converged = True
+                break
+            df = npv_derivative(r)
+            if df == 0:
+                break
+            r_new = r - f / df
+            if r_new <= -0.99:
+                r_new = -0.99
+            if abs(r_new - r) < 1e-12:
+                r = r_new
+                converged = True
+                break
+            r = r_new
+        tir_annual = r
+
+        if not converged or not math.isfinite(tir_annual) or tir_annual <= -0.99:
+            return {
+                "ticker": ticker_up, "price": price, "effective_price": effective_price,
+                "settlement_date": settlement_date.isoformat(), "available": False,
+                "fx_conversion": fx_info, "saved_via": saved_via,
+                "future_cashflow_sum": sum_cf,
+                "note": (
+                    f"No converge la TIR. Precio efectivo {effective_price:.4f}, "
+                    f"suma de cashflows {sum_cf:.4f}. Verificar el precio (¿esta en USD?) "
+                    f"o que el cashflow guardado corresponda al bono."
+                ),
+            }
+    else:
+        # Modo: TIR -> precio
+        mode = "tir_to_price"
+        tir_annual = (tir_target_percent or 0) / 100.0
+        if tir_annual <= -0.99:
+            raise HTTPException(status_code=422, detail="TIR fuera de rango (<= -99%).")
+        # Precio en USD = sum(CF / (1+r)^t)
+        usd_price_calc = sum(cf / ((1 + tir_annual) ** t) for cf, t in zip(cashflow_amounts, times_years))
+        effective_price = usd_price_calc
+        # Si aplica FX, calculamos tambien el precio equivalente en ARS
+        if fx_rate is not None:
+            ars_price_calc = usd_price_calc * fx_rate
+            fx_info["usd_converted_price"] = usd_price_calc
+            fx_info["ars_input_price"] = ars_price_calc
 
     tem = (1 + tir_annual) ** (1.0 / 12.0) - 1
     tna_365 = tir_annual  # simplificacion: TIR efectiva anual ≈ TNA anual base 365
@@ -873,15 +905,22 @@ async def bond_metrics(
         for cf, t in zip(cashflow_amounts, times_years)
     ) / pv_total
 
+    # Precio "display" en la moneda del ticker (ARS si aplica FX, sino USD)
+    display_price = (fx_info.get("ars_input_price") if (fx_rate is not None) else effective_price)
+
     return {
         "ticker": ticker_up,
         "family": family,
-        "price": price,
-        "effective_price": effective_price,
+        "mode": mode,
+        "input_price": price,
+        "input_tir_percent": tir_target_percent,
+        "computed_price_usd": effective_price,
+        "computed_price_display": display_price,
+        "currency_quoted": currency,
         "fx_conversion": fx_info,
         "saved_via": saved_via,
         "settlement_date": settlement_date.isoformat(),
-        "settlement_type": str(settlement_type).lower(),
+        "settlement_days": settlement_days,
         "today": today.isoformat(),
         "as_of_override": as_of_date.isoformat() if as_of_date is not None else None,
         "available": True,

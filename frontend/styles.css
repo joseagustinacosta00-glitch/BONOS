@@ -952,9 +952,34 @@ tbody td {
 }
 
 .bond-metrics-modal { position: fixed; inset: 0; z-index: 10000; }
-.bond-metrics-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); }
-.bond-metrics-dialog { position: relative; max-width: 720px; margin: 5vh auto; background: #fff; border-radius: 0.5rem; box-shadow: 0 12px 40px rgba(0,0,0,0.25); padding: 1.25rem; max-height: 90vh; overflow-y: auto; }
-.bond-metrics-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; }
-.bond-metrics-header h3 { margin: 0; font-size: 1.1rem; }
+.bond-metrics-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(2px); }
+.bond-metrics-dialog { position: relative; max-width: 640px; width: calc(100% - 2rem); margin: 6vh auto; background: #fff; border-radius: 0.75rem; box-shadow: 0 20px 60px rgba(0,0,0,0.30); padding: 0; max-height: 88vh; overflow-y: auto; font-family: inherit; }
+.bond-metrics-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid #e2e8f0; background: #f8fafc; border-radius: 0.75rem 0.75rem 0 0; }
+.bond-metrics-header h3 { margin: 0; font-size: 1.05rem; font-weight: 600; color: #0f172a; }
+.bond-metrics-header h3 #bondMetricsTicker { color: #0d6efd; font-weight: 700; }
+.bm-close { background: none; border: none; font-size: 1.5rem; line-height: 1; color: #64748b; cursor: pointer; padding: 0 0.25rem; }
+.bm-close:hover { color: #0f172a; }
+.bond-metrics-body { padding: 1rem 1.25rem 1.25rem; }
+.bm-hint { color: #475569; font-size: 0.85rem; margin: 0 0 0.75rem; }
+.bm-hint strong { color: #0d6efd; }
+.bm-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem 0.75rem; }
+.bm-inputs { grid-template-columns: 1fr 1fr 100px 1fr; }
+.bm-outputs { grid-template-columns: repeat(3, 1fr); }
+.bm-field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; color: #475569; margin: 0; }
+.bm-field span { font-weight: 500; }
+.bm-field input { padding: 0.4rem 0.55rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; font-size: 0.9rem; color: #0f172a; background: #fff; transition: border-color 0.15s; }
+.bm-field input:focus { outline: none; border-color: #0d6efd; box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15); }
+.bm-field input[readonly] { background: #f1f5f9; color: #1e293b; font-weight: 600; }
+.bm-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.85rem; }
+.bm-status { font-size: 0.82rem; color: #64748b; }
+.bm-status[data-kind="ok"] { color: #16a34a; }
+.bm-status[data-kind="error"] { color: #dc2626; }
+.bm-status[data-kind="draft"] { color: #475569; }
+.bm-divider { height: 1px; background: #e2e8f0; margin: 1rem 0 0.85rem; }
+.bm-note { font-size: 0.78rem; color: #64748b; margin: 0.75rem 0 0; line-height: 1.4; }
+.bm-note strong { color: #0f172a; }
+@media (max-width: 600px) {
+  .bm-inputs, .bm-outputs { grid-template-columns: 1fr 1fr; }
+}
 #quotesBody td.ticker { cursor: pointer; color: #0d6efd; text-decoration: underline dotted; }
 #quotesBody td.ticker:hover { color: #0a58ca; }
