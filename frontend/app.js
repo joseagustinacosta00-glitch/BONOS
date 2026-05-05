@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd42 cargado - Modal metricas: precio<->TIR, T+N editable, UI minimalista");
+console.log("[Monitor] app.js v=hd43 cargado - Modal metricas: fijo centrado + error reporting + settlement default 1");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2846,10 +2846,13 @@ async function fetchBondMetrics() {
     return;
   }
   setBmStatus("draft", "Calculando...");
+  // Settlement: default 1 si esta vacio (no 0)
+  let settlementVal = bondMetricsSettlement?.value;
+  if (settlementVal === "" || settlementVal == null) settlementVal = "1";
+  const settlementDays = parseInt(settlementVal, 10);
   const params = new URLSearchParams({
-    settlement_days: String(parseInt(bondMetricsSettlement?.value || "1", 10) || 0),
+    settlement_days: String(Number.isFinite(settlementDays) && settlementDays >= 0 ? settlementDays : 1),
   });
-  // Prioridad: si el usuario lleno PRECIO, usar precio. Si solo lleno TIR, usar TIR.
   if (hasPrice) {
     params.set("price", String(priceVal));
   } else {
@@ -2857,10 +2860,22 @@ async function fetchBondMetrics() {
   }
   if (bondMetricsAsOfDate?.value) params.set("as_of_date", bondMetricsAsOfDate.value);
   try {
-    const response = await fetch(`/api/bonds/${encodeURIComponent(currentMetricsTicker)}/metrics?${params.toString()}`);
+    const url = `/api/bonds/${encodeURIComponent(currentMetricsTicker)}/metrics?${params.toString()}`;
+    console.log("[bondMetrics] GET", url);
+    const response = await fetch(url);
     if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo calcular");
+      const errPayload = await response.json().catch(() => ({}));
+      let msg = `Error ${response.status}`;
+      if (typeof errPayload.detail === "string") {
+        msg = errPayload.detail;
+      } else if (Array.isArray(errPayload.detail) && errPayload.detail.length) {
+        msg = errPayload.detail.map((d) => {
+          const loc = Array.isArray(d.loc) ? d.loc.slice(-1).join(".") : "";
+          return `${loc}: ${d.msg || d.type || "invalido"}`;
+        }).join(" / ");
+      }
+      console.error("[bondMetrics] error", response.status, errPayload);
+      throw new Error(msg);
     }
     const payload = await response.json();
     const fmt = (v, dec = 4) => v == null ? "-" : new Intl.NumberFormat("es-AR", {
