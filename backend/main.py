@@ -980,13 +980,17 @@ async def calculator_bond_tamar_calculate(
     # - si <= last_published_date: usar TAMAR del dia (carry-forward si falta)
     # - si > last_published_date: usar projection
     daily_values: list[float] = []
+    daily_detail: list[dict] = []
     actual_days = 0
+    carry_forward_days = 0
     projected_days = 0
     last_known_value = None
+    last_known_date = None
     for d in sorted_dates:
         if d > window_start:
             break
         last_known_value = by_date[d]
+        last_known_date = d
 
     cursor = window_start
     while cursor <= window_end:
@@ -996,12 +1000,29 @@ async def calculator_bond_tamar_calculate(
         if cursor > last_published_date:
             daily_values.append(projection)
             projected_days += 1
+            daily_detail.append({
+                "date": cursor.isoformat(),
+                "value": projection,
+                "source": "projection",
+                "from_date": None,
+            })
         else:
             if cursor in by_date:
                 last_known_value = by_date[cursor]
+                last_known_date = cursor
             if last_known_value is not None:
                 daily_values.append(last_known_value)
-                actual_days += 1
+                source = "actual" if cursor in by_date else "carry_forward"
+                if source == "actual":
+                    actual_days += 1
+                else:
+                    carry_forward_days += 1
+                daily_detail.append({
+                    "date": cursor.isoformat(),
+                    "value": last_known_value,
+                    "source": source,
+                    "from_date": last_known_date.isoformat() if last_known_date else None,
+                })
         cursor += timedelta(days=1)
 
     if not daily_values:
@@ -1075,10 +1096,13 @@ async def calculator_bond_tamar_calculate(
         "tamar_average_breakdown": {
             "business_days_total": len(daily_values),
             "actual_days": actual_days,
+            "carry_forward_days": carry_forward_days,
             "projected_days": projected_days,
             "projected_value_used": projection,
             "last_published_date": last_published_date.isoformat(),
+            "sum_of_daily_values": sum(daily_values),
         },
+        "daily_detail": daily_detail,
         "tamar_for_tem_percent": tamar_for_tem_percent,
         "tamar_tem_percent": tamar_tem_percent,
         "vpv": vpv,

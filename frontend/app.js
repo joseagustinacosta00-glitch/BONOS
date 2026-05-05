@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd40 cargado - Metricas: family fallback + auto-conversion ARS/MEP/CCL");
+console.log("[Monitor] app.js v=hd41 cargado - TAMAR: detalle dia por dia para verificar promedio");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2698,7 +2698,27 @@ async function calculateTamar() {
     if (tamarCalcAverage) tamarCalcAverage.value = formatTamarPercent(payload.tamar_average_percent);
     if (tamarCalcBreakdown) {
       const br = payload.tamar_average_breakdown || {};
-      tamarCalcBreakdown.value = `${br.business_days_total} dias (${br.actual_days} reales / ${br.projected_days} proyectados @ ${formatTamarPercent(br.projected_value_used)})`;
+      const carry = br.carry_forward_days || 0;
+      const carryNote = carry > 0 ? ` + ${carry} carry-forward` : "";
+      tamarCalcBreakdown.value = `${br.business_days_total} dias (${br.actual_days} reales${carryNote} / ${br.projected_days} proyectados @ ${formatTamarPercent(br.projected_value_used)})`;
+    }
+    // Tabla de detalle dia por dia
+    const tamarDailyDetailBody = document.querySelector("#tamarDailyDetailBody");
+    if (tamarDailyDetailBody) {
+      const rows = payload.daily_detail || [];
+      if (!rows.length) {
+        tamarDailyDetailBody.innerHTML = '<tr><td colspan="5" class="empty-state">Sin detalle</td></tr>';
+      } else {
+        tamarDailyDetailBody.innerHTML = rows.map((r, i) => `
+          <tr class="${r.source === 'projection' ? 'hd-grace-row' : ''}">
+            <td>${i + 1}</td>
+            <td>${formatDateDisplay(r.date)}</td>
+            <td class="text-end">${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(r.value)}</td>
+            <td>${r.source}</td>
+            <td>${r.from_date && r.from_date !== r.date ? formatDateDisplay(r.from_date) : ""}</td>
+          </tr>
+        `).join("");
+      }
     }
     if (tamarCalcWithSpread) {
       tamarCalcWithSpread.value = formatTamarPercent(payload.tamar_for_tem_percent);

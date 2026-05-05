@@ -763,6 +763,29 @@
                   DIAS se cuenta con regla 30/360 US (igual que la funcion DAYS360 de Excel) entre emision y vencimiento.
                 </p>
 
+                <details>
+                  <summary class="hd-import-summary-title">Ver detalle dia por dia (para verificar promedio)</summary>
+                  <div style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm align-middle mb-0" id="tamarDailyDetailTable">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Fecha</th>
+                          <th class="text-end">TAMAR % n.a.</th>
+                          <th>Origen</th>
+                          <th>Carry-forward desde</th>
+                        </tr>
+                      </thead>
+                      <tbody id="tamarDailyDetailBody">
+                        <tr><td colspan="5" class="empty-state">Calcular primero</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p class="hd-help">"actual" = TAMAR publicado por BCRA ese dia. "carry_forward" = el dia es habil pero BCRA no publico, se reusa el ultimo valor conocido. "projection" = dia futuro, se usa el promedio de los ultimos 5 publicados.</p>
+                </details>
+                <p class="hd-help">
+                </p>
+
                 <h3 style="margin-top:1rem;">Tasa fija contra precio de mercado</h3>
                 <div class="hd-amort-controls">
                   <label>
@@ -1149,6 +1172,6 @@
       </div>
     </div>
 
-    <script src="/app-bundle.js?v=hd40"></script>
+    <script src="/app-bundle.js?v=hd41"></script>
   </body>
 </html>
