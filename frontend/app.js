@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd33 cargado - HD: fix duplicado julio + hint inicio sacado");
+console.log("[Monitor] app.js v=hd34 cargado - HD: reset state entre bonos + descarga CSV");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -82,6 +82,7 @@ const hdSavedDetailTitle = document.querySelector("#hdSavedDetailTitle");
 const hdSavedDetailMeta = document.querySelector("#hdSavedDetailMeta");
 const hdSavedDetailBody = document.querySelector("#hdSavedDetailBody");
 const hdSaveCashflow = document.querySelector("#hdSaveCashflow");
+const hdDownloadCashflow = document.querySelector("#hdDownloadCashflow");
 const hdSaveStatus = document.querySelector("#hdSaveStatus");
 const hdFaceValue = document.querySelector("#hdFaceValue");
 const hdFrequency = document.querySelector("#hdFrequency");
@@ -1170,6 +1171,23 @@ function getHdAnnualRateForYear(year) {
 // restaurar. Se setea cuando se generan/importan los cupones.
 let hdCouponsOriginal = null;
 
+// Limpia TODO el estado HD entre bonos para no contaminar valores residuales,
+// amortizaciones, gracia, cashflow previo, etc.
+function resetHdState() {
+  hdCoupons = [];
+  hdCouponsOriginal = null;
+  hdAnnualAmortByYear = {};
+  hdLastCalculation = null;
+  hdGraceConfig = { mode: "none", first_period_index: null };
+  if (hdGraceMode) hdGraceMode.value = "none";
+  if (hdGraceStatus) hdGraceStatus.textContent = "-";
+  if (hdDeferredStatus) hdDeferredStatus.textContent = "-";
+  if (hdCashflowBody) hdCashflowBody.innerHTML = '<tr><td colspan="10" class="empty-state">Sin cashflow para mostrar</td></tr>';
+  if (hdSaveCashflow) hdSaveCashflow.disabled = true;
+  if (hdDownloadCashflow) hdDownloadCashflow.disabled = true;
+  if (hdAmortPctPerPeriod) hdAmortPctPerPeriod.value = "";
+}
+
 // Inicio de pagos: ELIMINA los flujos previos al primer flujo que paga, asi el
 // nuevo primer flujo acumula naturalmente desde la fecha de emision (el backend
 // usa issue_date como period_start del primer cupon).
@@ -1349,6 +1367,7 @@ async function generateHdSchedule() {
     setHdStatus("error", "Completa emision y vencimiento como DD/MM/AAAA");
     return;
   }
+  resetHdState();
   setHdStatus("draft", "Generando cupones...");
   try {
     const response = await fetch("/api/calculators/bond-hd/schedule", {
@@ -1884,6 +1903,7 @@ async function importHdDates() {
     setHdStatus("error", "Subir archivo o pegar texto con fechas");
     return;
   }
+  resetHdState();
 
   let combinedText = pastedText;
   let fileForBackend = null;
@@ -1993,10 +2013,57 @@ async function calculateHdCashflow() {
     hdLastCalculation = await response.json();
     renderHdCashflowTable(hdLastCalculation);
     if (hdSaveCashflow) hdSaveCashflow.disabled = false;
+    if (hdDownloadCashflow) hdDownloadCashflow.disabled = false;
     setHdStatus("ok", "Cashflow calculado");
   } catch (error) {
     setHdStatus("error", error.message || "Error al calcular");
   }
+}
+
+function downloadHdCashflowCsv() {
+  if (!hdLastCalculation || !hdLastCalculation.cashflows || !hdLastCalculation.cashflows.length) {
+    setHdStatus("error", "No hay cashflow calculado para descargar");
+    return;
+  }
+  const headers = [
+    "Numero", "Fecha teorica", "Fecha efectiva",
+    "Periodo desde", "Periodo hasta", "Dias del periodo", "Year fraction",
+    "Tasa anual %", "Tasa periodo %",
+    "Amortizacion VN %", "VN residual %",
+    "Amortizacion c/100", "Interes c/100", "Total c/100",
+    "Amortizacion $", "Interes $", "Total $",
+  ];
+  const rows = hdLastCalculation.cashflows.map((c) => [
+    c.number, c.payment_date, c.effective_payment_date,
+    c.period_start, c.period_end, c.period_days, c.year_fraction,
+    c.annual_rate_percent, c.period_rate_percent,
+    c.amortization_vn_percent, c.residual_vn_percent,
+    c.amortization_per_100, c.interest_per_100, c.total_per_100,
+    c.amortization_amount, c.interest_amount, c.total_amount,
+  ]);
+  const formatCell = (v) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    // Si tiene coma o comillas o salto de linea, escapar
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+  const csv = [headers, ...rows].map((row) => row.map(formatCell).join(",")).join("\n");
+  // BOM para que Excel detecte UTF-8 correctamente
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const ticker = hdTicker?.value?.trim() || "bono_hd";
+  const today = new Date().toISOString().slice(0, 10);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cashflow_${ticker}_${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setHdStatus("ok", `CSV descargado: cashflow_${ticker}_${today}.csv`);
 }
 
 function renderHdCashflowTable(payload) {
@@ -2445,6 +2512,9 @@ hdGraceMonth?.addEventListener("change", applyHdGracePeriod);
 // Inicio de pagos (diferimiento del primer pago, caso GD35)
 hdDeferredApply?.addEventListener("click", applyHdDeferredStart);
 hdDeferredReset?.addEventListener("click", resetHdDeferredStart);
+
+// Descargar cashflow como CSV
+hdDownloadCashflow?.addEventListener("click", downloadHdCashflowCsv);
 
 if (!hdGenerateSchedule || !hdCalculate) {
   console.warn("[Bono HD] elementos de la calculadora no encontrados; revisa que index.html esté actualizado y limpia cache.");
