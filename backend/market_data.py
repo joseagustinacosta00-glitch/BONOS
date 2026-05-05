@@ -1108,6 +1108,105 @@ class MarketDataService:
         with self._lock:
             return [dict(q) for q in self._spot_quotes_dict.values()]
 
+    def scan_for_real_spot(self, min_price: float = 100.0) -> dict[str, Any]:
+        """Recorre TODOS los simbolos del catalogo de pyRofex que sean
+        candidatos a dolar (DLR, DOLAR, USD en symbol o description) y
+        para cada uno hace REST get_market_data probando todos los markets.
+        Devuelve los que tengan un last >= min_price (default 100, filtra
+        los que dan valores irreales como 6 pesos).
+        Si encuentra uno valido, lo registra automaticamente como spot."""
+        if self._pyrofex is None:
+            return {"error": "pyRofex no inicializado"}
+        pyRofex = self._pyrofex
+        environment = self._environment(pyRofex)
+        # 1) Listar todos los simbolos candidatos del catalogo
+        try:
+            response = pyRofex.get_detailed_instruments(environment=environment)
+            instruments = self._instrument_rows(response)
+        except Exception as exc:
+            return {"error": f"No se pudo cargar catalogo: {exc}"}
+        candidates = []
+        for inst in instruments:
+            sym = self._instrument_symbol(inst)
+            if not sym:
+                continue
+            sym_up = sym.upper()
+            # Excluir futuros DLR mensuales y opciones (ej "DLR/MAY26 1400 C")
+            if re.match(r"^DLR/[A-Z]{3}\d{2}M?$", sym_up):
+                continue
+            if " C" in sym_up or " P" in sym_up:  # opciones (Call/Put)
+                continue
+            if "/" in sym_up and any(ch.isdigit() for ch in sym_up):
+                # Probable spread/calendario tipo DLR/MAY26/JUN26
+                if sym_up.count("/") >= 2:
+                    continue
+            # Filtrar por probables spots/dolar
+            if any(k in sym_up for k in ("DOLAR", "DLR", "USD", "TMUSD", "A3500")):
+                candidates.append(sym)
+        # Limitar a 50 para no saturar
+        candidates = candidates[:80]
+        markets = self._all_available_markets(pyRofex)
+        results = []
+        winners = []  # los que tienen last razonable
+        entries = self._market_data_entries(pyRofex)
+        for symbol in candidates:
+            for mkt_name, mkt_value in markets:
+                try:
+                    response = pyRofex.get_market_data(
+                        ticker=symbol, entries=entries, depth=1,
+                        market=mkt_value, environment=environment,
+                    )
+                except Exception:
+                    continue
+                md = (response or {}).get("marketData") or {}
+                if not isinstance(md, dict):
+                    continue
+                last = self._entry_price(md.get("LA"))
+                bid = self._entry_price(md.get("BI"))
+                ask = self._entry_price(md.get("OF"))
+                cl = self._entry_price(md.get("CL"))
+                # Tomar el primer valor disponible
+                price_ref = last or cl or ((bid + ask) / 2 if bid and ask else None)
+                if price_ref is None:
+                    continue
+                row = {
+                    "symbol": symbol, "market": mkt_name,
+                    "last": last, "bid": bid, "ask": ask, "previous_close": cl,
+                    "price_ref": price_ref,
+                }
+                results.append(row)
+                if price_ref >= min_price:
+                    winners.append(row)
+                    # Registrar como spot
+                    with self._lock:
+                        if symbol not in self._spot_quotes_dict:
+                            self._spot_provider_to_symbol[symbol] = symbol
+                            self._spot_quotes_dict[symbol] = {
+                                "symbol": symbol, "provider_symbol": symbol,
+                                "description": f"Dolar SPOT detectado por scan (market={mkt_name})",
+                                "category": "spot", "currency": "ARS", "underlying": "USD",
+                                "last": last, "bid": bid, "ask": ask,
+                                "updated_at": now_argentina_iso(),
+                                "fetched_via": f"REST scan market={mkt_name}",
+                                "raw": self._json_safe(response),
+                            }
+                        else:
+                            current = self._spot_quotes_dict[symbol]
+                            current["last"] = last
+                            current["bid"] = bid
+                            current["ask"] = ask
+                            current["updated_at"] = now_argentina_iso()
+                break  # ya tenemos data del market correcto, no probar mas
+        # Ordenar resultados por price_ref descendente
+        results.sort(key=lambda r: r.get("price_ref") or 0, reverse=True)
+        winners.sort(key=lambda r: r.get("price_ref") or 0, reverse=True)
+        return {
+            "candidates_scanned": len(candidates),
+            "all_results_with_price": results[:100],
+            "winners_above_min": winners[:20],
+            "min_price_filter": min_price,
+        }
+
     def fetch_spot_via_rest(self) -> dict[str, Any]:
         """Llama al REST de pyRofex.get_market_data para los simbolos spot
         registrados, probando varios markets. Util cuando el WS no manda

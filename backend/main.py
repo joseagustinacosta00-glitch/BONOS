@@ -551,6 +551,22 @@ async def diag_spot_html() -> HTMLResponse:
     return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
 
 
+@app.api_route("/api/fx/spot/scan", methods=["GET", "POST"])
+async def fx_spot_scan(min_price: float = 100.0) -> dict:
+    """Scan amplio: itera todos los simbolos del catalogo de pyRofex que
+    sean candidatos a dolar (DLR/DOLAR/USD), llama REST get_market_data,
+    y devuelve los que tienen un last razonable (>= min_price). Default
+    filtra los irreales como 6 pesos. Si encuentra alguno valido lo
+    registra automaticamente como spot."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        result = await asyncio.to_thread(market.scan_for_real_spot, min_price)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result
+
+
 @app.api_route("/api/fx/spot/fetch-rest", methods=["GET", "POST"])
 async def fx_spot_fetch_rest() -> dict:
     """Llama al REST de pyRofex para forzar fetch del ultimo precio del
