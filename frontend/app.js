@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd48 cargado - Calculadoras: 'Hard Dollar' + nueva opcion 'Dollar-Linked'");
+console.log("[Monitor] app.js v=hd49 cargado - Futuros y DLK: SPOT hero + DLK orden fijo + 12 columnas DLR + tooltip vto");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -508,159 +508,146 @@ function renderFxRatios() {
   }
 }
 
-// Tabla Futuros y DLK: ahora son DOS tablas separadas (DLK izquierda,
-// Futuros derecha). Mantengo refs por (tipoTabla, symbol).
-const futRowRefs = new Map();   // key = symbol -> ref (futuros)
-const dlkRowRefs = new Map();   // key = symbol -> ref (DLK)
+// ===== Tablas Futuros y DLK =====
+// DLK: orden fijo TZV26 -> D30S6 -> TZV27 -> TZV28
+// Futuros DLR: 12 columnas con datos extendidos del backend
 
-function _buildRowEl(symbol, isDlk) {
+const DLK_ORDER = ["TZV26", "D30S6", "TZV27", "TZV28"];
+const dlkRowRefs = new Map();
+const futRowRefs = new Map();
+
+function fmtNumAr(value, dec = 2) {
+  if (value === null || value === undefined || value === "" || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: dec, maximumFractionDigits: dec,
+  }).format(value);
+}
+
+function fmtIntAr(value) {
+  if (value === null || value === undefined || value === "" || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(value);
+}
+
+function _buildDlkRow(symbol) {
   const tr = document.createElement("tr");
   tr.dataset.key = symbol;
-  const tdSym = document.createElement("td");
-  tdSym.innerHTML = `<strong>${symbol}</strong>`;
+  const tdSym = document.createElement("td"); tdSym.className = "ticker"; tdSym.innerHTML = `<strong>${symbol}</strong>`;
   const tdVenc = document.createElement("td"); tdVenc.textContent = "-";
-  const tdBid = document.createElement("td");  tdBid.className = "text-end";  tdBid.textContent = "s/d";
-  const tdAsk = document.createElement("td");  tdAsk.className = "text-end";  tdAsk.textContent = "s/d";
-  const tdLast = document.createElement("td"); tdLast.className = "text-end"; tdLast.textContent = "s/d";
-  const tdChg = document.createElement("td");  tdChg.className = "text-end";  tdChg.textContent = "s/d";
-  const tdTime = document.createElement("td"); tdTime.className = "text-end"; tdTime.textContent = "s/d";
+  const tdBid = document.createElement("td"); tdBid.className = "text-end"; tdBid.textContent = "-";
+  const tdAsk = document.createElement("td"); tdAsk.className = "text-end"; tdAsk.textContent = "-";
+  const tdLast = document.createElement("td"); tdLast.className = "text-end"; tdLast.textContent = "-";
+  const tdChg = document.createElement("td"); tdChg.className = "text-end"; tdChg.textContent = "-";
+  const tdTime = document.createElement("td"); tdTime.className = "text-end"; tdTime.textContent = "-";
   tr.append(tdSym, tdVenc, tdBid, tdAsk, tdLast, tdChg, tdTime);
   return { tr, cells: { venc: tdVenc, bid: tdBid, ask: tdAsk, last: tdLast, chg: tdChg, time: tdTime } };
+}
+
+function _buildFutRow(symbol) {
+  const tr = document.createElement("tr");
+  tr.dataset.key = symbol;
+  const tdSym = document.createElement("td"); tdSym.className = "ticker"; tdSym.innerHTML = `<strong>${symbol}</strong>`; tdSym.title = "";
+  const tdSzB = document.createElement("td"); tdSzB.className = "text-end"; tdSzB.textContent = "-";
+  const tdPxB = document.createElement("td"); tdPxB.className = "text-end"; tdPxB.textContent = "-";
+  const tdPxO = document.createElement("td"); tdPxO.className = "text-end"; tdPxO.textContent = "-";
+  const tdSzO = document.createElement("td"); tdSzO.className = "text-end"; tdSzO.textContent = "-";
+  const tdLast = document.createElement("td"); tdLast.className = "text-end"; tdLast.textContent = "-";
+  const tdChgAbs = document.createElement("td"); tdChgAbs.className = "text-end"; tdChgAbs.textContent = "-";
+  const tdChgPct = document.createElement("td"); tdChgPct.className = "text-end"; tdChgPct.textContent = "-";
+  const tdVCn = document.createElement("td"); tdVCn.className = "text-end"; tdVCn.textContent = "-";
+  const tdVN = document.createElement("td"); tdVN.className = "text-end"; tdVN.textContent = "-";
+  const tdOI = document.createElement("td"); tdOI.className = "text-end"; tdOI.textContent = "-";
+  const tdTna = document.createElement("td"); tdTna.className = "text-end"; tdTna.textContent = "-";
+  tr.append(tdSym, tdSzB, tdPxB, tdPxO, tdSzO, tdLast, tdChgAbs, tdChgPct, tdVCn, tdVN, tdOI, tdTna);
+  return { tr, sym: tdSym, cells: { szB: tdSzB, pxB: tdPxB, pxO: tdPxO, szO: tdSzO, last: tdLast, chgAbs: tdChgAbs, chgPct: tdChgPct, vCn: tdVCn, vN: tdVN, oi: tdOI, tna: tdTna } };
 }
 
 function ensureDlkRow(symbol) {
   let ref = dlkRowRefs.get(symbol);
   if (ref) return ref;
-  ref = _buildRowEl(symbol, true);
-  const dlkBody = document.querySelector("#dlkBody");
-  dlkBody?.appendChild(ref.tr);
+  ref = _buildDlkRow(symbol);
+  document.querySelector("#dlkBody")?.appendChild(ref.tr);
   dlkRowRefs.set(symbol, ref);
   return ref;
 }
 
-function ensureFutOnlyRow(symbol) {
+function ensureFutRow(symbol) {
   let ref = futRowRefs.get(symbol);
   if (ref) return ref;
-  ref = _buildRowEl(symbol, false);
-  const futOnlyBody = document.querySelector("#futOnlyBody");
-  futOnlyBody?.appendChild(ref.tr);
+  ref = _buildFutRow(symbol);
+  document.querySelector("#futOnlyBody")?.appendChild(ref.tr);
   futRowRefs.set(symbol, ref);
   return ref;
 }
 
 function seedFutRows() {
-  // DLK siempre presentes
-  for (const sym of ["D30S6", "TZV26", "TZV27", "TZV28"]) {
-    ensureDlkRow(sym);
-  }
+  // DLK fijo en el orden pedido
+  for (const sym of DLK_ORDER) ensureDlkRow(sym);
 }
 
-function _applyRowCells(ref, row) {
-  if (ref.cells.venc.textContent !== row.venc) ref.cells.venc.textContent = row.venc;
-  const bidTxt = fxFormatNum(row.bid, 4);
-  const askTxt = fxFormatNum(row.ask, 4);
-  const lastTxt = fxFormatNum(row.last, 4);
-  const chgTxt = (row.change === null || row.change === undefined) ? "s/d" : `${fxFormatNum(row.change, 2)}%`;
-  const timeTxt = fxFormatTime(row.updated_at);
-  const chgCls = "text-end " + (row.change > 0 ? "positive" : row.change < 0 ? "negative" : "");
-  if (ref.cells.bid.textContent !== bidTxt) ref.cells.bid.textContent = bidTxt;
-  if (ref.cells.ask.textContent !== askTxt) ref.cells.ask.textContent = askTxt;
-  if (ref.cells.last.textContent !== lastTxt) ref.cells.last.textContent = lastTxt;
-  if (ref.cells.chg.textContent !== chgTxt) ref.cells.chg.textContent = chgTxt;
-  if (ref.cells.chg.className !== chgCls) ref.cells.chg.className = chgCls;
-  if (ref.cells.time.textContent !== timeTxt) ref.cells.time.textContent = timeTxt;
-}
-
-// Heuristica de vencimiento implicito desde el simbolo cuando el backend
-// no lo trae. Cubre patrones tipo "DLR/MAY26", "TZV26" -> "MM/AA".
-const _MES_MAP_ES = {
-  ENE: 1, FEB: 2, MAR: 3, ABR: 4, MAY: 5, JUN: 6,
-  JUL: 7, AGO: 8, SEP: 9, OCT: 10, NOV: 11, DIC: 12,
-};
-function inferExpirationFromSymbol(symbol) {
-  if (!symbol) return null;
-  const sym = String(symbol).toUpperCase();
-  // patron "DLR/MMMYY" -> ej "DLR/MAY26"
-  const m1 = sym.match(/\/([A-Z]{3})(\d{2})$/);
-  if (m1) {
-    const month = _MES_MAP_ES[m1[1]];
-    const year = 2000 + parseInt(m1[2], 10);
-    if (month) return new Date(Date.UTC(year, month, 0)); // fin de mes
-  }
-  // patron tipo "TZV26" / "D30S6" / "TZV28": dos digitos al final = año
-  const m2 = sym.match(/(\d{2})$/);
-  if (m2) {
-    const year = 2000 + parseInt(m2[1], 10);
-    return new Date(Date.UTC(year, 11, 31));  // fin de año (orden aproximado)
-  }
-  return null;
-}
-
-function _expirationKey(row) {
-  // Para ordenar: prefiero el campo venc parseado si vino en formato fecha,
-  // sino el inferido desde el simbolo, sino fecha futura lejana.
-  if (row.venc && row.venc !== "-") {
-    const parts = row.venc.split(/[\/-]/);
-    if (parts.length === 3) {
-      // "DD/MM/AAAA" o "AAAA-MM-DD"
-      let y, mo, d;
-      if (parts[0].length === 4) { [y, mo, d] = parts; }
-      else { [d, mo, y] = parts; }
-      const dt = new Date(Date.UTC(parseInt(y), parseInt(mo) - 1, parseInt(d)));
-      if (!isNaN(dt.getTime())) return dt.getTime();
-    }
-  }
-  const inferred = inferExpirationFromSymbol(row.symbol);
-  return inferred ? inferred.getTime() : Number.MAX_SAFE_INTEGER;
-}
-
-function reorderRowsInBody(bodyId, refs, rows) {
-  const body = document.querySelector("#" + bodyId);
-  if (!body) return;
-  // Insertar en el orden dado por rows
-  for (const row of rows) {
-    const ref = refs.get(row.symbol);
-    if (ref && ref.tr.parentNode === body) {
-      body.appendChild(ref.tr); // reposiciona al final manteniendo el orden iterativo
-    }
-  }
+function _setIfChanged(cell, text, cls) {
+  if (cell.textContent !== text) cell.textContent = text;
+  if (cls != null && cell.className !== cls) cell.className = cls;
 }
 
 function renderFuturosDlk() {
   if (!dlkRowRefs.size) seedFutRows();
 
-  const dlkRows = latestQuotes
-    .filter((q) => q.category === "dlk")
-    .map((q) => ({
-      symbol: q.symbol, venc: "-",
-      bid: q.bid, ask: q.ask, last: q.last, change: q.change,
-      updated_at: q.updated_at,
-    }));
-  const futuresRows = (futuresCache || []).map((q) => ({
-    symbol: q.symbol,
-    venc: q.expiration ? String(q.expiration).slice(0, 10) : "-",
-    bid: q.bid, ask: q.ask, last: q.last, change: q.change,
-    updated_at: q.updated_at,
-  }));
-
-  // Ordenar por fecha de vencimiento
-  dlkRows.sort((a, b) => _expirationKey(a) - _expirationKey(b));
-  futuresRows.sort((a, b) => _expirationKey(a) - _expirationKey(b));
-
-  // Pintar DLK
-  for (const row of dlkRows) {
-    const ref = ensureDlkRow(row.symbol);
-    _applyRowCells(ref, row);
+  // === DLK ===
+  const dlkBySymbol = {};
+  for (const q of latestQuotes) {
+    if (q.category === "dlk") dlkBySymbol[q.symbol] = q;
   }
-  // Pintar Futuros
-  for (const row of futuresRows) {
-    const ref = ensureFutOnlyRow(row.symbol);
-    _applyRowCells(ref, row);
+  for (const symbol of DLK_ORDER) {
+    const ref = ensureDlkRow(symbol);
+    const q = dlkBySymbol[symbol];
+    if (!q) continue;
+    _setIfChanged(ref.cells.venc, "-");
+    _setIfChanged(ref.cells.bid, fmtNumAr(q.bid, 2));
+    _setIfChanged(ref.cells.ask, fmtNumAr(q.ask, 2));
+    _setIfChanged(ref.cells.last, fmtNumAr(q.last, 2));
+    const chgVal = q.change;
+    const chgTxt = (chgVal == null) ? "-" : `${fmtNumAr(chgVal, 2)}%`;
+    const chgCls = "text-end " + (chgVal > 0 ? "positive" : chgVal < 0 ? "negative" : "");
+    _setIfChanged(ref.cells.chg, chgTxt, chgCls);
+    _setIfChanged(ref.cells.time, q.updated_at ? formatTime(q.updated_at) : "-");
   }
 
-  // Reordenar visualmente segun el orden por vencimiento
-  reorderRowsInBody("dlkBody", dlkRowRefs, dlkRows);
-  reorderRowsInBody("futOnlyBody", futRowRefs, futuresRows);
+  // === FUTUROS DLR ===
+  // Backend ya los devuelve en orden de la whitelist y enriquecidos con
+  // change_abs, tna_percent, expiration.
+  const futList = futuresCache || [];
+  for (const q of futList) {
+    const ref = ensureFutRow(q.symbol);
+    if (q.expiration) {
+      const expDisp = formatDateDisplay(q.expiration);
+      ref.sym.title = `Vencimiento: ${expDisp}`;
+    }
+    _setIfChanged(ref.cells.szB, fmtIntAr(q.bid_size));
+    _setIfChanged(ref.cells.pxB, fmtNumAr(q.bid, 2));
+    _setIfChanged(ref.cells.pxO, fmtNumAr(q.ask, 2));
+    _setIfChanged(ref.cells.szO, fmtIntAr(q.ask_size));
+    _setIfChanged(ref.cells.last, fmtNumAr(q.last, 2));
+    const chgAbsVal = q.change_abs;
+    const chgPctVal = q.change;
+    const chgAbsTxt = (chgAbsVal == null) ? "-" : fmtNumAr(chgAbsVal, 2);
+    const chgPctTxt = (chgPctVal == null) ? "-" : `${fmtNumAr(chgPctVal, 2)}%`;
+    const chgAbsCls = "text-end " + (chgAbsVal > 0 ? "positive" : chgAbsVal < 0 ? "negative" : "");
+    const chgPctCls = "text-end " + (chgPctVal > 0 ? "positive" : chgPctVal < 0 ? "negative" : "");
+    _setIfChanged(ref.cells.chgAbs, chgAbsTxt, chgAbsCls);
+    _setIfChanged(ref.cells.chgPct, chgPctTxt, chgPctCls);
+    _setIfChanged(ref.cells.vCn, fmtIntAr(q.trade_volume ?? q.volume));
+    _setIfChanged(ref.cells.vN, fmtIntAr(q.nominal_volume));
+    _setIfChanged(ref.cells.oi, fmtIntAr(q.open_interest));
+    _setIfChanged(ref.cells.tna, q.tna_percent != null ? `${fmtNumAr(q.tna_percent, 2)}%` : "-");
+  }
+  // Reordenar los futuros segun el orden devuelto por el backend (whitelist)
+  const futBody = document.querySelector("#futOnlyBody");
+  if (futBody) {
+    for (const q of futList) {
+      const ref = futRowRefs.get(q.symbol);
+      if (ref && ref.tr.parentNode === futBody) futBody.appendChild(ref.tr);
+    }
+  }
 }
 
 async function pollFxRatios() {

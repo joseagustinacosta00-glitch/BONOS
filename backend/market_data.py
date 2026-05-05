@@ -6,6 +6,7 @@ import math
 import random
 import re
 import threading
+from datetime import date
 from typing import Any
 
 from backend.bond_calculators import LECAP_TICKERS
@@ -232,8 +233,41 @@ class MarketDataService:
 
     def futures_quotes(self) -> list[dict[str, Any]]:
         with self._lock:
-            quotes = list(self._futures_quotes.values())
-        return [dict(quote) for quote in sorted(quotes, key=lambda q: str(q.get("symbol") or ""))]
+            quotes = [dict(q) for q in self._futures_quotes.values()]
+            spot_last = None
+            for q in self._spot_quotes_dict.values():
+                if q.get("last") is not None:
+                    spot_last = float(q["last"])
+                    break
+        # Enriquecer con: variacion en precio (last - prev close), TNA implicita
+        today_iso = now_argentina().date()
+        for q in quotes:
+            last = q.get("last")
+            prev = q.get("previous_close")
+            try:
+                if last is not None and prev is not None:
+                    q["change_abs"] = float(last) - float(prev)
+                else:
+                    q["change_abs"] = None
+            except (TypeError, ValueError):
+                q["change_abs"] = None
+            # TNA = (futuro/spot - 1) / dias_a_vencimiento * 365
+            tna = None
+            try:
+                exp_str = q.get("expiration")
+                if last is not None and spot_last and spot_last > 0 and exp_str:
+                    exp_date = date.fromisoformat(str(exp_str))
+                    days = (exp_date - today_iso).days
+                    if days > 0:
+                        tna = ((float(last) / spot_last) - 1) * 365.0 / days * 100.0
+            except (TypeError, ValueError):
+                tna = None
+            q["tna_percent"] = tna
+            q["spot_used"] = spot_last
+        # Orden segun whitelist
+        order_index = {sym: i for i, sym in enumerate(self.ALLOWED_DLR_SYMBOLS)}
+        quotes.sort(key=lambda q: order_index.get(str(q.get("symbol") or ""), 9999))
+        return quotes
 
     def caucion_quotes(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -318,25 +352,33 @@ class MarketDataService:
                 if self.settings.market_source == "mock" and quote["last"] is None:
                     quote["last"] = 35.0 + int(quote.get("term_days") or 1) * 0.05
 
-            # Sembrar futuros DLR mensuales para que aparezcan tickers aunque
-            # pyRofex no descubra (cuenta sin permisos derivados, modo mock, etc.).
-            for symbol in self._fallback_futures_symbols():
+            # Sembrar la whitelist de futuros DLR (mensuales + mayoristas) con
+            # vencimiento calculado, asi aparecen tickers aunque pyRofex aun no
+            # haya conectado.
+            for symbol in self.ALLOWED_DLR_SYMBOLS:
                 if symbol in self._futures_quotes:
                     continue
+                expiration = self._dlr_expiration_date(symbol)
                 self._futures_quotes[symbol] = {
                     "symbol": symbol,
                     "provider_symbol": symbol,
                     "category": "futuro",
                     "currency": "ARS",
-                    "underlying": self._futures_underlying(symbol),
-                    "expiration": None,
+                    "underlying": "DLR",
+                    "is_mayorista": symbol.endswith("M"),
+                    "expiration": expiration.isoformat() if expiration else None,
                     "last": None,
                     "last_volume": None,
                     "cumulative_volume": None,
                     "bid": None,
                     "ask": None,
+                    "bid_size": None,
+                    "ask_size": None,
                     "change": None,
                     "volume": None,
+                    "trade_volume": None,
+                    "nominal_volume": None,
+                    "open_interest": None,
                     "previous_close": None,
                     "opening_price": None,
                     "updated_at": now,
@@ -640,18 +682,19 @@ class MarketDataService:
         market_data = message.get("marketData") or message.get("market_data") or {}
         bid = self._entry_price(market_data.get("BI"))
         ask = self._entry_price(market_data.get("OF"))
+        bid_size = self._entry_size(market_data.get("BI"))
+        ask_size = self._entry_size(market_data.get("OF"))
         last = self._entry_price(market_data.get("LA"))
         last_volume = self._entry_size(market_data.get("LA"))
-        # Volumen: pyRofex puede mandar TV (Trade Volume = nominales operados),
-        # NV (Nominal Volume = nominales operados, alias) o EV (Effective Volume = monto $).
-        # Tomamos lo que venga primero con dato.
-        volume = (
-            self._entry_value(market_data.get("TV"))
-            or self._entry_value(market_data.get("NV"))
-            or self._entry_value(market_data.get("EV"))
-        )
+        # Volumen de contratos operados (TV) y nominal (NV)
+        trade_volume = self._entry_value(market_data.get("TV"))
+        nominal_volume = self._entry_value(market_data.get("NV"))
+        effective_volume = self._entry_value(market_data.get("EV"))
+        volume = trade_volume or nominal_volume or effective_volume
         previous_close = self._entry_price(market_data.get("CL"))
         opening_price = self._entry_price(market_data.get("OP"))
+        # Open Interest: pyRofex usa "OI"
+        open_interest = self._entry_value(market_data.get("OI"))
         now = now_argentina_iso()
 
         with self._lock:
@@ -668,10 +711,15 @@ class MarketDataService:
             updates = {
                 "bid": bid if bid is not None else current.get("bid"),
                 "ask": ask if ask is not None else current.get("ask"),
+                "bid_size": bid_size if bid_size is not None else current.get("bid_size"),
+                "ask_size": ask_size if ask_size is not None else current.get("ask_size"),
                 "last": last if last is not None else current.get("last"),
                 "last_volume": last_volume if last_volume is not None else current.get("last_volume"),
                 "cumulative_volume": volume if volume is not None else current.get("cumulative_volume"),
                 "volume": volume if volume is not None else current.get("volume"),
+                "trade_volume": trade_volume if trade_volume is not None else current.get("trade_volume"),
+                "nominal_volume": nominal_volume if nominal_volume is not None else current.get("nominal_volume"),
+                "open_interest": open_interest if open_interest is not None else current.get("open_interest"),
                 "previous_close": previous_close if previous_close is not None else current.get("previous_close"),
                 "opening_price": opening_price if opening_price is not None else current.get("opening_price"),
                 "updated_at": now,
@@ -760,9 +808,27 @@ class MarketDataService:
             "t1": self.settings.rofex_settlement_t1,
         }
 
-    # Underlyings de futuros que queremos suscribir (filtra ruido). DLR es
-    # dolar mayorista. Otros que el usuario puede habilitar: ORO, GGAL, MERV.
-    ALLOWED_FUTURES_UNDERLYINGS: tuple[str, ...] = ("DLR",)
+    # Whitelist explicita: solo importamos estos futuros DLR (mensuales y
+    # mensuales mayoristas terminados en M). Cualquier otro instrumento que
+    # devuelva pyRofex se ignora.
+    ALLOWED_DLR_SYMBOLS: tuple[str, ...] = (
+        "DLR/MAY26", "DLR/MAY26M",
+        "DLR/JUN26", "DLR/JUN26M",
+        "DLR/JUL26", "DLR/JUL26M",
+        "DLR/AGO26", "DLR/AGO26M",
+        "DLR/SEP26", "DLR/SEP26M",
+        "DLR/OCT26", "DLR/OCT26M",
+        "DLR/NOV26", "DLR/NOV26M",
+        "DLR/DIC26", "DLR/DIC26M",
+        "DLR/ENE27", "DLR/ENE27M",
+        "DLR/FEB27", "DLR/FEB27M",
+        "DLR/MAR27", "DLR/MAR27M",
+        "DLR/ABR27", "DLR/ABR27M",
+    )
+    _MONTH_CODE_MAP: dict[str, int] = {
+        "ENE": 1, "FEB": 2, "MAR": 3, "ABR": 4, "MAY": 5, "JUN": 6,
+        "JUL": 7, "AGO": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DIC": 12,
+    }
 
     # Candidatos de simbolo del dolar spot en pyRofex / Matba. Distintas
     # cuentas / environments lo nombran diferente. Probamos todos.
@@ -776,105 +842,74 @@ class MarketDataService:
         "USDARS/SPOT",
     )
 
-    def _load_futures_catalog(self, pyRofex: Any, environment: Any) -> None:
-        """Descubre los futuros disponibles (DLR/MMMYY, etc.) y los registra
-        para suscripcion en el market ROFX. Filtra por underlyings permitidos
-        (ALLOWED_FUTURES_UNDERLYINGS). Si la API no devuelve nada, usa un
-        fallback hardcodeado de DLR mensuales."""
-        instruments: list[Any] = []
+    def _dlr_expiration_date(self, symbol: str) -> date | None:
+        """Calcula el ultimo dia habil del mes de vencimiento del DLR.
+        Ej: DLR/MAY26 / DLR/MAY26M -> ultimo dia habil de mayo 2026."""
+        m = re.match(r"^DLR/([A-Z]{3})(\d{2})M?$", symbol.upper())
+        if not m:
+            return None
+        month = self._MONTH_CODE_MAP.get(m.group(1))
+        if month is None:
+            return None
+        year = 2000 + int(m.group(2))
+        from calendar import monthrange
+        last_day_calendar = monthrange(year, month)[1]
+        candidate = date(year, month, last_day_calendar)
+        # Retroceder hasta encontrar dia habil
+        from backend.market_calendar import market_calendar
+        while not market_calendar.is_business_day(candidate):
+            candidate = date(year, month, candidate.day - 1)
+            if candidate.day < 1:
+                return None
+        return candidate
 
-        # Intento 1: con detalle (suele tener cficode + maturityDate)
+    def _load_futures_catalog(self, pyRofex: Any, environment: Any) -> None:
+        """Registra la whitelist de futuros DLR (mensuales y mayoristas) con
+        sus vencimientos calculados como ultimo dia habil del mes. No depende
+        del catalogo de pyRofex: ese se usa solo para logging/diagnostico."""
+        # Intento opcional de listar el catalogo solo para loggear que hay
         try:
             response = pyRofex.get_detailed_instruments(environment=environment)
             instruments = self._instrument_rows(response)
-            logger.info("get_detailed_instruments devolvio %d instrumentos", len(instruments))
+            logger.info("get_detailed_instruments devolvio %d instrumentos (whitelist DLR aplica)", len(instruments))
         except Exception as exc:
             logger.info("get_detailed_instruments no disponible: %s", exc)
 
-        # Intento 2: get_all_instruments (mas plano, sin cficode)
-        if not instruments:
-            try:
-                response = pyRofex.get_all_instruments(environment=environment)
-                instruments = self._instrument_rows(response)
-                logger.info("get_all_instruments devolvio %d instrumentos", len(instruments))
-            except Exception as exc:
-                logger.warning("No se pudo descubrir instrumentos: %s", exc)
-
         now = now_argentina_iso()
         registered = 0
-        skipped_other_underlying = 0
-        by_underlying: dict[str, int] = {}
-        for instrument in instruments:
-            symbol = self._instrument_symbol(instrument)
-            if not symbol:
-                continue
-            cficode = self._instrument_cficode(instrument)
-            if not self._is_future_instrument(symbol, cficode):
-                continue
-            underlying = self._futures_underlying(symbol)
-            by_underlying[underlying] = by_underlying.get(underlying, 0) + 1
-            # Filtrar: solo los underlyings habilitados
-            if self.ALLOWED_FUTURES_UNDERLYINGS and underlying not in self.ALLOWED_FUTURES_UNDERLYINGS:
-                skipped_other_underlying += 1
-                continue
+        for symbol in self.ALLOWED_DLR_SYMBOLS:
             self._futures_provider_to_symbol[symbol] = symbol
             if symbol not in self._futures_quotes:
+                expiration = self._dlr_expiration_date(symbol)
                 self._futures_quotes[symbol] = {
                     "symbol": symbol,
                     "provider_symbol": symbol,
                     "category": "futuro",
                     "currency": "ARS",
-                    "underlying": underlying,
-                    "expiration": self._futures_expiration_str(instrument),
+                    "underlying": "DLR",
+                    "is_mayorista": symbol.endswith("M"),
+                    "expiration": expiration.isoformat() if expiration else None,
                     "last": None,
                     "last_volume": None,
                     "cumulative_volume": None,
                     "bid": None,
                     "ask": None,
+                    "bid_size": None,
+                    "ask_size": None,
                     "change": None,
                     "volume": None,
+                    "trade_volume": None,
+                    "nominal_volume": None,
+                    "open_interest": None,
                     "previous_close": None,
                     "opening_price": None,
                     "updated_at": now,
                     "raw": {},
                 }
                 registered += 1
-        logger.info(
-            "Futuros descubiertos: %d registrados (allowed=%s) | %d ignorados de otros underlyings | breakdown: %s",
-            registered,
-            self.ALLOWED_FUTURES_UNDERLYINGS,
-            skipped_other_underlying,
-            by_underlying,
-        )
-
-        # Fallback: si la API no devolvio futuros, registramos un set comun de DLR mensuales.
-        if registered == 0:
-            fallback_symbols = self._fallback_futures_symbols()
-            logger.warning(
-                "API no devolvio futuros, usando fallback hardcoded de %d simbolos",
-                len(fallback_symbols),
-            )
-            for symbol in fallback_symbols:
-                self._futures_provider_to_symbol[symbol] = symbol
-                self._futures_quotes[symbol] = {
-                    "symbol": symbol,
-                    "provider_symbol": symbol,
-                    "category": "futuro",
-                    "currency": "ARS",
-                    "underlying": self._futures_underlying(symbol),
-                    "expiration": None,
-                    "last": None,
-                    "last_volume": None,
-                    "cumulative_volume": None,
-                    "bid": None,
-                    "ask": None,
-                    "change": None,
-                    "volume": None,
-                    "previous_close": None,
-                    "opening_price": None,
-                    "updated_at": now,
-                    "raw": {},
-                }
+        logger.info("DLR whitelist: %d futuros registrados", registered)
+        if False:  # nunca entra: dejado para no perder el branch antiguo
+            pass
 
     def _load_spot_catalog(self, pyRofex: Any, environment: Any) -> None:
         """Detecta el simbolo del dolar spot en el catalogo. Intenta tanto via
@@ -1208,7 +1243,8 @@ class MarketDataService:
             pyRofex.MarketDataEntry.TRADE_VOLUME,
         ]
         # Entries opcionales que pyRofex puede no exponer en todas las versiones.
-        for attr in ("NOMINAL_VOLUME", "EFFECTIVE_VOLUME", "OPENING_PRICE", "CLOSING_PRICE"):
+        for attr in ("NOMINAL_VOLUME", "EFFECTIVE_VOLUME", "OPENING_PRICE",
+                     "CLOSING_PRICE", "OPEN_INTEREST", "TRADE_EFFECTIVE_VOLUME"):
             value = getattr(pyRofex.MarketDataEntry, attr, None)
             if value is not None:
                 entries.append(value)
