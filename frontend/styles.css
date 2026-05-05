@@ -1073,3 +1073,18 @@ tbody td {
 .fut-dlr-table th, .fut-dlr-table td { padding: 0.35rem 0.5rem; }
 .fut-dlr-table .text-end { font-variant-numeric: tabular-nums; }
 .fut-dlr-table td.ticker { cursor: help; }
+
+/* Banner del SPOT con DOS cards (live + A3500) */
+.spot-banner-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
+.spot-card { padding: 0.85rem 1.1rem; border-radius: 0.6rem; display: flex; flex-direction: column; gap: 0.2rem; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.spot-card-live { background: linear-gradient(90deg, #ecfdf5 0%, #f0fdf4 100%); border: 1px solid #bbf7d0; border-left: 6px solid #16a34a; }
+.spot-card-a3500 { background: linear-gradient(90deg, #eff6ff 0%, #f8fafc 100%); border: 1px solid #bfdbfe; border-left: 6px solid #0d6efd; }
+.spot-card-label { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; }
+.spot-card-label small { font-weight: 500; text-transform: none; letter-spacing: 0.01em; color: #94a3b8; margin-left: 0.25rem; }
+.spot-card-live .spot-card-label { color: #16a34a; }
+.spot-card-a3500 .spot-card-label { color: #2563eb; }
+.spot-card-value { font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.spot-card-live .spot-card-value { color: #16a34a; }
+.spot-card-a3500 .spot-card-value { color: #0d6efd; }
+.spot-card-meta { font-size: 0.78rem; color: #64748b; }
+@media (max-width: 700px) { .spot-banner-pair { grid-template-columns: 1fr; } }

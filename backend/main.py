@@ -434,20 +434,25 @@ async def market_shortest_caucion() -> dict:
 
 @app.get("/api/fx/spot")
 async def fx_spot() -> dict:
-    """Devuelve el dolar spot.
-    Fuente primaria: BCRA Comunicacion A 3500 (dolar mayorista oficial,
-    publicado diariamente). Si pyRofex tiene ticks de TMUSD u otro spot
-    intraday, se pueden ver en items[]."""
-    # 1) Intentar BCRA A3500 como fuente primaria
-    bcra_spot = None
+    """Devuelve dos cosas:
+    - spot_live: el spot operado momento a momento via pyRofex (10-15 ART).
+      Es el valor que cambia tick a tick durante la rueda.
+    - a3500: el VWAP del dia publicado por BCRA (Comunicacion A 3500), que
+      es el valor de cierre oficial. Se publica una vez al dia.
+    Para calculos durante la rueda usar spot_live; al cierre / dia siguiente
+    usar a3500.
+    """
+    # A3500: cierre oficial via API BCRA
+    a3500 = None
     try:
         series = bcra.get_series("usd_mayorista_a3500")
         latest = series.get("latest")
         if latest:
-            bcra_spot = {
-                "symbol": "DDF_BCRA_A3500",
-                "description": "Dolar USA - Mayorista BCRA Comunicacion A 3500",
+            a3500 = {
+                "symbol": "BCRA_A3500",
+                "description": "Dolar USA - Mayorista BCRA Comunicacion A 3500 (cierre VWAP del dia)",
                 "source": "BCRA",
+                "kind": "close",
                 "last": float(latest.get("value")),
                 "value_date": latest.get("date"),
                 "updated_at": series.get("updated_at"),
@@ -455,18 +460,24 @@ async def fx_spot() -> dict:
     except Exception:
         pass
 
-    # 2) Items de pyRofex como info adicional (TMUSD, DLR/SPOT etc.)
-    items = market.spot_quotes()
+    # Spot LIVE: ticks intraday via pyRofex
     pyrofex_spot = market.spot_last()
+    spot_live = None
+    if pyrofex_spot and pyrofex_spot.get("last") is not None:
+        spot_live = {
+            **pyrofex_spot,
+            "kind": "live",
+            "source": "pyRofex",
+            "description": pyrofex_spot.get("description") or "Dolar USA spot intraday",
+        }
 
-    # Spot principal: BCRA si lo tenemos, sino pyRofex como fallback
-    main = bcra_spot or pyrofex_spot
+    # Para retrocompatibilidad: "spot" = el live si esta, sino el A3500.
+    main = spot_live or a3500
     return {
         "spot": main,
-        "bcra_a3500": bcra_spot,
-        "pyrofex_spot": pyrofex_spot,
-        "items": items,
-        "count": len(items) + (1 if bcra_spot else 0),
+        "spot_live": spot_live,
+        "a3500": a3500,
+        "items": market.spot_quotes(),
         "updated_at": now_argentina_iso(),
     }
 

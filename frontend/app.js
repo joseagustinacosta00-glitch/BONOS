@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd53 cargado - SPOT desde BCRA A3500 (fuente oficial diaria)");
+console.log("[Monitor] app.js v=hd54 cargado - SPOT dual: LIVE (pyRofex) + A3500 (BCRA)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -682,7 +682,8 @@ async function pollFutures() {
   }
 }
 
-let spotCache = null;
+let spotLiveCache = null;
+let spotA3500Cache = null;
 let spotItemsCount = 0;
 let spotRediscoverTried = false;
 async function pollSpot() {
@@ -690,16 +691,12 @@ async function pollSpot() {
     const response = await fetch("/api/fx/spot");
     if (!response.ok) throw new Error("spot");
     const payload = await response.json();
-    spotCache = payload.spot || null;
-    spotItemsCount = payload.count || 0;
-    // Si nunca se descubrio ningun spot y todavia no probamos rediscover,
-    // intentar una vez para forzar suscripcion (caso: server arranco antes
-    // de tener permisos en pyRofex).
+    spotLiveCache = payload.spot_live || null;
+    spotA3500Cache = payload.a3500 || null;
+    spotItemsCount = (payload.items || []).length;
     if (spotItemsCount === 0 && !spotRediscoverTried) {
       spotRediscoverTried = true;
-      fetch("/api/futures/rediscover", { method: "POST" }).then(() => {
-        // proximo poll va a recargar
-      }).catch(() => {});
+      fetch("/api/futures/rediscover", { method: "POST" }).catch(() => {});
     }
   } catch (_) {
     /* ignore */
@@ -708,30 +705,41 @@ async function pollSpot() {
   }
 }
 
+function fmtSpotValue(v) {
+  return new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 2, maximumFractionDigits: 4,
+  }).format(v);
+}
+
 function renderSpotBanner() {
-  const banner = document.querySelector("#spotBanner");
-  const valueEl = document.querySelector("#spotBannerValue");
-  const metaEl = document.querySelector("#spotBannerMeta");
-  if (!banner) return;
-  // Siempre visible: el SPOT es informacion clave
-  banner.style.display = "flex";
-  if (!spotCache) {
-    if (valueEl) valueEl.textContent = "—";
-    if (metaEl) metaEl.textContent = spotItemsCount === 0
-      ? "Esperando descubrimiento del simbolo..."
-      : "Esperando primer tick";
-    return;
+  // SPOT LIVE
+  const liveValue = document.querySelector("#spotLiveValue");
+  const liveMeta = document.querySelector("#spotLiveMeta");
+  if (liveValue && liveMeta) {
+    if (spotLiveCache && spotLiveCache.last != null) {
+      liveValue.textContent = fmtSpotValue(spotLiveCache.last);
+      const sym = spotLiveCache.symbol || "spot";
+      const ts = spotLiveCache.updated_at ? formatTime(spotLiveCache.updated_at) : "";
+      liveMeta.textContent = `${sym}${ts ? " · " + ts : ""}`;
+    } else {
+      liveValue.textContent = "—";
+      liveMeta.textContent = spotItemsCount === 0
+        ? "No hay simbolo spot suscripto"
+        : "Esperando ticks (mercado 10-15h)";
+    }
   }
-  if (valueEl) {
-    valueEl.textContent = spotCache.last != null
-      ? new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(spotCache.last)
-      : "—";
-  }
-  if (metaEl) {
-    const display = spotCache.description || spotCache.symbol || "spot";
-    const valueDate = spotCache.value_date ? formatDateDisplay(spotCache.value_date) : "";
-    const source = spotCache.source ? ` · ${spotCache.source}` : "";
-    metaEl.textContent = `${display}${valueDate ? " · " + valueDate : ""}${source}`;
+  // A3500
+  const a3500Value = document.querySelector("#spotA3500Value");
+  const a3500Meta = document.querySelector("#spotA3500Meta");
+  if (a3500Value && a3500Meta) {
+    if (spotA3500Cache && spotA3500Cache.last != null) {
+      a3500Value.textContent = fmtSpotValue(spotA3500Cache.last);
+      const date = spotA3500Cache.value_date ? formatDateDisplay(spotA3500Cache.value_date) : "";
+      a3500Meta.textContent = `Comunicacion A 3500${date ? " · " + date : ""}`;
+    } else {
+      a3500Value.textContent = "—";
+      a3500Meta.textContent = "Esperando publicacion BCRA";
+    }
   }
 }
 
