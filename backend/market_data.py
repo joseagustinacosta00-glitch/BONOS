@@ -847,8 +847,14 @@ class MarketDataService:
     # cuentas / environments lo nombran diferente. Probamos todos.
     # PRIORIDAD: el primero que tenga last es el que usamos como "el" spot.
     SPOT_SYMBOL_CANDIDATES: tuple[str, ...] = (
+        # Dolar mayorista BCRA Comunicacion A 3500 (REFERENCIA OFICIAL)
+        # Es el "Dolar USA" que se ve en el tablero de Matba/Rofex.
+        "DDF_BCRA_A3500",
+        "DDF/BCRA_A3500",
+        "DDF.BCRA.A3500",
+        "BCRA_A3500",
+        "MERV - XMEV - DDF_BCRA_A3500 - 24hs",
         # Dolar spot mayorista en MERV (TMUSD - Tipo Money USD, liq 24hs).
-        # Este es el real usado en cuentas MERV/BYMA argentinas.
         "MERV - XMEV - TMUSD - 24hs",
         "MERV - XMEV - TMUSD - CI",
         # Variantes en ROFX/Matba
@@ -985,8 +991,11 @@ class MarketDataService:
                 or ("SPOT" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
                 or ("USA" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
                 or "TMUSD" in sym_up
+                or "A3500" in sym_up   # Dolar mayorista BCRA Comunicacion A 3500
+                or "DDF_BCRA" in sym_up
                 or ("DOLAR USA" in desc_norm)
                 or ("DOLAR SPOT" in desc_norm)
+                or ("A 3500" in desc_norm or "A3500" in desc_norm)
             )
             if not is_spot:
                 continue

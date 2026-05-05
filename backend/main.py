@@ -479,12 +479,13 @@ async def diag_spot_html() -> HTMLResponse:
                     break
         desc_up = desc.upper().replace("Ó", "O").replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ú", "U")
         line = f"{sym}    [{desc or '-'}]"
-        # Match por description "DOLAR USA"
-        if "DOLAR USA" in desc_up or "DOLAR SPOT" in desc_up:
+        # Match por description "DOLAR USA" o por simbolo A3500
+        if "DOLAR USA" in desc_up or "DOLAR SPOT" in desc_up or "A3500" in sym_up or "DDF_BCRA" in sym_up:
             by_desc_dolar_usa.append(line)
-        if any(k in sym_up for k in ("DLR", "DOLAR", "USD")) or "DOLAR" in desc_up or "USD" in desc_up:
+        if (any(k in sym_up for k in ("DLR", "DOLAR", "USD", "A3500", "BCRA")) or
+                "DOLAR" in desc_up or "USD" in desc_up):
             all_dlr_or_usd.append(line)
-            if any(k in sym_up for k in ("SPOT", "/CI", "/T0", "24HS", "USA", "TMUSD")) or "DOLAR USA" in desc_up:
+            if any(k in sym_up for k in ("SPOT", "/CI", "/T0", "24HS", "USA", "TMUSD", "A3500")) or "DOLAR USA" in desc_up:
                 candidates.append(line)
     sub = list(market._spot_provider_to_symbol.keys())
     hardcoded = list(market.SPOT_SYMBOL_CANDIDATES)
