@@ -59,6 +59,25 @@ settings = get_settings()
 market = MarketDataService(settings)
 bcra = BcraClient(settings)
 storage = CalculatorStorage(ROOT_DIR / settings.app_db_path)
+
+# Backup auto rate-limited: minimo 5 min entre backups despues de un write
+import time as _time_module
+_last_auto_backup_ts: dict[str, float] = {"ts": 0.0}
+
+
+def _maybe_backup_after_write(min_interval_seconds: int = 300) -> None:
+    """Llama auto_backup() solo si paso suficiente tiempo desde el ultimo.
+    Asi cada save HD/LECAP/historical genera un punto de restore reciente
+    sin saturar el disco con backups en operaciones rapidas."""
+    now = _time_module.time()
+    if now - _last_auto_backup_ts["ts"] < min_interval_seconds:
+        return
+    try:
+        storage.auto_backup(retention=30)
+        _last_auto_backup_ts["ts"] = now
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("backup post-write fallo")
 market_history_storage = MarketHistoryStorage(settings.market_history_database_url)
 market_scheduler = MarketHistoryScheduler(
     market=market,
@@ -179,15 +198,53 @@ class AssistantMessageRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup() -> None:
+    import logging
+    log = logging.getLogger(__name__)
+
+    db_path = storage.db_path
+    db_existed_before = db_path.exists()
+    log.info("startup: APP_DB_PATH = %s | existe = %s", db_path, db_existed_before)
+
+    # Auto-restore: si la DB no existe pero hay backups, restaurar del mas
+    # reciente automaticamente. Protege contra el escenario donde el contenedor
+    # arranca sin la DB previa (deploy con persistent disk recien re-montado,
+    # APP_DB_PATH movido, etc.). Los backups viven junto a la DB en /backups.
+    if not db_existed_before:
+        backups_dir = db_path.parent / "backups"
+        if backups_dir.exists():
+            candidates = sorted(backups_dir.glob("user_data_*.db"), reverse=True)
+            if candidates:
+                latest = candidates[0]
+                try:
+                    storage.restore_from(latest)
+                    log.warning(
+                        "startup: DB no existia, RESTAURADA automaticamente desde %s (%d bytes)",
+                        latest.name, latest.stat().st_size,
+                    )
+                except Exception as exc:
+                    log.exception("startup: auto-restore fallo: %s", exc)
+
     storage.initialize()
+
+    # Log de contenido para diagnostico
+    try:
+        counts = storage.get_table_counts()
+        log.info("startup: counts = %s", counts)
+        if not db_existed_before and not any(counts.values()):
+            log.warning(
+                "startup: DB recien creada y SIN backups disponibles. "
+                "Verificar que APP_DB_PATH apunte al persistent disk de Render "
+                "(ej. /var/data/user_data.db) y que el disk este montado."
+            )
+    except Exception as exc:
+        log.exception("startup: get_table_counts fallo: %s", exc)
+
     try:
         backup_path = storage.auto_backup(retention=30)
         if backup_path:
-            import logging
-            logging.getLogger(__name__).info("backup automatico creado: %s", backup_path)
+            log.info("backup automatico creado: %s", backup_path)
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception("backup automatico fallo: %s", exc)
+        log.exception("backup automatico fallo: %s", exc)
     await market.start()
     if settings.market_history_enabled:
         try:
@@ -618,6 +675,7 @@ async def calculator_save_lecap(payload: LecapCalculationRequest) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _maybe_backup_after_write()
     return {"item": saved.to_dict(), "calculation": calculation.to_dict()}
 
 
@@ -1062,6 +1120,7 @@ async def calculator_bond_hd_saved_upsert(payload: BondHdSavePayload) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _maybe_backup_after_write()
     return {"item": saved.to_dict()}
 
 
@@ -1191,6 +1250,7 @@ async def save_historical_data(payload: HistoricalDataRequest) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _maybe_backup_after_write()
     return {"item": point.to_dict(), "replaced": replaced}
 
 
@@ -1238,6 +1298,8 @@ async def upload_historical_data(
         detail = errors[:20] if errors else "No se encontraron filas importables en el archivo."
         raise HTTPException(status_code=422, detail=detail)
 
+    if imported or replaced:
+        _maybe_backup_after_write()
     return {
         "ticker": _normalize_base_ticker(ticker),
         "metric_type": normalized_metric,
@@ -1548,6 +1610,29 @@ async def data_backup_now() -> dict:
     if path is None:
         raise HTTPException(status_code=404, detail="No hay base para backupear todavia.")
     return {"created": path.name}
+
+
+@app.post("/api/data/restore-latest")
+async def data_restore_latest() -> dict:
+    """Restaura la base desde el backup mas reciente disponible. Util si la
+    DB se vacio por un deploy con persistent disk mal configurado."""
+    backups_dir = storage.db_path.parent / "backups"
+    if not backups_dir.exists():
+        raise HTTPException(status_code=404, detail="No hay carpeta de backups.")
+    candidates = sorted(backups_dir.glob("user_data_*.db"), reverse=True)
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No hay backups disponibles.")
+    latest = candidates[0]
+    try:
+        storage.restore_from(latest)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    counts_after = storage.get_table_counts()
+    return {
+        "restored_from": latest.name,
+        "size_bytes": latest.stat().st_size,
+        "counts_after": counts_after,
+    }
 
 
 @app.post("/api/data/restore")
