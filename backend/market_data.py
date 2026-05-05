@@ -31,6 +31,7 @@ class MarketDataService:
         self._lock = threading.RLock()
         self._mock_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
+        self._spot_poller_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
         self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
         self._futures_provider_to_symbol: dict[str, str] = {}
@@ -51,6 +52,8 @@ class MarketDataService:
             # Arrancar watchdog que reconecta el WS si los precios estan stale
             # en horario de mercado (10:30-17:00 ART)
             self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+            # Arrancar poller del spot via REST (fallback si WS no manda ticks)
+            self._spot_poller_task = asyncio.create_task(self._spot_rest_poller())
             return
 
         self.status = "mock"
@@ -71,10 +74,35 @@ class MarketDataService:
             except asyncio.CancelledError:
                 pass
 
+        if getattr(self, "_spot_poller_task", None):
+            self._spot_poller_task.cancel()
+            try:
+                await self._spot_poller_task
+            except asyncio.CancelledError:
+                pass
+
         if self._pyrofex is not None:
             await asyncio.to_thread(self._disconnect_pyrofex)
 
         self.status = "stopped"
+
+    async def _spot_rest_poller(self) -> None:
+        """Poll del spot via REST cada 10s en horario de mercado.
+        Necesario porque el WS de pyRofex no manda ticks de TMUSD u otros
+        spots en algunas cuentas; el REST si responde."""
+        try:
+            while True:
+                await asyncio.sleep(10)
+                try:
+                    if not self._is_market_hours():
+                        continue
+                    await asyncio.to_thread(self.fetch_spot_via_rest)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.debug("spot_rest_poller error: %s", exc)
+        except asyncio.CancelledError:
+            return
 
     async def _watchdog_loop(self) -> None:
         """Cada 60s verifica que los precios se esten actualizando.
@@ -518,10 +546,8 @@ class MarketDataService:
         spot_symbols = list(self._spot_provider_to_symbol.keys())
         market_bonds = self._market(pyRofex)
         market_rofx = getattr(pyRofex.Market, "ROFX", market_bonds)
-        # Spot puede venir de MERV (ej "MERV - XMEV - TMUSD - 24hs") o ROFX
-        # (ej "DLR/SPOT"). Lo separamos para enviar al market correcto.
         spot_merv = [s for s in spot_symbols if s.upper().startswith("MERV")]
-        spot_rofx = [s for s in spot_symbols if s not in spot_merv]
+        spot_rest = [s for s in spot_symbols if s not in spot_merv]
         self._subscription_failed: list[str] = []
         self._subscription_succeeded: list[str] = []
         self._subscribe_symbol_chunk(pyRofex, environment, entries, bonds_symbols, market_bonds, chunk_size)
@@ -529,15 +555,49 @@ class MarketDataService:
             self._subscribe_symbol_chunk(pyRofex, environment, entries, futures_symbols, market_rofx, chunk_size)
         if spot_merv:
             self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_merv, market_bonds, chunk_size)
-        if spot_rofx:
-            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_rofx, market_rofx, chunk_size)
+        # Spot fuera de MERV: probar TODOS los markets disponibles (ROFX,
+        # MERV, default). Es defensivo: pyRofex va a aceptar la suscripcion
+        # en el market correcto y rechazar silenciosamente en los otros.
+        if spot_rest:
+            tried_markets = self._all_available_markets(pyRofex)
+            for mkt_name, mkt_value in tried_markets:
+                logger.info("Suscribiendo spot %s al market %s", spot_rest, mkt_name)
+                try:
+                    self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_rest, mkt_value, chunk_size)
+                except Exception as exc:
+                    logger.warning("Suscripcion spot al market %s fallo: %s", mkt_name, exc)
         logger.info(
-            "subscripcion pyRofex: %d ok / %d fallaron (incluye %d spot MERV + %d spot ROFX)",
+            "subscripcion pyRofex: %d ok / %d fallaron (incluye %d spot MERV + %d spot otros)",
             len(self._subscription_succeeded),
             len(self._subscription_failed),
             len(spot_merv),
-            len(spot_rofx),
+            len(spot_rest),
         )
+
+    def _all_available_markets(self, pyRofex: Any) -> list[tuple[str, Any]]:
+        """Lista todos los markets que pyRofex.Market expone, con su nombre."""
+        markets: list[tuple[str, Any]] = []
+        market_enum = getattr(pyRofex, "Market", None)
+        if market_enum is None:
+            return [("default", self._market(pyRofex))]
+        # Iterar atributos del enum / clase
+        for attr in dir(market_enum):
+            if attr.startswith("_"):
+                continue
+            try:
+                value = getattr(market_enum, attr)
+                if value is None:
+                    continue
+                # Filtrar callables/builtins
+                if callable(value):
+                    continue
+                markets.append((attr, value))
+            except Exception:
+                continue
+        # Si no encontramos nada, fallback al market default
+        if not markets:
+            markets.append(("default", self._market(pyRofex)))
+        return markets
 
     def _subscribe_symbol_chunk(self, pyRofex: Any, environment: Any, entries: list[Any], symbols: list[str], market: Any, chunk_size: int) -> None:
         for i in range(0, len(symbols), chunk_size):
@@ -941,9 +1001,35 @@ class MarketDataService:
         if False:  # nunca entra: dejado para no perder el branch antiguo
             pass
 
+    # Simbolos spot SEMPRE-FUERZA-REGISTRO (aunque no esten en el catalogo).
+    # Esto es porque algunos productos sinteticos como DDF_BCRA_A3500 no
+    # aparecen en get_detailed_instruments pero SI se pueden suscribir.
+    FORCED_SPOT_SYMBOLS: tuple[str, ...] = (
+        "DDF_BCRA_A3500",
+        "MERV - XMEV - TMUSD - 24hs",
+        "MERV - XMEV - TMUSD - CI",
+    )
+
     def _load_spot_catalog(self, pyRofex: Any, environment: Any) -> None:
         """Detecta el simbolo del dolar spot en el catalogo. Intenta tanto via
-        get_detailed_instruments como matcheando candidatos conocidos."""
+        get_detailed_instruments como matcheando candidatos conocidos.
+        ADEMAS registra siempre FORCED_SPOT_SYMBOLS aunque no esten en catalogo."""
+        # Primero registrar los simbolos forzados (sin verificar catalogo)
+        now = now_argentina_iso()
+        for fsym in self.FORCED_SPOT_SYMBOLS:
+            if fsym not in self._spot_quotes_dict:
+                self._spot_provider_to_symbol[fsym] = fsym
+                self._spot_quotes_dict[fsym] = {
+                    "symbol": fsym,
+                    "provider_symbol": fsym,
+                    "description": "Dolar USA - Mayorista (forced subscription)",
+                    "category": "spot",
+                    "currency": "ARS",
+                    "underlying": "USD",
+                    "last": None, "bid": None, "ask": None,
+                    "updated_at": now, "raw": {},
+                }
+        logger.info("Spot forzados registrados sin chequear catalogo: %s", list(self.FORCED_SPOT_SYMBOLS))
         instruments: list[Any] = []
         try:
             response = pyRofex.get_detailed_instruments(environment=environment)
@@ -1021,6 +1107,56 @@ class MarketDataService:
         """Devuelve los precios del dolar spot detectados (puede ser >=1)."""
         with self._lock:
             return [dict(q) for q in self._spot_quotes_dict.values()]
+
+    def fetch_spot_via_rest(self) -> dict[str, Any]:
+        """Llama al REST de pyRofex.get_market_data para los simbolos spot
+        registrados, probando varios markets. Util cuando el WS no manda
+        ticks pero el REST si responde. Actualiza _spot_quotes_dict en sitio.
+        """
+        if self._pyrofex is None:
+            return {"error": "pyRofex no inicializado"}
+        pyRofex = self._pyrofex
+        environment = self._environment(pyRofex)
+        results: dict[str, Any] = {}
+        markets = self._all_available_markets(pyRofex)
+        for symbol in list(self._spot_provider_to_symbol.keys()):
+            sym_results: list[dict[str, Any]] = []
+            for mkt_name, mkt_value in markets:
+                try:
+                    response = pyRofex.get_market_data(
+                        ticker=symbol,
+                        entries=self._market_data_entries(pyRofex),
+                        depth=1,
+                        market=mkt_value,
+                        environment=environment,
+                    )
+                except Exception as exc:
+                    sym_results.append({"market": mkt_name, "error": str(exc)})
+                    continue
+                # Si la respuesta tiene marketData, procesarla
+                md = (response or {}).get("marketData") or (response or {}).get("market_data")
+                if md:
+                    last = self._entry_price(md.get("LA"))
+                    sym_results.append({
+                        "market": mkt_name,
+                        "last": last,
+                        "raw_keys": list(md.keys()) if isinstance(md, dict) else None,
+                    })
+                    if last is not None:
+                        # Actualizar el quote en sitio
+                        with self._lock:
+                            current = self._spot_quotes_dict.get(symbol, {})
+                            current["last"] = float(last)
+                            current["bid"] = self._entry_price(md.get("BI")) or current.get("bid")
+                            current["ask"] = self._entry_price(md.get("OF")) or current.get("ask")
+                            current["updated_at"] = now_argentina_iso()
+                            current["raw"] = self._json_safe(response)
+                            current["fetched_via"] = f"REST market={mkt_name}"
+                            self._spot_quotes_dict[symbol] = current
+                else:
+                    sym_results.append({"market": mkt_name, "no_marketData": True, "response_keys": list((response or {}).keys()) if response else None})
+            results[symbol] = sym_results
+        return results
 
     def spot_last(self) -> dict[str, Any] | None:
         """Atajo: el primer spot disponible con `last` cargado."""

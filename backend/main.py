@@ -551,6 +551,20 @@ async def diag_spot_html() -> HTMLResponse:
     return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
 
 
+@app.post("/api/fx/spot/fetch-rest")
+async def fx_spot_fetch_rest() -> dict:
+    """Llama al REST de pyRofex para forzar fetch del ultimo precio del
+    spot (en lugar de esperar al WS). Util para diagnosticar y como
+    fallback si el WS no manda ticks."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        result = await asyncio.to_thread(market.fetch_spot_via_rest)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "results": result, "spot_now": market.spot_quotes()}
+
+
 @app.get("/api/fx/spot/diagnose")
 async def fx_spot_diagnose() -> dict:
     """Diagnostico: devuelve los simbolos del catalogo de pyRofex que
