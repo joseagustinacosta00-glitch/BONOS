@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd55 cargado - SPOT: usa CL (cierre) si LA es null (caso VETA sandbox)");
+console.log("[Monitor] app.js v=hd56 cargado - SPOT: prioridad DLR/SPOT + poller 5s + meta LA/CL clara");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -718,10 +718,10 @@ function renderSpotBanner() {
   if (liveValue && liveMeta) {
     if (spotLiveCache && spotLiveCache.last != null) {
       liveValue.textContent = fmtSpotValue(spotLiveCache.last);
-      const sym = spotLiveCache.symbol || "spot";
+      const sym = spotLiveCache.symbol || "DLR/SPOT";
       const ts = spotLiveCache.updated_at ? formatTime(spotLiveCache.updated_at) : "";
-      const source = spotLiveCache.last_source === "CL" ? " · cierre" : "";
-      liveMeta.textContent = `${sym}${ts ? " · " + ts : ""}${source}`;
+      const sourceTag = spotLiveCache.last_source === "CL" ? " · CL (cierre)" : " · LA";
+      liveMeta.innerHTML = `<strong>${sym}</strong>${ts ? " · " + ts : ""}${sourceTag}`;
     } else {
       liveValue.textContent = "—";
       liveMeta.textContent = spotItemsCount === 0

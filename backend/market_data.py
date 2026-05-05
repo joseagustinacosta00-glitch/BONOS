@@ -87,15 +87,18 @@ class MarketDataService:
         self.status = "stopped"
 
     async def _spot_rest_poller(self) -> None:
-        """Poll del spot via REST cada 10s en horario de mercado.
-        Necesario porque el WS de pyRofex no manda ticks de TMUSD u otros
-        spots en algunas cuentas; el REST si responde."""
+        """Poll del spot via REST cada 5s en horario de mercado, cada 60s
+        fuera. Necesario porque el WS no manda ticks de DLR/SPOT en VETA
+        (sandbox) y solo el REST devuelve el CL/LA actualizado."""
         try:
             while True:
-                await asyncio.sleep(10)
+                in_market = False
                 try:
-                    if not self._is_market_hours():
-                        continue
+                    in_market = self._is_market_hours()
+                except Exception:
+                    pass
+                await asyncio.sleep(5 if in_market else 60)
+                try:
                     await asyncio.to_thread(self.fetch_spot_via_rest)
                 except asyncio.CancelledError:
                     raise
@@ -1506,8 +1509,7 @@ class MarketDataService:
                             current["updated_at"] = now_argentina_iso()
                             current["raw"] = self._json_safe(response)
                             current["fetched_via"] = f"REST market={mkt_name}"
-                            if last_source == "CL":
-                                current["description"] = f"DLR/SPOT (cierre VETA, sin LA en sandbox)"
+                            current["description"] = "Dolar USA - Spot intraday (DLR/SPOT)"
                             self._spot_quotes_dict[symbol] = current
                 else:
                     sym_results.append({"market": mkt_name, "no_marketData": True, "response_keys": list((response or {}).keys()) if response else None})
@@ -1515,12 +1517,21 @@ class MarketDataService:
         return results
 
     def spot_last(self) -> dict[str, Any] | None:
-        """Atajo: el primer spot disponible con `last` cargado."""
+        """Devuelve DLR/SPOT preferentemente. Sino el primero con last."""
         with self._lock:
+            # Prioridad 1: DLR/SPOT si tiene last
+            preferred = self._spot_quotes_dict.get("DLR/SPOT")
+            if preferred and preferred.get("last") is not None:
+                return dict(preferred)
+            # Prioridad 2: cualquier otro con last (descartando los tests irreales)
             for q in self._spot_quotes_dict.values():
-                if q.get("last") is not None:
+                last = q.get("last")
+                if last is not None and float(last) >= 100:
                     return dict(q)
-            # Si ninguno tiene last, devolvemos el primero (puede tener bid/ask)
+            # Prioridad 3: DLR/SPOT aunque no tenga last
+            if preferred:
+                return dict(preferred)
+            # Fallback: el primero
             for q in self._spot_quotes_dict.values():
                 return dict(q)
         return None
