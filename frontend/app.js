@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd49 cargado - Futuros y DLK: SPOT hero + DLK orden fijo + 12 columnas DLR + tooltip vto");
+console.log("[Monitor] app.js v=hd50 cargado - SPOT siempre visible + auto-rediscover + poll 2s");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -683,12 +683,24 @@ async function pollFutures() {
 }
 
 let spotCache = null;
+let spotItemsCount = 0;
+let spotRediscoverTried = false;
 async function pollSpot() {
   try {
     const response = await fetch("/api/fx/spot");
     if (!response.ok) throw new Error("spot");
     const payload = await response.json();
     spotCache = payload.spot || null;
+    spotItemsCount = payload.count || 0;
+    // Si nunca se descubrio ningun spot y todavia no probamos rediscover,
+    // intentar una vez para forzar suscripcion (caso: server arranco antes
+    // de tener permisos en pyRofex).
+    if (spotItemsCount === 0 && !spotRediscoverTried) {
+      spotRediscoverTried = true;
+      fetch("/api/futures/rediscover", { method: "POST" }).then(() => {
+        // proximo poll va a recargar
+      }).catch(() => {});
+    }
   } catch (_) {
     /* ignore */
   } finally {
@@ -701,15 +713,19 @@ function renderSpotBanner() {
   const valueEl = document.querySelector("#spotBannerValue");
   const metaEl = document.querySelector("#spotBannerMeta");
   if (!banner) return;
-  if (!spotCache || spotCache.last == null) {
-    banner.style.display = "none";
+  // Siempre visible: el SPOT es informacion clave
+  banner.style.display = "flex";
+  if (!spotCache) {
+    if (valueEl) valueEl.textContent = "—";
+    if (metaEl) metaEl.textContent = spotItemsCount === 0
+      ? "Esperando descubrimiento del simbolo..."
+      : "Esperando primer tick";
     return;
   }
-  banner.style.display = "inline-flex";
   if (valueEl) {
-    valueEl.textContent = new Intl.NumberFormat("es-AR", {
-      minimumFractionDigits: 2, maximumFractionDigits: 4,
-    }).format(spotCache.last);
+    valueEl.textContent = spotCache.last != null
+      ? new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(spotCache.last)
+      : "—";
   }
   if (metaEl) {
     const sym = spotCache.symbol || "spot";
@@ -2486,7 +2502,10 @@ document.querySelectorAll("[data-market-category]").forEach((button) => {
     renderQuotes();
     // Poll inmediato al entrar al sub-tab para no esperar al intervalo
     if (currentMarketCategory === "fx") pollFxRatios();
-    if (currentMarketCategory === "futuros_dlk") pollFutures();
+    if (currentMarketCategory === "futuros_dlk") {
+      pollFutures();
+      pollSpot();
+    }
   });
 });
 
@@ -3211,13 +3230,13 @@ fetchSnapshot()
     setConnection("error", "Sin backend");
   });
 
-// Pollers de FX y Futuros: independientes del WebSocket para no parpadear.
+// Pollers de FX, Futuros y Spot: independientes del WebSocket para no parpadear.
 pollFxRatios();
 pollFutures();
 pollSpot();
 window.setInterval(pollFxRatios, 3000);
 window.setInterval(pollFutures, 5000);
-window.setInterval(pollSpot, 5000);
+window.setInterval(pollSpot, 2000);  // SPOT mas frecuente: dato critico
 
 tplusRate.disabled = tplusAutoRate.checked;
 renderQuotes();

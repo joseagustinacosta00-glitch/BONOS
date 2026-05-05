@@ -446,6 +446,44 @@ async def fx_spot() -> dict:
     }
 
 
+@app.get("/api/fx/spot/diagnose")
+async def fx_spot_diagnose() -> dict:
+    """Diagnostico: devuelve los simbolos del catalogo de pyRofex que
+    podrian ser el dolar spot (contienen DLR/DOLAR/USD). Util cuando
+    los candidatos hardcoded no matchean."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    if market._pyrofex is None:
+        raise HTTPException(status_code=503, detail="pyRofex no inicializado.")
+    pyRofex = market._pyrofex
+    environment = market._environment(pyRofex)
+    instruments = []
+    try:
+        response = pyRofex.get_detailed_instruments(environment=environment)
+        instruments = market._instrument_rows(response)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"get_detailed_instruments fallo: {exc}") from exc
+    candidates: list[str] = []
+    all_dlr_or_usd: list[str] = []
+    for inst in instruments:
+        sym = market._instrument_symbol(inst)
+        if not sym:
+            continue
+        sym_up = sym.upper()
+        if any(k in sym_up for k in ("DLR", "DOLAR", "USD")):
+            all_dlr_or_usd.append(sym)
+            if "SPOT" in sym_up or "/CI" in sym_up or "/T0" in sym_up or "24HS" in sym_up:
+                candidates.append(sym)
+    return {
+        "total_instruments": len(instruments),
+        "all_dlr_or_usd_count": len(all_dlr_or_usd),
+        "all_dlr_or_usd": all_dlr_or_usd[:50],
+        "spot_candidates": candidates,
+        "current_spot_candidates_hardcoded": list(market.SPOT_SYMBOL_CANDIDATES),
+        "currently_subscribed_spot": list(market._spot_provider_to_symbol.keys()),
+    }
+
+
 @app.post("/api/futures/rediscover")
 async def futures_rediscover() -> dict:
     """Vuelve a llamar al catalogo de pyRofex y re-suscribe los futuros.

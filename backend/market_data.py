@@ -839,6 +839,8 @@ class MarketDataService:
         "USD/SPOT",
         "DLR/CI",
         "DLR/T0",
+        "DLR/24HS",
+        "DOL/SPOT",
         "USDARS/SPOT",
     )
 
