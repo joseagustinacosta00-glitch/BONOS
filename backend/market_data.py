@@ -33,6 +33,8 @@ class MarketDataService:
         self._pyrofex: Any | None = None
         self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
         self._futures_provider_to_symbol: dict[str, str] = {}
+        self._spot_provider_to_symbol: dict[str, str] = {}
+        self._spot_quotes_dict: dict[str, dict[str, Any]] = {}
         self._last_tick_ts: float | None = None
         self._build_provider_symbol_map()
 
@@ -154,14 +156,18 @@ class MarketDataService:
         market_rofx = getattr(pyRofex.Market, "ROFX", self._market(pyRofex))
 
         before_count = len(self._futures_provider_to_symbol)
-        # Re-cargar catalogo (puede agregar nuevos simbolos a _futures_provider_to_symbol)
+        spot_before_count = len(self._spot_provider_to_symbol)
+        # Re-cargar catalogos (futuros + spot)
         self._load_futures_catalog(pyRofex, environment)
+        self._load_spot_catalog(pyRofex, environment)
         after_count = len(self._futures_provider_to_symbol)
+        spot_after_count = len(self._spot_provider_to_symbol)
         new_symbols = list(self._futures_provider_to_symbol.keys())[before_count:]
+        new_spot_symbols = list(self._spot_provider_to_symbol.keys())[spot_before_count:]
 
-        # Re-suscribir TODOS los futuros (idempotente para los ya suscriptos,
-        # y agrega los nuevos). En chunks de 8 para defensividad.
+        # Re-suscribir TODOS los futuros + spot. En chunks de 8.
         all_symbols = list(self._futures_provider_to_symbol.keys())
+        all_spot_symbols = list(self._spot_provider_to_symbol.keys())
         if not hasattr(self, "_subscription_failed") or self._subscription_failed is None:
             self._subscription_failed = []
         if not hasattr(self, "_subscription_succeeded") or self._subscription_succeeded is None:
@@ -169,6 +175,8 @@ class MarketDataService:
         prev_failed = list(self._subscription_failed)
         prev_succeeded = list(self._subscription_succeeded)
         self._subscribe_symbol_chunk(pyRofex, environment, entries, all_symbols, market_rofx, 8)
+        if all_spot_symbols:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, all_spot_symbols, market_rofx, 8)
         new_failed = [s for s in self._subscription_failed if s not in prev_failed]
         new_succeeded = [s for s in self._subscription_succeeded if s not in prev_succeeded]
 
@@ -177,6 +185,10 @@ class MarketDataService:
             "futures_after": after_count,
             "futures_added": len(new_symbols),
             "added_symbols": new_symbols,
+            "spot_before": spot_before_count,
+            "spot_after": spot_after_count,
+            "spot_added": len(new_spot_symbols),
+            "added_spot_symbols": new_spot_symbols,
             "subscription_succeeded_now": new_succeeded,
             "subscription_failed_now": new_failed,
         }
@@ -437,6 +449,7 @@ class MarketDataService:
 
         self._load_caucion_instrument(pyRofex, environment)
         self._load_futures_catalog(pyRofex, environment)
+        self._load_spot_catalog(pyRofex, environment)
         self._load_initial_rest_snapshot(pyRofex, entries)
         pyRofex.init_websocket_connection(
             market_data_handler=self._on_market_data,
@@ -454,6 +467,7 @@ class MarketDataService:
         invalido no rompa toda la subscripcion del resto."""
         bonds_symbols = list(self._rofex_to_quote.keys())
         futures_symbols = list(self._futures_provider_to_symbol.keys())
+        spot_symbols = list(self._spot_provider_to_symbol.keys())
         market_bonds = self._market(pyRofex)
         market_rofx = getattr(pyRofex.Market, "ROFX", market_bonds)
         self._subscription_failed: list[str] = []
@@ -461,10 +475,13 @@ class MarketDataService:
         self._subscribe_symbol_chunk(pyRofex, environment, entries, bonds_symbols, market_bonds, chunk_size)
         if futures_symbols:
             self._subscribe_symbol_chunk(pyRofex, environment, entries, futures_symbols, market_rofx, chunk_size)
+        if spot_symbols:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_symbols, market_rofx, chunk_size)
         logger.info(
-            "subscripcion pyRofex: %d ok / %d fallaron",
+            "subscripcion pyRofex: %d ok / %d fallaron (incluye %d spot)",
             len(self._subscription_succeeded),
             len(self._subscription_failed),
+            len(spot_symbols),
         )
 
     def _subscribe_symbol_chunk(self, pyRofex: Any, environment: Any, entries: list[Any], symbols: list[str], market: Any, chunk_size: int) -> None:
@@ -644,6 +661,8 @@ class MarketDataService:
                 current = self._lecap_quotes[settlement_type][local_symbol]
             elif category == "future":
                 current = self._futures_quotes[local_symbol]
+            elif category == "spot":
+                current = self._spot_quotes_dict[local_symbol]
             else:
                 current = self._quotes[local_symbol]
             updates = {
@@ -681,6 +700,9 @@ class MarketDataService:
     def _quote_ref(self, provider_symbol: str | None) -> tuple[str, str, str | None] | None:
         if not provider_symbol:
             return None
+
+        if provider_symbol in self._spot_provider_to_symbol:
+            return ("spot", provider_symbol, None)
 
         if provider_symbol in self._futures_provider_to_symbol:
             return ("future", provider_symbol, None)
@@ -741,6 +763,18 @@ class MarketDataService:
     # Underlyings de futuros que queremos suscribir (filtra ruido). DLR es
     # dolar mayorista. Otros que el usuario puede habilitar: ORO, GGAL, MERV.
     ALLOWED_FUTURES_UNDERLYINGS: tuple[str, ...] = ("DLR",)
+
+    # Candidatos de simbolo del dolar spot en pyRofex / Matba. Distintas
+    # cuentas / environments lo nombran diferente. Probamos todos.
+    SPOT_SYMBOL_CANDIDATES: tuple[str, ...] = (
+        "DLR/SPOT",
+        "DOLAR/SPOT",
+        "DOLAR_SPOT",
+        "USD/SPOT",
+        "DLR/CI",
+        "DLR/T0",
+        "USDARS/SPOT",
+    )
 
     def _load_futures_catalog(self, pyRofex: Any, environment: Any) -> None:
         """Descubre los futuros disponibles (DLR/MMMYY, etc.) y los registra
@@ -841,6 +875,69 @@ class MarketDataService:
                     "updated_at": now,
                     "raw": {},
                 }
+
+    def _load_spot_catalog(self, pyRofex: Any, environment: Any) -> None:
+        """Detecta el simbolo del dolar spot en el catalogo. Intenta tanto via
+        get_detailed_instruments como matcheando candidatos conocidos."""
+        instruments: list[Any] = []
+        try:
+            response = pyRofex.get_detailed_instruments(environment=environment)
+            instruments = self._instrument_rows(response)
+        except Exception:
+            try:
+                response = pyRofex.get_all_instruments(environment=environment)
+                instruments = self._instrument_rows(response)
+            except Exception as exc:
+                logger.warning("No se pudo cargar catalogo para spot: %s", exc)
+
+        # Set de simbolos candidatos en mayusculas para match case-insensitive
+        candidate_set = {s.upper() for s in self.SPOT_SYMBOL_CANDIDATES}
+        # Tambien aceptar simbolos que contengan "SPOT" + DLR/DOLAR/USD
+        now = now_argentina_iso()
+        registered: list[str] = []
+        for instrument in instruments:
+            symbol = self._instrument_symbol(instrument)
+            if not symbol:
+                continue
+            sym_up = symbol.upper()
+            # Match: candidato exacto, o contiene SPOT y referencia a dolar
+            is_spot = sym_up in candidate_set or (
+                "SPOT" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD"))
+            )
+            if not is_spot:
+                continue
+            self._spot_provider_to_symbol[symbol] = symbol
+            if symbol not in self._spot_quotes_dict:
+                self._spot_quotes_dict[symbol] = {
+                    "symbol": symbol,
+                    "provider_symbol": symbol,
+                    "category": "spot",
+                    "currency": "ARS",
+                    "underlying": "USD",
+                    "last": None,
+                    "bid": None,
+                    "ask": None,
+                    "updated_at": now,
+                    "raw": {},
+                }
+                registered.append(symbol)
+        logger.info("Dolar spot descubierto: %d simbolo(s) -> %s", len(registered), registered)
+
+    def spot_quotes(self) -> list[dict[str, Any]]:
+        """Devuelve los precios del dolar spot detectados (puede ser >=1)."""
+        with self._lock:
+            return [dict(q) for q in self._spot_quotes_dict.values()]
+
+    def spot_last(self) -> dict[str, Any] | None:
+        """Atajo: el primer spot disponible con `last` cargado."""
+        with self._lock:
+            for q in self._spot_quotes_dict.values():
+                if q.get("last") is not None:
+                    return dict(q)
+            # Si ninguno tiene last, devolvemos el primero (puede tener bid/ask)
+            for q in self._spot_quotes_dict.values():
+                return dict(q)
+        return None
 
     @staticmethod
     def _fallback_futures_symbols() -> list[str]:

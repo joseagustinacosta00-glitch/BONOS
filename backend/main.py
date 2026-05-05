@@ -432,6 +432,20 @@ async def market_shortest_caucion() -> dict:
     }
 
 
+@app.get("/api/fx/spot")
+async def fx_spot() -> dict:
+    """Devuelve el dolar spot (last). Si hay multiples simbolos detectados,
+    devuelve el mas reciente con last cargado + la lista completa."""
+    main = market.spot_last()
+    items = market.spot_quotes()
+    return {
+        "spot": main,
+        "items": items,
+        "count": len(items),
+        "updated_at": now_argentina_iso(),
+    }
+
+
 @app.post("/api/futures/rediscover")
 async def futures_rediscover() -> dict:
     """Vuelve a llamar al catalogo de pyRofex y re-suscribe los futuros.

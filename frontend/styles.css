@@ -1047,3 +1047,9 @@ tbody td {
 
 .tamar-banner { margin-top: 1rem; padding: 0.75rem 1rem; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f59e0b; border-radius: 0.5rem; font-size: 0.82rem; color: #78350f; }
 .tamar-banner strong { color: #451a03; }
+
+/* Banner del dolar spot encima de la tabla de futuros */
+.spot-banner { display: inline-flex; align-items: center; gap: 0.6rem; margin: 0.25rem 0 0.6rem; padding: 0.5rem 0.85rem; background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #0d6efd; border-radius: 0.5rem; font-size: 0.9rem; }
+.spot-banner-label { color: #2563eb; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.spot-banner-value { color: #0d6efd; font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.spot-banner-meta { color: #64748b; font-size: 0.78rem; margin-left: 0.4rem; }

@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd45 cargado - TAMAR: persistencia (guardar/listar/cargar/borrar)");
+console.log("[Monitor] app.js v=hd46 cargado - Dolar SPOT integrado: /api/fx/spot + banner en Futuros y DLK");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -611,6 +611,42 @@ async function pollFutures() {
     if (currentMarketCategory === "futuros_dlk" && currentMarketList !== "lecaps") {
       renderFuturosDlk();
     }
+  }
+}
+
+let spotCache = null;
+async function pollSpot() {
+  try {
+    const response = await fetch("/api/fx/spot");
+    if (!response.ok) throw new Error("spot");
+    const payload = await response.json();
+    spotCache = payload.spot || null;
+  } catch (_) {
+    /* ignore */
+  } finally {
+    renderSpotBanner();
+  }
+}
+
+function renderSpotBanner() {
+  const banner = document.querySelector("#spotBanner");
+  const valueEl = document.querySelector("#spotBannerValue");
+  const metaEl = document.querySelector("#spotBannerMeta");
+  if (!banner) return;
+  if (!spotCache || spotCache.last == null) {
+    banner.style.display = "none";
+    return;
+  }
+  banner.style.display = "inline-flex";
+  if (valueEl) {
+    valueEl.textContent = new Intl.NumberFormat("es-AR", {
+      minimumFractionDigits: 2, maximumFractionDigits: 4,
+    }).format(spotCache.last);
+  }
+  if (metaEl) {
+    const sym = spotCache.symbol || "spot";
+    const ts = spotCache.updated_at ? formatTime(spotCache.updated_at) : "";
+    metaEl.textContent = `${sym}${ts ? " · " + ts : ""}`;
   }
 }
 
@@ -3110,8 +3146,10 @@ fetchSnapshot()
 // Pollers de FX y Futuros: independientes del WebSocket para no parpadear.
 pollFxRatios();
 pollFutures();
+pollSpot();
 window.setInterval(pollFxRatios, 3000);
 window.setInterval(pollFutures, 5000);
+window.setInterval(pollSpot, 5000);
 
 tplusRate.disabled = tplusAutoRate.checked;
 renderQuotes();
