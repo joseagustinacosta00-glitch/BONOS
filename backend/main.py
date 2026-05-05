@@ -1085,6 +1085,37 @@ async def calculator_bond_tamar_calculate(
     days_total_calendar = (maturity_date - issue_date).days  # solo informativo
     vpv = face_value * ((1 + tamar_tem_decimal) ** ((days_total / 360.0) * 12.0))
 
+    # 5b) Cashflow del bono: TAMAR M31G6 / similares son bullet capitalizable,
+    # un unico flujo al vencimiento que paga VPV (capital + intereses acumulados).
+    maturity_effective = market_calendar.next_business_day(maturity_date, include_current=True)
+    issue_effective = market_calendar.next_business_day(issue_date, include_current=True)
+    cashflow_rows = [
+        {
+            "number": None,
+            "payment_date_theoretical": None,
+            "payment_date_effective": issue_effective.isoformat(),
+            "days": None,
+            "amort_vn_percent": None,
+            "residual_vn_percent": 100.0,
+            "tasa_aplicable_tem_percent": None,
+            "interes_aplicable_per_100": None,
+            "vpv_per_100": face_value,
+            "is_emission": True,
+        },
+        {
+            "number": 1,
+            "payment_date_theoretical": maturity_date.isoformat(),
+            "payment_date_effective": maturity_effective.isoformat(),
+            "days": days_total,
+            "amort_vn_percent": 100.0,
+            "residual_vn_percent": 100.0,  # antes del pago
+            "tasa_aplicable_tem_percent": tamar_tem_percent,
+            "interes_aplicable_per_100": vpv - face_value,
+            "vpv_per_100": vpv,
+            "is_emission": False,
+        },
+    ]
+
     # 6) Tasa fija TNA contra precio de mercado.
     # settlement_type = "t0" (mismo dia habil) o "t1" (proximo dia habil)
     settlement_offset = 0 if str(settlement_type).lower() == "t0" else 1
@@ -1148,6 +1179,7 @@ async def calculator_bond_tamar_calculate(
         "vpv_days": days_total,
         "vpv_days_basis": "30/360 US (DAYS360 de Excel)",
         "vpv_days_calendar": days_total_calendar,
+        "cashflow": cashflow_rows,
         "fixed_rate_calc": {
             "settlement_type": str(settlement_type).lower(),
             "settlement_date": settlement_date.isoformat(),

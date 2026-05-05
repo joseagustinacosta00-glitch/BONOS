@@ -1021,3 +1021,29 @@ tbody td {
 }
 #quotesBody td.ticker { cursor: pointer; color: #0d6efd; text-decoration: underline dotted; }
 #quotesBody td.ticker:hover { color: #0a58ca; }
+
+/* TAMAR calculator: cards de resumen */
+.tamar-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin: 0.5rem 0 1.25rem; }
+.tamar-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.6rem; padding: 0.85rem 1rem; display: flex; flex-direction: column; gap: 0.25rem; transition: border-color .15s, box-shadow .15s; }
+.tamar-card:hover { border-color: #cbd5e1; }
+.tamar-card-label { font-size: 0.74rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+.tamar-card-value { font-size: 1.4rem; font-weight: 700; color: #0f172a; line-height: 1.1; }
+.tamar-card-foot { font-size: 0.72rem; color: #94a3b8; }
+.tamar-card-highlight { background: #eff6ff; border-color: #bfdbfe; }
+.tamar-card-highlight .tamar-card-value { color: #0d6efd; }
+.tamar-card-highlight .tamar-card-label { color: #2563eb; }
+
+.tamar-section-title { font-size: 0.95rem; font-weight: 600; color: #0f172a; margin: 1.25rem 0 0.5rem; }
+
+.tamar-cashflow-table { font-size: 0.85rem; }
+.tamar-cashflow-table tr.tamar-emission-row { background: #fef3c7; font-style: italic; color: #78350f; }
+.tamar-cashflow-table tr.tamar-emission-row td { font-weight: 500; }
+.tamar-cashflow-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; background: #f8fafc; }
+
+.tamar-aux { margin-top: 0.85rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.6rem 0.85rem; background: #fafafa; }
+.tamar-aux > summary { cursor: pointer; font-size: 0.85rem; font-weight: 500; color: #475569; }
+.tamar-aux[open] { background: #fff; }
+.tamar-aux[open] > summary { margin-bottom: 0.6rem; color: #0f172a; }
+
+.tamar-banner { margin-top: 1rem; padding: 0.75rem 1rem; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f59e0b; border-radius: 0.5rem; font-size: 0.82rem; color: #78350f; }
+.tamar-banner strong { color: #451a03; }

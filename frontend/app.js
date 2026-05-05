@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd43 cargado - Modal metricas: fijo centrado + error reporting + settlement default 1");
+console.log("[Monitor] app.js v=hd44 cargado - TAMAR: cards + cashflow table + auxiliares colapsables");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2652,16 +2652,7 @@ async function calculateTamar() {
       maturity_date: maturityIso,
       face_value: String(faceValue),
       tem_extra_percent: String(temExtra),
-      settlement_type: tamarSettlement?.value || "t1",
     });
-    const marketPriceVal = parseFloat(tamarMarketPrice?.value || "");
-    if (Number.isFinite(marketPriceVal) && marketPriceVal > 0) {
-      params.set("market_price", String(marketPriceVal));
-    }
-    // Fecha "as of": si el usuario la cargo, la mando. Si no, backend usa hoy.
-    if (tamarAsOfDate?.value) {
-      params.set("as_of_date", tamarAsOfDate.value);
-    }
     const response = await fetch(`/api/calculators/bond-tamar/calculate?${params.toString()}`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
@@ -2669,18 +2660,18 @@ async function calculateTamar() {
     }
     const payload = await response.json();
 
-    // Tambien rellenar la seccion de "TAMAR de referencia" con los mismos datos
+    // Cards de TAMAR de referencia (emision + proyeccion). Ahora son <span>
     const emi = payload.tamar_emission || {};
     const proj = payload.tamar_maturity_projection || {};
-    if (tamarEmissionValue) tamarEmissionValue.value = formatTamarPercent(emi.value);
+    if (tamarEmissionValue) tamarEmissionValue.textContent = formatTamarPercent(emi.value);
     if (tamarEmissionRefDate) {
-      tamarEmissionRefDate.value = emi.value_date
-        ? `${formatDateDisplay(emi.value_date)} (target ${formatDateDisplay(emi.reference_date_target)})`
-        : `Sin dato (target ${formatDateDisplay(emi.reference_date_target)})`;
+      tamarEmissionRefDate.textContent = emi.value_date
+        ? `Ref ${formatDateDisplay(emi.value_date)}`
+        : "Sin dato";
     }
-    if (tamarProjectionValue) tamarProjectionValue.value = formatTamarPercent(proj.average);
+    if (tamarProjectionValue) tamarProjectionValue.textContent = formatTamarPercent(proj.average);
     if (tamarProjectionCutoff) {
-      tamarProjectionCutoff.value = `${formatDateDisplay(proj.publication_cutoff)} (hoy ${formatDateDisplay(proj.today)})`;
+      tamarProjectionCutoff.textContent = `Cutoff ${formatDateDisplay(proj.publication_cutoff)}`;
     }
     if (tamarProjectionSamples) {
       const samples = proj.samples || [];
@@ -2693,16 +2684,26 @@ async function calculateTamar() {
     }
     tamarReferenceSection?.classList.remove("d-none");
 
-    // Seccion de calculo
+    // Cards principales del calculo (textContent porque ahora son <span>)
+    if (tamarCalcAverage) tamarCalcAverage.textContent = formatTamarPercent(payload.tamar_average_percent);
+    if (tamarCalcWithSpread) {
+      const spread = (payload.tamar_for_tem_percent ?? 0) - (payload.tamar_average_percent ?? 0);
+      tamarCalcWithSpread.textContent = Math.abs(spread) > 1e-6
+        ? `+${formatTamarPercent(spread)} spread`
+        : "TAMAR pura (sin spread)";
+    }
+    if (tamarCalcTem) tamarCalcTem.textContent = formatTamarPercent(payload.tamar_tem_percent);
+    if (tamarCalcVpv) tamarCalcVpv.textContent = formatTamarMoney(payload.vpv);
+    if (tamarCalcDays) tamarCalcDays.textContent = `${payload.vpv_days} dias 30/360 / ${payload.vpv_days_calendar} cal.`;
+
+    // Auxiliares
     if (tamarCalcWindow) tamarCalcWindow.value = `${formatDateDisplay(payload.window_start)} -> ${formatDateDisplay(payload.window_end)}`;
-    if (tamarCalcAverage) tamarCalcAverage.value = formatTamarPercent(payload.tamar_average_percent);
     if (tamarCalcBreakdown) {
       const br = payload.tamar_average_breakdown || {};
       const carry = br.carry_forward_days || 0;
       const carryNote = carry > 0 ? ` + ${carry} carry-forward` : "";
       tamarCalcBreakdown.value = `${br.business_days_total} dias (${br.actual_days} reales${carryNote} / ${br.projected_days} proyectados @ ${formatTamarPercent(br.projected_value_used)})`;
     }
-    // Tabla de detalle dia por dia
     const tamarDailyDetailBody = document.querySelector("#tamarDailyDetailBody");
     if (tamarDailyDetailBody) {
       const rows = payload.daily_detail || [];
@@ -2720,39 +2721,43 @@ async function calculateTamar() {
         `).join("");
       }
     }
-    if (tamarCalcWithSpread) {
-      tamarCalcWithSpread.value = formatTamarPercent(payload.tamar_for_tem_percent);
-    }
-    if (tamarCalcTem) tamarCalcTem.value = formatTamarPercent(payload.tamar_tem_percent);
-    if (tamarCalcVpv) tamarCalcVpv.value = `${formatTamarMoney(payload.vpv)} c/${faceValue} VN`;
-    if (tamarCalcDays) {
-      tamarCalcDays.value = `${payload.vpv_days} dias 30/360 (Excel DAYS360) - ${payload.vpv_days_calendar} calendario`;
+
+    // Cashflow table principal
+    const tamarCashflowBody = document.querySelector("#tamarCashflowBody");
+    if (tamarCashflowBody && Array.isArray(payload.cashflow)) {
+      tamarCashflowBody.innerHTML = payload.cashflow.map((row) => {
+        if (row.is_emission) {
+          return `<tr class="tamar-emission-row">
+            <td>—</td>
+            <td>—</td>
+            <td>${formatDateDisplay(row.payment_date_effective)}</td>
+            <td class="text-end">—</td>
+            <td class="text-end">—</td>
+            <td class="text-end">100,00%</td>
+            <td class="text-end">—</td>
+            <td class="text-end">—</td>
+            <td class="text-end">${formatTamarMoney(row.vpv_per_100)}</td>
+          </tr>`;
+        }
+        const fmtPct = (v, d = 2) => v == null ? '-' : `${new Intl.NumberFormat("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d }).format(v)}%`;
+        return `<tr>
+          <td>${row.number}</td>
+          <td>${formatDateDisplay(row.payment_date_theoretical)}</td>
+          <td>${formatDateDisplay(row.payment_date_effective)}</td>
+          <td class="text-end">${row.days != null ? row.days : '-'}</td>
+          <td class="text-end">${fmtPct(row.amort_vn_percent)}</td>
+          <td class="text-end">${fmtPct(row.residual_vn_percent)}</td>
+          <td class="text-end">${fmtPct(row.tasa_aplicable_tem_percent, 4)}</td>
+          <td class="text-end">${row.interes_aplicable_per_100 != null ? formatTamarMoney(row.interes_aplicable_per_100) : '-'}</td>
+          <td class="text-end"><strong>${formatTamarMoney(row.vpv_per_100)}</strong></td>
+        </tr>`;
+      }).join("");
     }
 
     if (tamarFixedRateBanner && payload.fixed_rate_warning) {
       const w = payload.fixed_rate_warning;
-      tamarFixedRateBanner.innerHTML = `<strong>Tasa fija desde:</strong> ${formatDateDisplay(w.from_date)} hasta ${formatDateDisplay(w.to_date)}.<br>${w.message}`;
+      tamarFixedRateBanner.innerHTML = `<strong>Tasa fija desde ${formatDateDisplay(w.from_date)}:</strong> a partir de esa fecha (vto - 10 dias habiles) el VPV queda fijo y no varia con TAMAR proyectada.`;
       tamarFixedRateBanner.style.display = "block";
-    }
-
-    // Bloque de tasa fija TNA
-    const fr = payload.fixed_rate_calc || {};
-    if (tamarSettlementDate) {
-      tamarSettlementDate.value = fr.settlement_date
-        ? `${formatDateDisplay(fr.settlement_date)} (${(fr.settlement_type || "").toUpperCase()})`
-        : "-";
-    }
-    if (tamarDaysToMaturity) {
-      tamarDaysToMaturity.value = fr.days_to_maturity_from_settlement != null
-        ? `${fr.days_to_maturity_from_settlement} dias`
-        : "-";
-    }
-    if (tamarFixedTna) {
-      if (fr.fixed_rate_tna_percent != null) {
-        tamarFixedTna.value = formatTamarPercent(fr.fixed_rate_tna_percent, 4);
-      } else {
-        tamarFixedTna.value = fr.note || "Cargar precio de mercado";
-      }
     }
 
     tamarCalcSection?.classList.remove("d-none");

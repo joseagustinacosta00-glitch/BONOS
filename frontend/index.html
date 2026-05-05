@@ -8,7 +8,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd43">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd44">
   </head>
   <body>
     <main class="app-shell">
@@ -671,101 +671,103 @@
                   <input id="tamarFaceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100" required>
                 </label>
                 <label>
-                  <span>TEM TAMAR adicional % (spread)</span>
+                  <span>Spread TEM TAMAR % (opcional)</span>
                   <input id="tamarTemExtra" class="form-control form-control-sm" type="number" step="0.0001" value="0" placeholder="0 = TAMAR pura">
                 </label>
-                <label>
-                  <span>Precio de mercado (opcional, para TNA)</span>
-                  <input id="tamarMarketPrice" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" placeholder="Ej: 95.50">
-                </label>
-                <label>
-                  <span>Liquidacion</span>
-                  <select id="tamarSettlement" class="form-select form-select-sm">
-                    <option value="t1" selected>T+1</option>
-                    <option value="t0">T+0</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Calcular al dia (default: hoy)</span>
-                  <input id="tamarAsOfDate" class="form-control form-control-sm" type="date" placeholder="Hoy">
-                </label>
                 <button id="tamarFetchReference" class="btn btn-sm btn-outline-dark" type="button">Cargar TAMAR de referencia</button>
-                <button id="tamarCalculate" class="btn btn-sm btn-dark" type="button">Calcular TAMAR + TEM + VPV</button>
+                <button id="tamarCalculate" class="btn btn-sm btn-dark" type="button">Calcular VPV</button>
                 <span id="tamarStatus" class="calc-status">Borrador</span>
               </form>
 
               <section id="tamarReferenceSection" class="cashflow-preview d-none" aria-label="Valores TAMAR de referencia">
-                <h3>Valores TAMAR de referencia</h3>
-                <div class="hd-amort-controls">
-                  <label>
-                    <span>TAMAR emision (% n.a.)</span>
-                    <input id="tamarEmissionValue" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Fecha de referencia (10 dias habiles antes de emision)</span>
-                    <input id="tamarEmissionRefDate" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>TAMAR proyectado a vto (% n.a.)</span>
-                    <input id="tamarProjectionValue" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Cutoff de publicacion (hoy - 2 dias habiles)</span>
-                    <input id="tamarProjectionCutoff" class="form-control form-control-sm" type="text" readonly>
-                  </label>
+                <div class="tamar-cards" id="tamarReferenceCards">
+                  <div class="tamar-card">
+                    <span class="tamar-card-label">TAMAR emision</span>
+                    <span class="tamar-card-value" id="tamarEmissionValue">-</span>
+                    <span class="tamar-card-foot" id="tamarEmissionRefDate"></span>
+                  </div>
+                  <div class="tamar-card">
+                    <span class="tamar-card-label">TAMAR proyectado</span>
+                    <span class="tamar-card-value" id="tamarProjectionValue">-</span>
+                    <span class="tamar-card-foot" id="tamarProjectionCutoff"></span>
+                  </div>
                 </div>
-                <p class="hd-help">El TAMAR de emision se toma del BCRA (id_variable=44) en la fecha 10 dias habiles antes de la emision. Si ese dia no hubo publicacion, se usa la publicacion anterior disponible. El TAMAR proyectado es el promedio simple de los ultimos 5 valores publicados (TAMAR se publica con 2 dias habiles de lag).</p>
-                <details>
-                  <summary class="hd-import-summary-title">Ver muestras del promedio (5 datos TAMAR)</summary>
+                <details class="tamar-aux">
+                  <summary>Muestras del promedio (5 datos TAMAR)</summary>
                   <div id="tamarProjectionSamples" class="hd-amort-controls"></div>
                 </details>
               </section>
 
               <section id="tamarCalcSection" class="cashflow-preview d-none" aria-label="Calculo TAMAR / TEM / VPV">
-                <h3>Calculo de promedio TAMAR, TEM y VPV</h3>
-                <div id="tamarFixedRateBanner" class="alert alert-warning" style="display:none;"></div>
-                <div class="hd-amort-controls">
-                  <label>
-                    <span>Ventana TAMAR (emision-10BD a vto-10BD)</span>
-                    <input id="tamarCalcWindow" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Promedio TAMAR ventana (% n.a.)</span>
-                    <input id="tamarCalcAverage" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Dias habiles considerados (real / proyectado)</span>
-                    <input id="tamarCalcBreakdown" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>TAMAR + spread aplicado (% n.a.)</span>
-                    <input id="tamarCalcWithSpread" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>TAMAR_TEM resultante (% mensual)</span>
-                    <input id="tamarCalcTem" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>VPV (Valor Presente Vencimiento)</span>
-                    <input id="tamarCalcVpv" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Dias totales (emision a vto)</span>
-                    <input id="tamarCalcDays" class="form-control form-control-sm" type="text" readonly>
-                  </label>
+                <div class="tamar-cards">
+                  <div class="tamar-card">
+                    <span class="tamar-card-label">Promedio TAMAR ventana</span>
+                    <span class="tamar-card-value" id="tamarCalcAverage">-</span>
+                    <span class="tamar-card-foot" id="tamarCalcWithSpread"></span>
+                  </div>
+                  <div class="tamar-card">
+                    <span class="tamar-card-label">TAMAR_TEM</span>
+                    <span class="tamar-card-value" id="tamarCalcTem">-</span>
+                    <span class="tamar-card-foot">% efectivo mensual</span>
+                  </div>
+                  <div class="tamar-card tamar-card-highlight">
+                    <span class="tamar-card-label">VPV (c/100 VN)</span>
+                    <span class="tamar-card-value" id="tamarCalcVpv">-</span>
+                    <span class="tamar-card-foot" id="tamarCalcDays"></span>
+                  </div>
                 </div>
-                <p class="hd-help">
-                  Promedio TAMAR sobre la ventana de calculo, usando datos publicados del BCRA hasta la fecha de
-                  ultimo publicado y la proyeccion (promedio de los ultimos 5 publicados con lag de 2 dias habiles)
-                  para los dias futuros.<br>
-                  TAMAR_TEM = [(1 + TAMAR/(365/32))^(365/32)]^(1/12) - 1<br>
-                  VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12)<br>
-                  DIAS se cuenta con regla 30/360 US (igual que la funcion DAYS360 de Excel) entre emision y vencimiento.
-                </p>
 
-                <details>
-                  <summary class="hd-import-summary-title">Ver detalle dia por dia (para verificar promedio)</summary>
-                  <div style="max-height: 400px; overflow-y: auto;">
+                <h3 class="tamar-section-title">Cashflow del bono</h3>
+                <div class="table-wrap inner-table">
+                  <table class="table table-sm align-middle mb-0 hd-cashflow-table tamar-cashflow-table">
+                    <thead>
+                      <tr>
+                        <th rowspan="2">Cupon Nro</th>
+                        <th colspan="2" class="text-center">Fecha de pago</th>
+                        <th rowspan="2" class="text-end">Dias entre fechas</th>
+                        <th colspan="2" class="text-center">Amortizacion</th>
+                        <th colspan="2" class="text-center">Interes</th>
+                        <th rowspan="2" class="text-end">VPV</th>
+                      </tr>
+                      <tr>
+                        <th>Teorica</th>
+                        <th>Efectiva</th>
+                        <th class="text-end">VN %</th>
+                        <th class="text-end">VR %</th>
+                        <th class="text-end">Tasa aplicable</th>
+                        <th class="text-end">Aplicable</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tamarCashflowBody">
+                      <tr><td colspan="9" class="empty-state">Calcular primero</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <details class="tamar-aux">
+                  <summary>Detalles del calculo (ventana, breakdown, formulas)</summary>
+                  <div class="hd-amort-controls">
+                    <label>
+                      <span>Ventana TAMAR (emision-10BD a vto-10BD)</span>
+                      <input id="tamarCalcWindow" class="form-control form-control-sm" type="text" readonly>
+                    </label>
+                    <label>
+                      <span>Dias habiles considerados</span>
+                      <input id="tamarCalcBreakdown" class="form-control form-control-sm" type="text" readonly>
+                    </label>
+                  </div>
+                  <p class="hd-help">
+                    Promedio TAMAR sobre la ventana de calculo, con datos publicados del BCRA hasta la fecha del
+                    ultimo publicado y la proyeccion (promedio de los ultimos 5 publicados, lag 2 dias habiles)
+                    para los futuros.<br>
+                    TAMAR_TEM = [(1 + TAMAR/(365/32))^(365/32)]^(1/12) - 1<br>
+                    VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12), con DIAS regla 30/360 US.
+                  </p>
+                </details>
+
+                <details class="tamar-aux">
+                  <summary>Detalle dia por dia del promedio TAMAR</summary>
+                  <div style="max-height: 360px; overflow-y: auto;">
                     <table class="table table-sm align-middle mb-0" id="tamarDailyDetailTable">
                       <thead>
                         <tr>
@@ -781,32 +783,9 @@
                       </tbody>
                     </table>
                   </div>
-                  <p class="hd-help">"actual" = TAMAR publicado por BCRA ese dia. "carry_forward" = el dia es habil pero BCRA no publico, se reusa el ultimo valor conocido. "projection" = dia futuro, se usa el promedio de los ultimos 5 publicados.</p>
                 </details>
-                <p class="hd-help">
-                </p>
 
-                <h3 style="margin-top:1rem;">Tasa fija contra precio de mercado</h3>
-                <div class="hd-amort-controls">
-                  <label>
-                    <span>Fecha de liquidacion</span>
-                    <input id="tamarSettlementDate" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Dias liquidacion -> vencimiento</span>
-                    <input id="tamarDaysToMaturity" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                  <label>
-                    <span>Tasa fija TNA (% anual base 365)</span>
-                    <input id="tamarFixedTna" class="form-control form-control-sm" type="text" readonly>
-                  </label>
-                </div>
-                <p class="hd-help">
-                  Tasa fija TNA = ((VPV / precio_mercado) - 1) / dias_liq_a_vto * 365.
-                  Es la tasa nominal anual implicita: comprando hoy a precio_mercado y cobrando VPV a vencimiento,
-                  esa es la tasa anualizada de retorno (interes simple base 365). Una vez que el bono cruza
-                  vto-10BD, el VPV queda fijo y por ende la tasa tambien (no varia mas con la TAMAR).
-                </p>
+                <div id="tamarFixedRateBanner" class="tamar-banner" style="display:none;"></div>
               </section>
             </div>
 
@@ -1174,6 +1153,6 @@
       </div>
     </div>
 
-    <script src="/app-bundle.js?v=hd43"></script>
+    <script src="/app-bundle.js?v=hd44"></script>
   </body>
 </html>
