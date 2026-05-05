@@ -432,6 +432,25 @@ async def market_shortest_caucion() -> dict:
     }
 
 
+@app.post("/api/futures/rediscover")
+async def futures_rediscover() -> dict:
+    """Vuelve a llamar al catalogo de pyRofex y re-suscribe los futuros.
+    Util cuando se habilitan permisos en la cuenta y no queremos esperar
+    a un redeploy completo del servicio."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        result = await asyncio.to_thread(market.rediscover_futures)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Re-descubrimiento fallo: {exc}") from exc
+    items = market.futures_quotes()
+    return {
+        "ok": True,
+        **result,
+        "futures_total_now": len(items),
+    }
+
+
 @app.post("/api/system/reconnect-ws")
 async def system_reconnect_ws() -> dict:
     """Fuerza reconexion del WebSocket pyRofex sin necesidad de redeploy.

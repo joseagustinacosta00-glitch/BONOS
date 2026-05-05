@@ -140,6 +140,47 @@ class MarketDataService:
             self._last_tick_ts = now_argentina().timestamp()
         logger.info("watchdog: reconexion pyRofex completada")
 
+    def rediscover_futures(self) -> dict[str, Any]:
+        """Vuelve a llamar al catalogo de pyRofex y re-suscribe los nuevos
+        futuros encontrados. Util cuando recien se habilitaron permisos en
+        la cuenta y no queremos esperar a un redeploy.
+        Devuelve resumen con cuantos futuros se descubrieron / suscribieron.
+        """
+        if self._pyrofex is None:
+            raise RuntimeError("pyRofex no esta inicializado.")
+        pyRofex = self._pyrofex
+        environment = self._environment(pyRofex)
+        entries = self._market_data_entries(pyRofex)
+        market_rofx = getattr(pyRofex.Market, "ROFX", self._market(pyRofex))
+
+        before_count = len(self._futures_provider_to_symbol)
+        # Re-cargar catalogo (puede agregar nuevos simbolos a _futures_provider_to_symbol)
+        self._load_futures_catalog(pyRofex, environment)
+        after_count = len(self._futures_provider_to_symbol)
+        new_symbols = list(self._futures_provider_to_symbol.keys())[before_count:]
+
+        # Re-suscribir TODOS los futuros (idempotente para los ya suscriptos,
+        # y agrega los nuevos). En chunks de 8 para defensividad.
+        all_symbols = list(self._futures_provider_to_symbol.keys())
+        if not hasattr(self, "_subscription_failed") or self._subscription_failed is None:
+            self._subscription_failed = []
+        if not hasattr(self, "_subscription_succeeded") or self._subscription_succeeded is None:
+            self._subscription_succeeded = []
+        prev_failed = list(self._subscription_failed)
+        prev_succeeded = list(self._subscription_succeeded)
+        self._subscribe_symbol_chunk(pyRofex, environment, entries, all_symbols, market_rofx, 8)
+        new_failed = [s for s in self._subscription_failed if s not in prev_failed]
+        new_succeeded = [s for s in self._subscription_succeeded if s not in prev_succeeded]
+
+        return {
+            "futures_before": before_count,
+            "futures_after": after_count,
+            "futures_added": len(new_symbols),
+            "added_symbols": new_symbols,
+            "subscription_succeeded_now": new_succeeded,
+            "subscription_failed_now": new_failed,
+        }
+
     def snapshot(self) -> dict[str, Any]:
         today = now_argentina().date()
         with self._lock:
@@ -697,13 +738,18 @@ class MarketDataService:
             "t1": self.settings.rofex_settlement_t1,
         }
 
+    # Underlyings de futuros que queremos suscribir (filtra ruido). DLR es
+    # dolar mayorista. Otros que el usuario puede habilitar: ORO, GGAL, MERV.
+    ALLOWED_FUTURES_UNDERLYINGS: tuple[str, ...] = ("DLR",)
+
     def _load_futures_catalog(self, pyRofex: Any, environment: Any) -> None:
         """Descubre los futuros disponibles (DLR/MMMYY, etc.) y los registra
-        para suscripcion en el market ROFX. Si la API no devuelve nada, usa
-        un fallback hardcodeado de DLR mensuales."""
+        para suscripcion en el market ROFX. Filtra por underlyings permitidos
+        (ALLOWED_FUTURES_UNDERLYINGS). Si la API no devuelve nada, usa un
+        fallback hardcodeado de DLR mensuales."""
         instruments: list[Any] = []
 
-        # Intento 1: con detalle (suele tener cficode)
+        # Intento 1: con detalle (suele tener cficode + maturityDate)
         try:
             response = pyRofex.get_detailed_instruments(environment=environment)
             instruments = self._instrument_rows(response)
@@ -711,7 +757,7 @@ class MarketDataService:
         except Exception as exc:
             logger.info("get_detailed_instruments no disponible: %s", exc)
 
-        # Intento 2: get_all_instruments
+        # Intento 2: get_all_instruments (mas plano, sin cficode)
         if not instruments:
             try:
                 response = pyRofex.get_all_instruments(environment=environment)
@@ -722,12 +768,20 @@ class MarketDataService:
 
         now = now_argentina_iso()
         registered = 0
+        skipped_other_underlying = 0
+        by_underlying: dict[str, int] = {}
         for instrument in instruments:
             symbol = self._instrument_symbol(instrument)
             if not symbol:
                 continue
             cficode = self._instrument_cficode(instrument)
             if not self._is_future_instrument(symbol, cficode):
+                continue
+            underlying = self._futures_underlying(symbol)
+            by_underlying[underlying] = by_underlying.get(underlying, 0) + 1
+            # Filtrar: solo los underlyings habilitados
+            if self.ALLOWED_FUTURES_UNDERLYINGS and underlying not in self.ALLOWED_FUTURES_UNDERLYINGS:
+                skipped_other_underlying += 1
                 continue
             self._futures_provider_to_symbol[symbol] = symbol
             if symbol not in self._futures_quotes:
@@ -736,7 +790,7 @@ class MarketDataService:
                     "provider_symbol": symbol,
                     "category": "futuro",
                     "currency": "ARS",
-                    "underlying": self._futures_underlying(symbol),
+                    "underlying": underlying,
                     "expiration": self._futures_expiration_str(instrument),
                     "last": None,
                     "last_volume": None,
@@ -751,10 +805,15 @@ class MarketDataService:
                     "raw": {},
                 }
                 registered += 1
-        logger.info("Futuros descubiertos automaticamente: %d", registered)
+        logger.info(
+            "Futuros descubiertos: %d registrados (allowed=%s) | %d ignorados de otros underlyings | breakdown: %s",
+            registered,
+            self.ALLOWED_FUTURES_UNDERLYINGS,
+            skipped_other_underlying,
+            by_underlying,
+        )
 
         # Fallback: si la API no devolvio futuros, registramos un set comun de DLR mensuales.
-        # pyRofex puede limitar segun permisos de cuenta; estos simbolos son los standar de Matba.
         if registered == 0:
             fallback_symbols = self._fallback_futures_symbols()
             logger.warning(
