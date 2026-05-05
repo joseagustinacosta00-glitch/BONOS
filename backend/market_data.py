@@ -268,7 +268,11 @@ class MarketDataService:
             )[0]
         )
 
-    def futures_quotes(self) -> list[dict[str, Any]]:
+    def futures_quotes(self, as_of_date: date | None = None) -> list[dict[str, Any]]:
+        """Devuelve los futuros enriquecidos con change_abs, settlement_price
+        y TNA implicita. La TNA usa as_of_date como fecha de referencia para
+        contar dias al vencimiento. Si as_of_date cae en fin de semana o
+        feriado, se ajusta al ultimo dia habil anterior."""
         with self._lock:
             quotes = [dict(q) for q in self._futures_quotes.values()]
             spot_last = None
@@ -276,8 +280,16 @@ class MarketDataService:
                 if q.get("last") is not None:
                     spot_last = float(q["last"])
                     break
-        # Enriquecer con: variacion en precio (last - prev close), TNA implicita
-        today_iso = now_argentina().date()
+
+        # Determinar fecha "as of" efectiva
+        from backend.market_calendar import market_calendar
+        if as_of_date is None:
+            as_of_date = now_argentina().date()
+        # Si el dia no es habil, usar previous_business_day para que
+        # spot tenga sentido (no hay spot para sabado/domingo a futuro)
+        if not market_calendar.is_business_day(as_of_date):
+            as_of_date = market_calendar.previous_business_day(as_of_date, include_current=False)
+
         for q in quotes:
             last = q.get("last")
             prev = q.get("previous_close")
@@ -288,19 +300,22 @@ class MarketDataService:
                     q["change_abs"] = None
             except (TypeError, ValueError):
                 q["change_abs"] = None
-            # TNA = (futuro/spot - 1) / dias_a_vencimiento * 365
+            # TNA = (futuro/spot - 1) * 365 / dias_a_vencimiento * 100
             tna = None
+            days = None
             try:
                 exp_str = q.get("expiration")
                 if last is not None and spot_last and spot_last > 0 and exp_str:
                     exp_date = date.fromisoformat(str(exp_str))
-                    days = (exp_date - today_iso).days
+                    days = (exp_date - as_of_date).days
                     if days > 0:
                         tna = ((float(last) / spot_last) - 1) * 365.0 / days * 100.0
             except (TypeError, ValueError):
                 tna = None
             q["tna_percent"] = tna
             q["spot_used"] = spot_last
+            q["days_to_maturity"] = days
+            q["as_of_date_used"] = as_of_date.isoformat()
         # Orden segun whitelist
         order_index = {sym: i for i, sym in enumerate(self.ALLOWED_DLR_SYMBOLS)}
         quotes.sort(key=lambda q: order_index.get(str(q.get("symbol") or ""), 9999))
@@ -416,6 +431,7 @@ class MarketDataService:
                     "trade_volume": None,
                     "nominal_volume": None,
                     "open_interest": None,
+                    "settlement_price": None,
                     "previous_close": None,
                     "opening_price": None,
                     "updated_at": now,
@@ -769,8 +785,9 @@ class MarketDataService:
         volume = trade_volume or nominal_volume or effective_volume
         previous_close = self._entry_price(market_data.get("CL"))
         opening_price = self._entry_price(market_data.get("OP"))
-        # Open Interest: pyRofex usa "OI"
+        # Open Interest: pyRofex usa "OI". Settlement (ajuste): "SE".
         open_interest = self._entry_value(market_data.get("OI"))
+        settlement_price = self._entry_price(market_data.get("SE"))
         now = now_argentina_iso()
 
         with self._lock:
@@ -803,6 +820,7 @@ class MarketDataService:
                 "trade_volume": trade_volume if trade_volume is not None else current.get("trade_volume"),
                 "nominal_volume": nominal_volume if nominal_volume is not None else current.get("nominal_volume"),
                 "open_interest": open_interest if open_interest is not None else current.get("open_interest"),
+                "settlement_price": settlement_price if settlement_price is not None else current.get("settlement_price"),
                 "previous_close": previous_close if previous_close is not None else current.get("previous_close"),
                 "opening_price": opening_price if opening_price is not None else current.get("opening_price"),
                 "updated_at": now,
@@ -1001,6 +1019,7 @@ class MarketDataService:
                     "trade_volume": None,
                     "nominal_volume": None,
                     "open_interest": None,
+                    "settlement_price": None,
                     "previous_close": None,
                     "opening_price": None,
                     "updated_at": now,
@@ -1806,7 +1825,8 @@ class MarketDataService:
         ]
         # Entries opcionales que pyRofex puede no exponer en todas las versiones.
         for attr in ("NOMINAL_VOLUME", "EFFECTIVE_VOLUME", "OPENING_PRICE",
-                     "CLOSING_PRICE", "OPEN_INTEREST", "TRADE_EFFECTIVE_VOLUME"):
+                     "CLOSING_PRICE", "OPEN_INTEREST", "TRADE_EFFECTIVE_VOLUME",
+                     "SETTLEMENT_PRICE"):
             value = getattr(pyRofex.MarketDataEntry, attr, None)
             if value is not None:
                 entries.append(value)

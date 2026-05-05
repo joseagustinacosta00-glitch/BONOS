@@ -688,12 +688,18 @@ async def system_reconnect_ws() -> dict:
 
 
 @app.get("/api/futures")
-async def market_futures() -> dict:
-    items = market.futures_quotes()
+async def market_futures(as_of_date: date | None = None) -> dict:
+    """Lista de futuros DLR con TNA implicita calculada contra el spot.
+    Query opcional as_of_date (YYYY-MM-DD): cambia la fecha de referencia
+    para los dias_a_vto. Si cae en fin de semana, se ajusta al ultimo dia
+    habil anterior. Default: hoy."""
+    items = market.futures_quotes(as_of_date=as_of_date)
+    as_of_used = items[0].get("as_of_date_used") if items else None
     return {
         "status": market.status,
         "source": market.settings.market_source,
         "updated_at": now_argentina_iso(),
+        "as_of_date_used": as_of_used,
         "items": items,
     }
 

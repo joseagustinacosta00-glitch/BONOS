@@ -1088,3 +1088,10 @@ tbody td {
 .spot-card-a3500 .spot-card-value { color: #0d6efd; }
 .spot-card-meta { font-size: 0.78rem; color: #64748b; }
 @media (max-width: 700px) { .spot-banner-pair { grid-template-columns: 1fr; } }
+
+/* Header del bloque de futuros con selector de fecha al lado del titulo */
+.fut-header-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.4rem; }
+.fut-header-bar .fut-split-title { margin: 0; }
+.fut-asof-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: #475569; margin: 0; }
+.fut-asof-label input { padding: 0.25rem 0.4rem; border: 1px solid #cbd5e1; border-radius: 0.3rem; font-size: 0.82rem; }
+.fut-asof-label input:focus { outline: none; border-color: #0d6efd; box-shadow: 0 0 0 2px rgba(13,110,253,0.15); }

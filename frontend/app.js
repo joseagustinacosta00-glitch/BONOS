@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd56 cargado - SPOT: prioridad DLR/SPOT + poller 5s + meta LA/CL clara");
+console.log("[Monitor] app.js v=hd57 cargado - Futuros DLR: columna Aj. + selector as_of_date para TNA");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -551,14 +551,15 @@ function _buildFutRow(symbol) {
   const tdPxO = document.createElement("td"); tdPxO.className = "text-end"; tdPxO.textContent = "-";
   const tdSzO = document.createElement("td"); tdSzO.className = "text-end"; tdSzO.textContent = "-";
   const tdLast = document.createElement("td"); tdLast.className = "text-end"; tdLast.textContent = "-";
+  const tdAj = document.createElement("td"); tdAj.className = "text-end"; tdAj.textContent = "-";
   const tdChgAbs = document.createElement("td"); tdChgAbs.className = "text-end"; tdChgAbs.textContent = "-";
   const tdChgPct = document.createElement("td"); tdChgPct.className = "text-end"; tdChgPct.textContent = "-";
   const tdVCn = document.createElement("td"); tdVCn.className = "text-end"; tdVCn.textContent = "-";
   const tdVN = document.createElement("td"); tdVN.className = "text-end"; tdVN.textContent = "-";
   const tdOI = document.createElement("td"); tdOI.className = "text-end"; tdOI.textContent = "-";
   const tdTna = document.createElement("td"); tdTna.className = "text-end"; tdTna.textContent = "-";
-  tr.append(tdSym, tdSzB, tdPxB, tdPxO, tdSzO, tdLast, tdChgAbs, tdChgPct, tdVCn, tdVN, tdOI, tdTna);
-  return { tr, sym: tdSym, cells: { szB: tdSzB, pxB: tdPxB, pxO: tdPxO, szO: tdSzO, last: tdLast, chgAbs: tdChgAbs, chgPct: tdChgPct, vCn: tdVCn, vN: tdVN, oi: tdOI, tna: tdTna } };
+  tr.append(tdSym, tdSzB, tdPxB, tdPxO, tdSzO, tdLast, tdAj, tdChgAbs, tdChgPct, tdVCn, tdVN, tdOI, tdTna);
+  return { tr, sym: tdSym, cells: { szB: tdSzB, pxB: tdPxB, pxO: tdPxO, szO: tdSzO, last: tdLast, aj: tdAj, chgAbs: tdChgAbs, chgPct: tdChgPct, vCn: tdVCn, vN: tdVN, oi: tdOI, tna: tdTna } };
 }
 
 function ensureDlkRow(symbol) {
@@ -627,6 +628,9 @@ function renderFuturosDlk() {
     _setIfChanged(ref.cells.pxO, fmtNumAr(q.ask, 2));
     _setIfChanged(ref.cells.szO, fmtIntAr(q.ask_size));
     _setIfChanged(ref.cells.last, fmtNumAr(q.last, 2));
+    // Ajuste / Settlement: si pyRofex no manda SE, fallback al previous_close
+    const ajVal = q.settlement_price != null ? q.settlement_price : q.previous_close;
+    _setIfChanged(ref.cells.aj, fmtNumAr(ajVal, 2));
     const chgAbsVal = q.change_abs;
     const chgPctVal = q.change;
     const chgAbsTxt = (chgAbsVal == null) ? "-" : fmtNumAr(chgAbsVal, 2);
@@ -666,9 +670,16 @@ async function pollFxRatios() {
   }
 }
 
+function _futAsOfDateValue() {
+  const el = document.querySelector("#futAsOfDate");
+  return el && el.value ? el.value : "";
+}
+
 async function pollFutures() {
   try {
-    const response = await fetch("/api/futures");
+    const asOf = _futAsOfDateValue();
+    const url = asOf ? `/api/futures?as_of_date=${asOf}` : "/api/futures";
+    const response = await fetch(url);
     if (!response.ok) throw new Error("futures");
     const payload = await response.json();
     futuresCache = payload.items || [];
@@ -3239,6 +3250,19 @@ fetchSnapshot()
     renderQuotes();
     setConnection("error", "Sin backend");
   });
+
+// Selector de fecha "as of" para TNA de futuros: default hoy local
+(function initFutAsOfDate() {
+  const el = document.querySelector("#futAsOfDate");
+  if (!el) return;
+  if (!el.value) {
+    const d = new Date();
+    el.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  el.addEventListener("change", () => {
+    pollFutures().catch(() => {});
+  });
+})();
 
 // Pollers de FX, Futuros y Spot: independientes del WebSocket para no parpadear.
 pollFxRatios();
