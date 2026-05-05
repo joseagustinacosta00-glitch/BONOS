@@ -1053,3 +1053,11 @@ tbody td {
 .spot-banner-label { color: #2563eb; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
 .spot-banner-value { color: #0d6efd; font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
 .spot-banner-meta { color: #64748b; font-size: 0.78rem; margin-left: 0.4rem; }
+
+/* Layout 2 columnas para sub-tab Futuros y DLK (DLK izquierda, Futuros derecha) */
+.fut-split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+.fut-split-col { min-width: 0; }
+.fut-split-title { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; margin: 0 0 0.4rem; }
+@media (max-width: 1024px) {
+  .fut-split { grid-template-columns: 1fr; }
+}
