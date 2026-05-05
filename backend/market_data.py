@@ -1249,6 +1249,20 @@ class MarketDataService:
 
         # 3) Variantes del simbolo a probar
         variants = [
+            # PRIORIDAD: variantes de DLR/SPOT (el usuario insiste que es ese)
+            "DLR/SPOT",
+            "DLR/spot",
+            "DLR / SPOT",
+            "DLRSPOT",
+            "DLR SPOT",
+            "DLR-SPOT",
+            "DLR_SPOT",
+            "DLR.SPOT",
+            "I.DLR/SPOT",
+            "ROFX - DLR/SPOT",
+            "ROFX - DLR/SPOT - SPOT",
+            "MERV - XMEV - DLR/SPOT",
+            # Otras combinaciones que tenia
             "DDF_BCRA_A3500",
             "I.DDF_BCRA_A3500",
             "DDF.BCRA.A3500",
