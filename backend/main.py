@@ -687,6 +687,139 @@ async def calculator_delete_lecap(item_id: int) -> dict:
     return {"deleted": True}
 
 
+@app.get("/api/bonds/{ticker}/metrics")
+async def bond_metrics(
+    ticker: str,
+    price: float,
+    settlement_type: str = "t1",
+    as_of_date: date | None = None,
+) -> dict:
+    """Calcula TIR, TNA, TEM, Duration, MD y Convexity para un bono dado su
+    precio. Toma el cashflow guardado del bono HD (calculator persistido) si
+    existe. Para otros tipos por ahora devuelve un mensaje informativo.
+
+    Formulas:
+      - Solve r en: price = sum(CF_i / (1 + r_period)^period_i)
+        donde period_i = year_fraction acumulada hasta el flujo i (en años).
+      - TIR_efectiva_anual = (1 + r_period)^(1/year_fraction_unit) - 1
+      - TNA_365 = TIR * 365 / 360 (cuando convencion es act/360) o
+        simplificacion: TIR efectiva anual.
+      - TEM = (1 + TIR_anual)^(1/12) - 1
+      - Duration (Macaulay) = sum(t_i * pv_i) / price
+      - Modified Duration = Duration / (1 + r_anual)
+      - Convexity = sum(t_i*(t_i+1) * pv_i / (1+r)^2) / price
+    """
+    if price <= 0:
+        raise HTTPException(status_code=422, detail="Precio debe ser positivo.")
+    today_real = now_argentina().date()
+    today = as_of_date if as_of_date is not None else today_real
+    settlement_offset = 0 if str(settlement_type).lower() == "t0" else 1
+    settlement_date = market_calendar.add_business_days(today, settlement_offset)
+
+    saved = storage.get_bond_hd(ticker.upper())
+    if saved is None:
+        return {
+            "ticker": ticker.upper(),
+            "price": price,
+            "settlement_date": settlement_date.isoformat(),
+            "available": False,
+            "note": "Sin cashflow guardado para este ticker. Calcular primero con la calculadora HD y guardarlo.",
+        }
+
+    payload = saved.payload or {}
+    cashflows = payload.get("cashflows") or []
+    if not cashflows:
+        return {
+            "ticker": ticker.upper(),
+            "price": price,
+            "settlement_date": settlement_date.isoformat(),
+            "available": False,
+            "note": "El bono guardado no tiene cashflow.",
+        }
+
+    # Filtrar flujos futuros respecto a settlement_date
+    future = []
+    for cf in cashflows:
+        try:
+            pay_iso = cf.get("effective_payment_date") or cf.get("payment_date")
+            if not pay_iso:
+                continue
+            d = date.fromisoformat(str(pay_iso))
+            total_per_100 = float(cf.get("total_per_100") or 0)
+            if d <= settlement_date or total_per_100 <= 0:
+                continue
+            future.append((d, total_per_100))
+        except (ValueError, TypeError):
+            continue
+    if not future:
+        return {
+            "ticker": ticker.upper(),
+            "price": price,
+            "settlement_date": settlement_date.isoformat(),
+            "available": False,
+            "note": "Sin flujos futuros respecto a la liquidacion.",
+        }
+
+    # Tiempos en años (base 365 act)
+    times_years = [(d - settlement_date).days / 365.0 for d, _ in future]
+    cashflow_amounts = [cf for _, cf in future]
+
+    # Newton-Raphson para TIR efectiva anual
+    def npv(r: float) -> float:
+        return sum(cf / ((1 + r) ** t) for cf, t in zip(cashflow_amounts, times_years)) - price
+
+    def npv_derivative(r: float) -> float:
+        return sum(-t * cf / ((1 + r) ** (t + 1)) for cf, t in zip(cashflow_amounts, times_years))
+
+    r = 0.30  # seed razonable para bonos arg
+    for _ in range(100):
+        f = npv(r)
+        if abs(f) < 1e-10:
+            break
+        df = npv_derivative(r)
+        if df == 0:
+            break
+        r_new = r - f / df
+        if r_new <= -0.99:
+            r_new = -0.99
+        if abs(r_new - r) < 1e-12:
+            r = r_new
+            break
+        r = r_new
+    tir_annual = r
+
+    # TEM y TNA
+    tem = (1 + tir_annual) ** (1.0 / 12.0) - 1
+    tna_365 = tir_annual  # simplificacion: TIR efectiva anual ≈ TNA anual base 365
+
+    # Duration (Macaulay)
+    pv_total = sum(cf / ((1 + tir_annual) ** t) for cf, t in zip(cashflow_amounts, times_years))
+    duration = sum(t * cf / ((1 + tir_annual) ** t) for cf, t in zip(cashflow_amounts, times_years)) / pv_total
+    modified_duration = duration / (1 + tir_annual)
+    convexity = sum(
+        t * (t + 1) * cf / ((1 + tir_annual) ** (t + 2))
+        for cf, t in zip(cashflow_amounts, times_years)
+    ) / pv_total
+
+    return {
+        "ticker": ticker.upper(),
+        "price": price,
+        "settlement_date": settlement_date.isoformat(),
+        "settlement_type": str(settlement_type).lower(),
+        "today": today.isoformat(),
+        "as_of_override": as_of_date.isoformat() if as_of_date is not None else None,
+        "available": True,
+        "future_cashflow_count": len(future),
+        "tir_annual_percent": tir_annual * 100,
+        "tna_365_percent": tna_365 * 100,
+        "tem_percent": tem * 100,
+        "duration_years": duration,
+        "modified_duration": modified_duration,
+        "convexity": convexity,
+        "source": "Cashflow guardado del bono HD",
+    }
+
+
 @app.get("/api/calculators/bond-tamar/calculate")
 async def calculator_bond_tamar_calculate(
     issue_date: date,
@@ -695,6 +828,7 @@ async def calculator_bond_tamar_calculate(
     tem_extra_percent: float = 0.0,
     market_price: float | None = None,
     settlement_type: str = "t1",
+    as_of_date: date | None = None,
 ) -> dict:
     """Calcula promedio TAMAR sobre la ventana [emision-10BD, vencimiento-10BD],
     TEM TAMAR via formula y VPV proyectado al vencimiento.
@@ -727,7 +861,7 @@ async def calculator_bond_tamar_calculate(
     sorted_dates = sorted(by_date.keys())
     if not sorted_dates:
         raise HTTPException(status_code=503, detail="No hay datos TAMAR validos del BCRA.")
-    last_published_date = sorted_dates[-1]
+    # last_published_date se redefine despues respetando as_of_date
 
     # 1) TAMAR de emision (igual que tamar-reference)
     issue_minus_10bd = market_calendar.add_business_days(issue_date, -10)
@@ -741,8 +875,14 @@ async def calculator_bond_tamar_calculate(
     )
 
     # 2) Proyeccion TAMAR (promedio de los ultimos 5 publicados con lag de 2 BD)
-    today = now_argentina().date()
+    # as_of_date permite "viajar" en el tiempo: simular el calculo como si hoy
+    # fuera otra fecha. Por default = hoy real.
+    today_real = now_argentina().date()
+    today = as_of_date if as_of_date is not None else today_real
     publication_cutoff = market_calendar.add_business_days(today, -2)
+    # last_published_date desde la perspectiva de as_of_date (ignora datos
+    # publicados despues de publication_cutoff aunque existan en la serie).
+    last_published_date = publication_cutoff
     available = [d for d in sorted_dates if d <= publication_cutoff]
     last5_dates = available[-5:]
     samples = [{"date": d.isoformat(), "value": by_date[d]} for d in last5_dates]
@@ -848,6 +988,8 @@ async def calculator_bond_tamar_calculate(
         "tamar_maturity_projection": {
             "publication_cutoff": publication_cutoff.isoformat(),
             "today": today.isoformat(),
+            "today_real": today_real.isoformat(),
+            "as_of_override": as_of_date.isoformat() if as_of_date is not None else None,
             "average": projection,
             "samples": samples,
             "sample_count": len(samples),

@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd38 cargado - TAMAR calc: VPV usa dias 30/360 (DAYS360)");
+console.log("[Monitor] app.js v=hd39 cargado - TAMAR as_of_date + modal de metricas por ticker");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -68,6 +68,7 @@ const tamarSettlement = document.querySelector("#tamarSettlement");
 const tamarSettlementDate = document.querySelector("#tamarSettlementDate");
 const tamarDaysToMaturity = document.querySelector("#tamarDaysToMaturity");
 const tamarFixedTna = document.querySelector("#tamarFixedTna");
+const tamarAsOfDate = document.querySelector("#tamarAsOfDate");
 const tamarReferenceSection = document.querySelector("#tamarReferenceSection");
 const tamarEmissionValue = document.querySelector("#tamarEmissionValue");
 const tamarEmissionRefDate = document.querySelector("#tamarEmissionRefDate");
@@ -421,7 +422,7 @@ function renderQuotes() {
 
   instrumentCount.textContent = latestQuotes.length;
   patchMarketBody(rows, [
-    { html: (q) => q.symbol, className: "ticker" },
+    { html: (q) => q.symbol, className: "ticker ticker-clickable-cell" },
     { html: (q) => q.family },
     { html: (q) => `<span class="currency-pill">${q.currency}</span>` },
     { html: (q) => formatNumber(q.bid, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), className: "text-end" },
@@ -2657,6 +2658,10 @@ async function calculateTamar() {
     if (Number.isFinite(marketPriceVal) && marketPriceVal > 0) {
       params.set("market_price", String(marketPriceVal));
     }
+    // Fecha "as of": si el usuario la cargo, la mando. Si no, backend usa hoy.
+    if (tamarAsOfDate?.value) {
+      params.set("as_of_date", tamarAsOfDate.value);
+    }
     const response = await fetch(`/api/calculators/bond-tamar/calculate?${params.toString()}`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
@@ -2740,6 +2745,120 @@ async function calculateTamar() {
 
 tamarCalculate?.addEventListener("click", () => {
   calculateTamar().catch((err) => console.error(err));
+});
+
+// ====== Modal de metricas por ticker (Mercado) ======
+const bondMetricsModal = document.querySelector("#bondMetricsModal");
+const bondMetricsTicker = document.querySelector("#bondMetricsTicker");
+const bondMetricsPrice = document.querySelector("#bondMetricsPrice");
+const bondMetricsSettlement = document.querySelector("#bondMetricsSettlement");
+const bondMetricsAsOfDate = document.querySelector("#bondMetricsAsOfDate");
+const bondMetricsRecalc = document.querySelector("#bondMetricsRecalc");
+const bondMetricsStatus = document.querySelector("#bondMetricsStatus");
+const bondMetricsTir = document.querySelector("#bondMetricsTir");
+const bondMetricsTna = document.querySelector("#bondMetricsTna");
+const bondMetricsTem = document.querySelector("#bondMetricsTem");
+const bondMetricsDuration = document.querySelector("#bondMetricsDuration");
+const bondMetricsMd = document.querySelector("#bondMetricsMd");
+const bondMetricsConvexity = document.querySelector("#bondMetricsConvexity");
+const bondMetricsNote = document.querySelector("#bondMetricsNote");
+
+let currentMetricsTicker = null;
+
+function openBondMetricsModal(ticker, defaultPrice) {
+  if (!bondMetricsModal) return;
+  currentMetricsTicker = ticker;
+  if (bondMetricsTicker) bondMetricsTicker.textContent = ticker;
+  if (bondMetricsPrice) bondMetricsPrice.value = defaultPrice != null ? String(defaultPrice) : "";
+  // limpiar outputs
+  for (const el of [bondMetricsTir, bondMetricsTna, bondMetricsTem, bondMetricsDuration, bondMetricsMd, bondMetricsConvexity]) {
+    if (el) el.value = "";
+  }
+  if (bondMetricsNote) bondMetricsNote.textContent = "Cargar precio y apretar Recalcular.";
+  if (bondMetricsStatus) {
+    bondMetricsStatus.dataset.kind = "draft";
+    bondMetricsStatus.textContent = "-";
+  }
+  bondMetricsModal.style.display = "block";
+  bondMetricsModal.setAttribute("aria-hidden", "false");
+  if (defaultPrice != null) {
+    fetchBondMetrics().catch((err) => console.error(err));
+  }
+}
+
+function closeBondMetricsModal() {
+  if (!bondMetricsModal) return;
+  bondMetricsModal.style.display = "none";
+  bondMetricsModal.setAttribute("aria-hidden", "true");
+  currentMetricsTicker = null;
+}
+
+async function fetchBondMetrics() {
+  if (!currentMetricsTicker) return;
+  const price = parseFloat(bondMetricsPrice?.value || "");
+  if (!Number.isFinite(price) || price <= 0) {
+    bondMetricsStatus.dataset.kind = "error";
+    bondMetricsStatus.textContent = "Cargar un precio valido";
+    return;
+  }
+  bondMetricsStatus.dataset.kind = "draft";
+  bondMetricsStatus.textContent = "Calculando...";
+  const params = new URLSearchParams({
+    price: String(price),
+    settlement_type: bondMetricsSettlement?.value || "t1",
+  });
+  if (bondMetricsAsOfDate?.value) params.set("as_of_date", bondMetricsAsOfDate.value);
+  try {
+    const response = await fetch(`/api/bonds/${encodeURIComponent(currentMetricsTicker)}/metrics?${params.toString()}`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo calcular");
+    }
+    const payload = await response.json();
+    if (!payload.available) {
+      bondMetricsStatus.dataset.kind = "error";
+      bondMetricsStatus.textContent = "Sin datos";
+      bondMetricsNote.textContent = payload.note || "No disponible";
+      return;
+    }
+    const fmt = (v, dec = 4) => v == null ? "-" : new Intl.NumberFormat("es-AR", {
+      minimumFractionDigits: dec, maximumFractionDigits: dec,
+    }).format(v);
+    if (bondMetricsTir) bondMetricsTir.value = fmt(payload.tir_annual_percent) + " %";
+    if (bondMetricsTna) bondMetricsTna.value = fmt(payload.tna_365_percent) + " %";
+    if (bondMetricsTem) bondMetricsTem.value = fmt(payload.tem_percent) + " %";
+    if (bondMetricsDuration) bondMetricsDuration.value = fmt(payload.duration_years);
+    if (bondMetricsMd) bondMetricsMd.value = fmt(payload.modified_duration);
+    if (bondMetricsConvexity) bondMetricsConvexity.value = fmt(payload.convexity);
+    bondMetricsNote.textContent = `Liq: ${formatDateDisplay(payload.settlement_date)} (${(payload.settlement_type || "").toUpperCase()}). ${payload.future_cashflow_count} flujos futuros considerados. Fuente: ${payload.source}.`;
+    bondMetricsStatus.dataset.kind = "ok";
+    bondMetricsStatus.textContent = "OK";
+  } catch (error) {
+    bondMetricsStatus.dataset.kind = "error";
+    bondMetricsStatus.textContent = error.message || "Error";
+    bondMetricsNote.textContent = "";
+  }
+}
+
+bondMetricsRecalc?.addEventListener("click", () => fetchBondMetrics().catch((e) => console.error(e)));
+bondMetricsModal?.addEventListener("click", (event) => {
+  if (event.target.matches("[data-modal-close]")) closeBondMetricsModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && bondMetricsModal?.style.display === "block") closeBondMetricsModal();
+});
+
+// Click en cualquier ticker de la tabla principal de Mercado abre el modal.
+quotesBody?.addEventListener("click", (event) => {
+  const td = event.target.closest("td.ticker");
+  if (!td) return;
+  const tr = td.closest("tr[data-key]");
+  if (!tr) return;
+  const ticker = tr.dataset.key;
+  // Buscar el ultimo precio del ticker en latestQuotes
+  const quote = latestQuotes.find((q) => q.symbol === ticker);
+  const defaultPrice = quote?.last ?? quote?.bid ?? null;
+  openBondMetricsModal(ticker, defaultPrice);
 });
 
 if (!hdGenerateSchedule || !hdCalculate) {
