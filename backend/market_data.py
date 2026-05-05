@@ -1207,6 +1207,109 @@ class MarketDataService:
             "min_price_filter": min_price,
         }
 
+    def deep_probe_dlr_spot(self) -> dict[str, Any]:
+        """Diagnostico profundo de DLR/SPOT: prueba get_market_data con
+        distintos depths, trade_history si existe, y HTTP directo al REST
+        endpoint bypaseando el SDK."""
+        if self._pyrofex is None:
+            return {"error": "pyRofex no inicializado"}
+        pyRofex = self._pyrofex
+        environment = self._environment(pyRofex)
+        result: dict[str, Any] = {}
+
+        # 1) Info de la sesion
+        try:
+            from pyRofex.components import globals as pyglobals
+            result["environment_info"] = {
+                "user": getattr(pyglobals.environment_config.get(environment, {}), "get", lambda x, d=None: d)("user", "?") if hasattr(pyglobals, "environment_config") else "?",
+                "rest_url": str(getattr(pyglobals, "environment_config", {}).get(environment, {}).get("url", "?")) if hasattr(pyglobals, "environment_config") else "?",
+                "ws_url": str(getattr(pyglobals, "environment_config", {}).get(environment, {}).get("ws", "?")) if hasattr(pyglobals, "environment_config") else "?",
+            }
+        except Exception as exc:
+            result["environment_info"] = {"error": str(exc)}
+
+        # 2) get_market_data con distintos depths
+        result["get_market_data"] = []
+        market_rofx = getattr(pyRofex.Market, "ROFEX", None) or getattr(pyRofex.Market, "ROFX", None)
+        for depth in (1, 5, 10):
+            for entries_subset_name, entries_subset in [
+                ("ALL", self._market_data_entries(pyRofex)),
+                ("LAST_only", [pyRofex.MarketDataEntry.LAST]),
+                ("BIDS_only", [pyRofex.MarketDataEntry.BIDS]),
+            ]:
+                try:
+                    response = pyRofex.get_market_data(
+                        ticker="DLR/SPOT", entries=entries_subset, depth=depth,
+                        market=market_rofx, environment=environment,
+                    )
+                    md = (response or {}).get("marketData") or {}
+                    result["get_market_data"].append({
+                        "depth": depth, "entries": entries_subset_name,
+                        "status": (response or {}).get("status"),
+                        "message": (response or {}).get("message"),
+                        "marketData_keys": list(md.keys()) if isinstance(md, dict) else None,
+                        "LA": md.get("LA") if isinstance(md, dict) else None,
+                        "BI": md.get("BI") if isinstance(md, dict) else None,
+                        "OF": md.get("OF") if isinstance(md, dict) else None,
+                        "CL": md.get("CL") if isinstance(md, dict) else None,
+                    })
+                except Exception as exc:
+                    result["get_market_data"].append({
+                        "depth": depth, "entries": entries_subset_name,
+                        "error": str(exc),
+                    })
+
+        # 3) get_trade_history si existe el metodo
+        result["trade_history"] = None
+        if hasattr(pyRofex, "get_trade_history"):
+            try:
+                from datetime import datetime, timedelta
+                hoy = datetime.now().date()
+                ayer = hoy - timedelta(days=2)
+                response = pyRofex.get_trade_history(
+                    ticker="DLR/SPOT",
+                    start_date=ayer.isoformat(),
+                    end_date=hoy.isoformat(),
+                    market=market_rofx, environment=environment,
+                )
+                result["trade_history"] = {
+                    "status": (response or {}).get("status"),
+                    "trades_count": len((response or {}).get("trades") or []),
+                    "first_3_trades": ((response or {}).get("trades") or [])[:3],
+                }
+            except Exception as exc:
+                result["trade_history"] = {"error": str(exc)}
+        else:
+            result["trade_history"] = "metodo get_trade_history no disponible en esta version de pyRofex"
+
+        # 4) HTTP directo al REST endpoint (bypasea el SDK)
+        result["http_direct"] = None
+        try:
+            import requests
+            from pyRofex.components import globals as pyglobals
+            env_cfg = getattr(pyglobals, "environment_config", {}).get(environment, {})
+            base_url = env_cfg.get("url")
+            token = env_cfg.get("token") or env_cfg.get("auth_token")
+            headers = {"X-Auth-Token": token} if token else {}
+            url = f"{base_url}rest/marketdata/get?marketId=ROFX&symbol=DLR/SPOT&entries=BI,OF,LA,CL&depth=1"
+            r = requests.get(url, headers=headers, timeout=10)
+            result["http_direct"] = {
+                "url": url,
+                "status_code": r.status_code,
+                "headers_sent": list(headers.keys()),
+                "response_text": r.text[:500],
+            }
+        except Exception as exc:
+            result["http_direct"] = {"error": str(exc)}
+
+        # 5) Listar metodos disponibles en pyRofex (para futura referencia)
+        result["pyrofex_methods"] = [
+            m for m in dir(pyRofex)
+            if not m.startswith("_") and callable(getattr(pyRofex, m, None))
+        ][:80]
+
+        return result
+
     def probe_spot_combinations(self) -> dict[str, Any]:
         """Prueba MUCHAS combinaciones de simbolo + market para encontrar
         donde vive el spot real. Reporta el response COMPLETO de cada

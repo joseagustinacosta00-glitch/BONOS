@@ -551,6 +551,20 @@ async def diag_spot_html() -> HTMLResponse:
     return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
 
 
+@app.api_route("/api/fx/spot/deep-probe", methods=["GET", "POST"])
+async def fx_spot_deep_probe() -> dict:
+    """Diagnostico profundo de DLR/SPOT: prueba get_market_data con
+    distintos depths/entries, trade_history si existe, y HTTP directo al
+    REST de pyRofex. Tambien lista los metodos disponibles del SDK."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        result = await asyncio.to_thread(market.deep_probe_dlr_spot)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result
+
+
 @app.api_route("/api/fx/spot/probe", methods=["GET", "POST"])
 async def fx_spot_probe() -> dict:
     """Prueba MUCHAS combinaciones de simbolo + market y reporta el
