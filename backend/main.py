@@ -551,11 +551,11 @@ async def diag_spot_html() -> HTMLResponse:
     return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
 
 
-@app.post("/api/fx/spot/fetch-rest")
+@app.api_route("/api/fx/spot/fetch-rest", methods=["GET", "POST"])
 async def fx_spot_fetch_rest() -> dict:
     """Llama al REST de pyRofex para forzar fetch del ultimo precio del
-    spot (en lugar de esperar al WS). Util para diagnosticar y como
-    fallback si el WS no manda ticks."""
+    spot (en lugar de esperar al WS). Acepta GET para que se pueda
+    triggerar desde la URL del browser."""
     if market.settings.market_source != "pyrofex":
         raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
     try:
@@ -603,7 +603,7 @@ async def fx_spot_diagnose() -> dict:
     }
 
 
-@app.post("/api/futures/rediscover")
+@app.api_route("/api/futures/rediscover", methods=["GET", "POST"])
 async def futures_rediscover() -> dict:
     """Vuelve a llamar al catalogo de pyRofex y re-suscribe los futuros.
     Util cuando se habilitan permisos en la cuenta y no queremos esperar
@@ -622,7 +622,7 @@ async def futures_rediscover() -> dict:
     }
 
 
-@app.post("/api/system/reconnect-ws")
+@app.api_route("/api/system/reconnect-ws", methods=["GET", "POST"])
 async def system_reconnect_ws() -> dict:
     """Fuerza reconexion del WebSocket pyRofex sin necesidad de redeploy.
     Util cuando los precios estan stale (ej: server arranco en horario de
