@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd47 cargado - Futuros y DLK: split en 2 tablas (DLK izq, Futuros der) + ordenado por vencimiento");
+console.log("[Monitor] app.js v=hd48 cargado - Calculadoras: 'Hard Dollar' + nueva opcion 'Dollar-Linked'");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -229,9 +229,10 @@ let lastQuotesHtml = "";        // body html anterior para no reescribir si no c
 
 const BOND_MODEL_LABELS = {
   lecap: "Lecap",
-  hard_dollar: "Bono HD",
+  hard_dollar: "Hard Dollar",
   cer: "CER",
   tamar: "TAMAR",
+  dlk: "Dollar-Linked",
   pesos_fixed_rate: "Tasa fija",
   dual: "DUAL",
 };
