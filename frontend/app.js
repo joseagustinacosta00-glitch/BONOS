@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd36 cargado - TAMAR calc: promedio ventana + TEM + VPV");
+console.log("[Monitor] app.js v=hd37 cargado - TAMAR calc: tasa fija TNA contra precio de mercado");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -63,6 +63,11 @@ const tamarCalcWithSpread = document.querySelector("#tamarCalcWithSpread");
 const tamarCalcTem = document.querySelector("#tamarCalcTem");
 const tamarCalcVpv = document.querySelector("#tamarCalcVpv");
 const tamarCalcDays = document.querySelector("#tamarCalcDays");
+const tamarMarketPrice = document.querySelector("#tamarMarketPrice");
+const tamarSettlement = document.querySelector("#tamarSettlement");
+const tamarSettlementDate = document.querySelector("#tamarSettlementDate");
+const tamarDaysToMaturity = document.querySelector("#tamarDaysToMaturity");
+const tamarFixedTna = document.querySelector("#tamarFixedTna");
 const tamarReferenceSection = document.querySelector("#tamarReferenceSection");
 const tamarEmissionValue = document.querySelector("#tamarEmissionValue");
 const tamarEmissionRefDate = document.querySelector("#tamarEmissionRefDate");
@@ -2646,7 +2651,12 @@ async function calculateTamar() {
       maturity_date: maturityIso,
       face_value: String(faceValue),
       tem_extra_percent: String(temExtra),
+      settlement_type: tamarSettlement?.value || "t1",
     });
+    const marketPriceVal = parseFloat(tamarMarketPrice?.value || "");
+    if (Number.isFinite(marketPriceVal) && marketPriceVal > 0) {
+      params.set("market_price", String(marketPriceVal));
+    }
     const response = await fetch(`/api/calculators/bond-tamar/calculate?${params.toString()}`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
@@ -2696,6 +2706,26 @@ async function calculateTamar() {
       const w = payload.fixed_rate_warning;
       tamarFixedRateBanner.innerHTML = `<strong>Tasa fija desde:</strong> ${formatDateDisplay(w.from_date)} hasta ${formatDateDisplay(w.to_date)}.<br>${w.message}`;
       tamarFixedRateBanner.style.display = "block";
+    }
+
+    // Bloque de tasa fija TNA
+    const fr = payload.fixed_rate_calc || {};
+    if (tamarSettlementDate) {
+      tamarSettlementDate.value = fr.settlement_date
+        ? `${formatDateDisplay(fr.settlement_date)} (${(fr.settlement_type || "").toUpperCase()})`
+        : "-";
+    }
+    if (tamarDaysToMaturity) {
+      tamarDaysToMaturity.value = fr.days_to_maturity_from_settlement != null
+        ? `${fr.days_to_maturity_from_settlement} dias`
+        : "-";
+    }
+    if (tamarFixedTna) {
+      if (fr.fixed_rate_tna_percent != null) {
+        tamarFixedTna.value = formatTamarPercent(fr.fixed_rate_tna_percent, 4);
+      } else {
+        tamarFixedTna.value = fr.note || "Cargar precio de mercado";
+      }
     }
 
     tamarCalcSection?.classList.remove("d-none");

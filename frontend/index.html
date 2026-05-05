@@ -674,6 +674,17 @@
                   <span>TEM TAMAR adicional % (spread)</span>
                   <input id="tamarTemExtra" class="form-control form-control-sm" type="number" step="0.0001" value="0" placeholder="0 = TAMAR pura">
                 </label>
+                <label>
+                  <span>Precio de mercado (opcional, para TNA)</span>
+                  <input id="tamarMarketPrice" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" placeholder="Ej: 95.50">
+                </label>
+                <label>
+                  <span>Liquidacion</span>
+                  <select id="tamarSettlement" class="form-select form-select-sm">
+                    <option value="t1" selected>T+1</option>
+                    <option value="t0">T+0</option>
+                  </select>
+                </label>
                 <button id="tamarFetchReference" class="btn btn-sm btn-outline-dark" type="button">Cargar TAMAR de referencia</button>
                 <button id="tamarCalculate" class="btn btn-sm btn-dark" type="button">Calcular TAMAR + TEM + VPV</button>
                 <span id="tamarStatus" class="calc-status">Borrador</span>
@@ -745,6 +756,28 @@
                   para los dias futuros.<br>
                   TAMAR_TEM = [(1 + TAMAR/(365/32))^(365/32)]^(1/12) - 1<br>
                   VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12)
+                </p>
+
+                <h3 style="margin-top:1rem;">Tasa fija contra precio de mercado</h3>
+                <div class="hd-amort-controls">
+                  <label>
+                    <span>Fecha de liquidacion</span>
+                    <input id="tamarSettlementDate" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Dias liquidacion -> vencimiento</span>
+                    <input id="tamarDaysToMaturity" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Tasa fija TNA (% anual base 365)</span>
+                    <input id="tamarFixedTna" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                </div>
+                <p class="hd-help">
+                  Tasa fija TNA = ((VPV / precio_mercado) - 1) / dias_liq_a_vto * 365.
+                  Es la tasa nominal anual implicita: comprando hoy a precio_mercado y cobrando VPV a vencimiento,
+                  esa es la tasa anualizada de retorno (interes simple base 365). Una vez que el bono cruza
+                  vto-10BD, el VPV queda fijo y por ende la tasa tambien (no varia mas con la TAMAR).
                 </p>
               </section>
             </div>
@@ -1071,6 +1104,6 @@
       </section>
     </main>
 
-    <script src="/app-bundle.js?v=hd36"></script>
+    <script src="/app-bundle.js?v=hd37"></script>
   </body>
 </html>

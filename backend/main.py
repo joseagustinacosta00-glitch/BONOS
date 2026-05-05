@@ -692,6 +692,8 @@ async def calculator_bond_tamar_calculate(
     maturity_date: date,
     face_value: float = 100.0,
     tem_extra_percent: float = 0.0,
+    market_price: float | None = None,
+    settlement_type: str = "t1",
 ) -> dict:
     """Calcula promedio TAMAR sobre la ventana [emision-10BD, vencimiento-10BD],
     TEM TAMAR via formula y VPV proyectado al vencimiento.
@@ -803,6 +805,26 @@ async def calculator_bond_tamar_calculate(
     days_total = (maturity_date - issue_date).days
     vpv = face_value * ((1 + tamar_tem_decimal) ** ((days_total / 360.0) * 12.0))
 
+    # 6) Tasa fija TNA contra precio de mercado.
+    # settlement_type = "t0" (mismo dia habil) o "t1" (proximo dia habil)
+    settlement_offset = 0 if str(settlement_type).lower() == "t0" else 1
+    settlement_date = market_calendar.add_business_days(today, settlement_offset)
+    days_to_maturity_from_settlement = (maturity_date - settlement_date).days
+
+    fixed_rate_tna_percent = None
+    fixed_rate_calc_note = None
+    if market_price is not None and market_price > 0:
+        if days_to_maturity_from_settlement <= 0:
+            fixed_rate_calc_note = "Vencimiento <= liquidacion: no aplica TNA."
+        else:
+            # tasa_fija = ((VPV / precio_mercado) - 1) / dias * 365
+            fixed_rate_decimal = ((vpv / market_price) - 1) / days_to_maturity_from_settlement * 365.0
+            fixed_rate_tna_percent = fixed_rate_decimal * 100.0
+    elif market_price is None:
+        fixed_rate_calc_note = "Cargar precio de mercado para calcular la tasa fija TNA."
+    else:
+        fixed_rate_calc_note = "Precio de mercado debe ser positivo."
+
     return {
         "issue_date": issue_date.isoformat(),
         "maturity_date": maturity_date.isoformat(),
@@ -839,6 +861,16 @@ async def calculator_bond_tamar_calculate(
         "tamar_tem_percent": tamar_tem_percent,
         "vpv": vpv,
         "vpv_days": days_total,
+        "fixed_rate_calc": {
+            "settlement_type": str(settlement_type).lower(),
+            "settlement_date": settlement_date.isoformat(),
+            "days_to_maturity_from_settlement": days_to_maturity_from_settlement,
+            "market_price": market_price,
+            "vpv_at_maturity": vpv,
+            "fixed_rate_tna_percent": fixed_rate_tna_percent,
+            "formula": "((VPV / precio_mercado) - 1) / dias_liq_a_vto * 365",
+            "note": fixed_rate_calc_note,
+        },
         "source": "BCRA Estadisticas Monetarias v4 - serie TAMAR bancos privados (id=44)",
     }
 
