@@ -12,7 +12,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.ai_assistant import answer_ai_question
@@ -444,6 +444,56 @@ async def fx_spot() -> dict:
         "count": len(items),
         "updated_at": now_argentina_iso(),
     }
+
+
+@app.get("/diag/spot", response_class=HTMLResponse)
+async def diag_spot_html() -> HTMLResponse:
+    """Pagina HTML con el diagnostico del spot (sin necesidad de DevTools)."""
+    if market.settings.market_source != "pyrofex":
+        return HTMLResponse("<h1>Market source no es pyRofex</h1>", status_code=400)
+    if market._pyrofex is None:
+        return HTMLResponse("<h1>pyRofex no inicializado</h1>", status_code=503)
+    pyRofex = market._pyrofex
+    environment = market._environment(pyRofex)
+    instruments = []
+    try:
+        response = pyRofex.get_detailed_instruments(environment=environment)
+        instruments = market._instrument_rows(response)
+    except Exception as exc:
+        return HTMLResponse(f"<h1>get_detailed_instruments fallo: {exc}</h1>", status_code=502)
+    candidates = []
+    all_dlr_or_usd = []
+    for inst in instruments:
+        sym = market._instrument_symbol(inst)
+        if not sym:
+            continue
+        sym_up = sym.upper()
+        if any(k in sym_up for k in ("DLR", "DOLAR", "USD")):
+            all_dlr_or_usd.append(sym)
+            if any(k in sym_up for k in ("SPOT", "/CI", "/T0", "24HS", "USA")):
+                candidates.append(sym)
+    sub = list(market._spot_provider_to_symbol.keys())
+    hardcoded = list(market.SPOT_SYMBOL_CANDIDATES)
+    html = f"""<!doctype html><html><head><meta charset=utf-8><title>Diag SPOT</title>
+    <style>body{{font-family:Arial;max-width:900px;margin:24px auto;padding:0 16px;color:#15212f}}
+    h1{{color:#0d6efd}}h2{{color:#475569;margin-top:24px;font-size:1rem;text-transform:uppercase;letter-spacing:.04em}}
+    pre{{background:#f1f5f9;padding:12px 16px;border-radius:6px;overflow-x:auto;font-size:.9rem;white-space:pre-wrap;word-break:break-all}}
+    .ok{{color:#16a34a;font-weight:700}}.err{{color:#dc2626;font-weight:700}}
+    .copy-hint{{color:#64748b;font-size:.85rem;margin-bottom:6px}}</style></head><body>
+    <h1>Diagnostico SPOT</h1>
+    <h2>Estado</h2>
+    <p>Total instrumentos del catalogo: <strong>{len(instruments)}</strong></p>
+    <p>Simbolos suscriptos como spot ahora mismo: <span class="{'ok' if sub else 'err'}">{', '.join(sub) if sub else '(NINGUNO)'}</span></p>
+    <h2>Candidatos detectados (lo que mi heuristica veria como spot)</h2>
+    <p class="copy-hint">Si esta vacio, ningun simbolo del catalogo contiene SPOT/CI/T0/24HS/USA junto a DLR/DOLAR/USD.</p>
+    <pre>{chr(10).join(candidates) if candidates else '(VACIO)'}</pre>
+    <h2>Todos los simbolos con DLR/DOLAR/USD ({len(all_dlr_or_usd)} en total)</h2>
+    <p class="copy-hint">Mandame el que corresponde al SPOT y lo agrego a la lista de candidatos.</p>
+    <pre>{chr(10).join(all_dlr_or_usd[:200])}</pre>
+    <h2>Candidatos hardcoded actualmente</h2>
+    <pre>{chr(10).join(hardcoded)}</pre>
+    </body></html>"""
+    return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/api/fx/spot/diagnose")
