@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import math
 import re
 import unicodedata
 from datetime import date, datetime, timedelta
@@ -39,7 +40,7 @@ from backend.bond_calculators import (
     build_lecap_market_row,
     generate_bond_hd_default_dates,
 )
-from backend.bonds import BOND_TICKERS
+from backend.bonds import BOND_TICKERS, TICKER_BY_SYMBOL
 from backend.config import get_settings
 from backend.hard_dollar import calculate_hard_dollar_ytm, hard_dollar_bond
 from backend.market_calendar import market_calendar, parse_date
@@ -687,27 +688,24 @@ async def calculator_delete_lecap(item_id: int) -> dict:
     return {"deleted": True}
 
 
+CABLE_FAMILIES = {"GD30", "GD35", "GD38", "GD41", "GD46", "GD29"}
+
+
 @app.get("/api/bonds/{ticker}/metrics")
 async def bond_metrics(
     ticker: str,
     price: float,
     settlement_type: str = "t1",
     as_of_date: date | None = None,
+    auto_convert_fx: bool = True,
 ) -> dict:
     """Calcula TIR, TNA, TEM, Duration, MD y Convexity para un bono dado su
-    precio. Toma el cashflow guardado del bono HD (calculator persistido) si
-    existe. Para otros tipos por ahora devuelve un mensaje informativo.
+    precio. Toma el cashflow guardado del bono HD (con fallback al ticker de
+    familia: AO27D -> AO27).
 
-    Formulas:
-      - Solve r en: price = sum(CF_i / (1 + r_period)^period_i)
-        donde period_i = year_fraction acumulada hasta el flujo i (en años).
-      - TIR_efectiva_anual = (1 + r_period)^(1/year_fraction_unit) - 1
-      - TNA_365 = TIR * 365 / 360 (cuando convencion es act/360) o
-        simplificacion: TIR efectiva anual.
-      - TEM = (1 + TIR_anual)^(1/12) - 1
-      - Duration (Macaulay) = sum(t_i * pv_i) / price
-      - Modified Duration = Duration / (1 + r_anual)
-      - Convexity = sum(t_i*(t_i+1) * pv_i / (1+r)^2) / price
+    Si el bono cotiza en ARS pero paga en USD/Cable, divide automaticamente
+    el precio por el FX implicito (MEP para ley local, CCL para GD/NY) antes
+    de calcular las metricas. Pasar auto_convert_fx=false para desactivarlo.
     """
     if price <= 0:
         raise HTTPException(status_code=422, detail="Precio debe ser positivo.")
@@ -716,15 +714,69 @@ async def bond_metrics(
     settlement_offset = 0 if str(settlement_type).lower() == "t0" else 1
     settlement_date = market_calendar.add_business_days(today, settlement_offset)
 
-    saved = storage.get_bond_hd(ticker.upper())
+    ticker_up = ticker.upper()
+    bond_info = TICKER_BY_SYMBOL.get(ticker_up)
+    family = bond_info.family if bond_info else ticker_up
+    currency = bond_info.currency if bond_info else "USD"
+
+    # 1) Buscar cashflow guardado: primero el ticker exacto, sino la familia
+    saved = storage.get_bond_hd(ticker_up)
+    saved_via = "exact"
+    if saved is None and family != ticker_up:
+        saved = storage.get_bond_hd(family)
+        if saved is not None:
+            saved_via = f"family ({family})"
     if saved is None:
         return {
-            "ticker": ticker.upper(),
+            "ticker": ticker_up,
             "price": price,
             "settlement_date": settlement_date.isoformat(),
             "available": False,
-            "note": "Sin cashflow guardado para este ticker. Calcular primero con la calculadora HD y guardarlo.",
+            "note": f"Sin cashflow guardado para {ticker_up} ni para la familia {family}. Cargar y guardar primero con la calculadora HD.",
         }
+
+    # 2) Conversion FX si el ticker cotiza en ARS y paga en USD/Cable
+    fx_info = {
+        "applied": False,
+        "currency_quoted": currency,
+        "fx_label": None,
+        "fx_rate": None,
+        "ars_input_price": price,
+        "usd_converted_price": price,
+        "note": None,
+    }
+    effective_price = price
+    if auto_convert_fx and currency == "ARS":
+        snap = market.snapshot()
+        by_symbol = {q.get("symbol"): q for q in snap.get("quotes", [])}
+        ars_q = by_symbol.get(ticker_up, {}) or by_symbol.get(family, {})
+        usd_q = by_symbol.get(family + "D", {})
+        cable_q = by_symbol.get(family + "C", {})
+        is_cable = family in CABLE_FAMILIES
+        target_q = cable_q if is_cable else usd_q
+        fx_label = "CCL" if is_cable else "MEP"
+        ars_last = (ars_q or {}).get("last")
+        usd_last = (target_q or {}).get("last")
+        try:
+            ars_last_f = float(ars_last) if ars_last is not None else None
+            usd_last_f = float(usd_last) if usd_last is not None else None
+        except (TypeError, ValueError):
+            ars_last_f = usd_last_f = None
+        if ars_last_f and usd_last_f and usd_last_f > 0:
+            fx_rate = ars_last_f / usd_last_f
+            effective_price = price / fx_rate
+            fx_info.update({
+                "applied": True,
+                "fx_label": fx_label,
+                "fx_rate": fx_rate,
+                "usd_converted_price": effective_price,
+                "note": f"Precio en ARS dividido por {fx_label} implicito ({family}/{family + ('C' if is_cable else 'D')}) = {fx_rate:.4f}",
+            })
+        else:
+            fx_info["note"] = (
+                f"No hay FX implicito para {family} (last ARS={ars_last_f}, "
+                f"last {fx_label}-target={usd_last_f}). Usando precio sin convertir."
+            )
 
     payload = saved.payload or {}
     cashflows = payload.get("cashflows") or []
@@ -766,15 +818,17 @@ async def bond_metrics(
 
     # Newton-Raphson para TIR efectiva anual
     def npv(r: float) -> float:
-        return sum(cf / ((1 + r) ** t) for cf, t in zip(cashflow_amounts, times_years)) - price
+        return sum(cf / ((1 + r) ** t) for cf, t in zip(cashflow_amounts, times_years)) - effective_price
 
     def npv_derivative(r: float) -> float:
         return sum(-t * cf / ((1 + r) ** (t + 1)) for cf, t in zip(cashflow_amounts, times_years))
 
     r = 0.30  # seed razonable para bonos arg
-    for _ in range(100):
+    converged = False
+    for _ in range(200):
         f = npv(r)
         if abs(f) < 1e-10:
+            converged = True
             break
         df = npv_derivative(r)
         if df == 0:
@@ -784,15 +838,33 @@ async def bond_metrics(
             r_new = -0.99
         if abs(r_new - r) < 1e-12:
             r = r_new
+            converged = True
             break
         r = r_new
     tir_annual = r
 
-    # TEM y TNA
+    # Si no convergio o el precio efectivo no permite TIR razonable, devolver nota
+    sum_cf = sum(cashflow_amounts)
+    if not converged or not math.isfinite(tir_annual) or tir_annual <= -0.99:
+        return {
+            "ticker": ticker_up,
+            "price": price,
+            "effective_price": effective_price,
+            "settlement_date": settlement_date.isoformat(),
+            "available": False,
+            "fx_conversion": fx_info,
+            "saved_via": saved_via,
+            "future_cashflow_sum": sum_cf,
+            "note": (
+                f"No converge la TIR. Precio efectivo {effective_price:.4f}, "
+                f"suma de cashflows {sum_cf:.4f}. Verificar el precio (¿esta en USD?) "
+                f"o que el cashflow guardado corresponda al bono."
+            ),
+        }
+
     tem = (1 + tir_annual) ** (1.0 / 12.0) - 1
     tna_365 = tir_annual  # simplificacion: TIR efectiva anual ≈ TNA anual base 365
 
-    # Duration (Macaulay)
     pv_total = sum(cf / ((1 + tir_annual) ** t) for cf, t in zip(cashflow_amounts, times_years))
     duration = sum(t * cf / ((1 + tir_annual) ** t) for cf, t in zip(cashflow_amounts, times_years)) / pv_total
     modified_duration = duration / (1 + tir_annual)
@@ -802,14 +874,19 @@ async def bond_metrics(
     ) / pv_total
 
     return {
-        "ticker": ticker.upper(),
+        "ticker": ticker_up,
+        "family": family,
         "price": price,
+        "effective_price": effective_price,
+        "fx_conversion": fx_info,
+        "saved_via": saved_via,
         "settlement_date": settlement_date.isoformat(),
         "settlement_type": str(settlement_type).lower(),
         "today": today.isoformat(),
         "as_of_override": as_of_date.isoformat() if as_of_date is not None else None,
         "available": True,
         "future_cashflow_count": len(future),
+        "future_cashflow_sum": sum_cf,
         "tir_annual_percent": tir_annual * 100,
         "tna_365_percent": tna_365 * 100,
         "tem_percent": tem * 100,

@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd39 cargado - TAMAR as_of_date + modal de metricas por ticker");
+console.log("[Monitor] app.js v=hd40 cargado - Metricas: family fallback + auto-conversion ARS/MEP/CCL");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2815,22 +2815,42 @@ async function fetchBondMetrics() {
       throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo calcular");
     }
     const payload = await response.json();
-    if (!payload.available) {
-      bondMetricsStatus.dataset.kind = "error";
-      bondMetricsStatus.textContent = "Sin datos";
-      bondMetricsNote.textContent = payload.note || "No disponible";
-      return;
-    }
     const fmt = (v, dec = 4) => v == null ? "-" : new Intl.NumberFormat("es-AR", {
       minimumFractionDigits: dec, maximumFractionDigits: dec,
     }).format(v);
+    if (!payload.available) {
+      bondMetricsStatus.dataset.kind = "error";
+      bondMetricsStatus.textContent = "No converge";
+      const fx = payload.fx_conversion || {};
+      let extra = "";
+      if (fx.applied) {
+        extra = ` Precio convertido a USD via ${fx.fx_label}: ${fmt(fx.usd_converted_price)} (FX ${fmt(fx.fx_rate)}).`;
+      } else if (fx.note) {
+        extra = ` ${fx.note}`;
+      }
+      bondMetricsNote.textContent = (payload.note || "No disponible") + extra;
+      // limpiar metricas
+      for (const el of [bondMetricsTir, bondMetricsTna, bondMetricsTem, bondMetricsDuration, bondMetricsMd, bondMetricsConvexity]) {
+        if (el) el.value = "";
+      }
+      return;
+    }
     if (bondMetricsTir) bondMetricsTir.value = fmt(payload.tir_annual_percent) + " %";
     if (bondMetricsTna) bondMetricsTna.value = fmt(payload.tna_365_percent) + " %";
     if (bondMetricsTem) bondMetricsTem.value = fmt(payload.tem_percent) + " %";
     if (bondMetricsDuration) bondMetricsDuration.value = fmt(payload.duration_years);
     if (bondMetricsMd) bondMetricsMd.value = fmt(payload.modified_duration);
     if (bondMetricsConvexity) bondMetricsConvexity.value = fmt(payload.convexity);
-    bondMetricsNote.textContent = `Liq: ${formatDateDisplay(payload.settlement_date)} (${(payload.settlement_type || "").toUpperCase()}). ${payload.future_cashflow_count} flujos futuros considerados. Fuente: ${payload.source}.`;
+    const fx = payload.fx_conversion || {};
+    let fxNote = "";
+    if (fx.applied) {
+      fxNote = ` <strong>FX:</strong> precio ARS ${fmt(fx.ars_input_price, 4)} / ${fx.fx_label} ${fmt(fx.fx_rate, 4)} = USD ${fmt(fx.usd_converted_price, 4)}.`;
+    }
+    let savedNote = "";
+    if (payload.saved_via && payload.saved_via !== "exact") {
+      savedNote = ` <em>(cashflow tomado de la familia: ${payload.saved_via})</em>`;
+    }
+    bondMetricsNote.innerHTML = `Liq: ${formatDateDisplay(payload.settlement_date)} (${(payload.settlement_type || "").toUpperCase()}). ${payload.future_cashflow_count} flujos futuros. ${fxNote}${savedNote}`;
     bondMetricsStatus.dataset.kind = "ok";
     bondMetricsStatus.textContent = "OK";
   } catch (error) {
