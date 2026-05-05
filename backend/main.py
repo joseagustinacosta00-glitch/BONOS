@@ -551,6 +551,21 @@ async def diag_spot_html() -> HTMLResponse:
     return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
 
 
+@app.api_route("/api/fx/spot/probe", methods=["GET", "POST"])
+async def fx_spot_probe() -> dict:
+    """Prueba MUCHAS combinaciones de simbolo + market y reporta el
+    response COMPLETO de pyRofex para cada uno. Sin filtros: necesitamos
+    ver exactamente que dice pyRofex en cada combinacion para encontrar
+    la correcta."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        result = await asyncio.to_thread(market.probe_spot_combinations)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result
+
+
 @app.api_route("/api/fx/spot/scan", methods=["GET", "POST"])
 async def fx_spot_scan(min_price: float = 100.0) -> dict:
     """Scan amplio: itera todos los simbolos del catalogo de pyRofex que

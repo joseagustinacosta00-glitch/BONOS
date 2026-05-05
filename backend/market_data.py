@@ -1207,6 +1207,125 @@ class MarketDataService:
             "min_price_filter": min_price,
         }
 
+    def probe_spot_combinations(self) -> dict[str, Any]:
+        """Prueba MUCHAS combinaciones de simbolo + market para encontrar
+        donde vive el spot real. Reporta el response COMPLETO de cada
+        intento (no filtra), asi vemos exactamente que dice pyRofex.
+        Tambien prueba variantes del simbolo (con prefijos comunes)."""
+        if self._pyrofex is None:
+            return {"error": "pyRofex no inicializado"}
+        pyRofex = self._pyrofex
+        environment = self._environment(pyRofex)
+
+        # 1) Listar markets disponibles
+        markets_listing = []
+        market_enum = getattr(pyRofex, "Market", None)
+        if market_enum is not None:
+            for attr in dir(market_enum):
+                if attr.startswith("_"):
+                    continue
+                try:
+                    val = getattr(market_enum, attr)
+                    if callable(val):
+                        continue
+                    markets_listing.append({"name": attr, "value": str(val)})
+                except Exception:
+                    continue
+
+        # 2) Listar SecurityTypes si existe
+        security_types = []
+        st_enum = getattr(pyRofex, "SecurityType", None)
+        if st_enum is not None:
+            for attr in dir(st_enum):
+                if attr.startswith("_"):
+                    continue
+                try:
+                    val = getattr(st_enum, attr)
+                    if callable(val):
+                        continue
+                    security_types.append({"name": attr, "value": str(val)})
+                except Exception:
+                    continue
+
+        # 3) Variantes del simbolo a probar
+        variants = [
+            "DDF_BCRA_A3500",
+            "I.DDF_BCRA_A3500",
+            "DDF.BCRA.A3500",
+            "DDF/BCRA_A3500",
+            "BCRA_A3500",
+            "I.BCRA_A3500",
+            "A3500",
+            "I.A3500",
+            "DOLAR USA",
+            "Dólar USA",
+            "DDF_BCRA_USD_A3500",
+            "USD_A3500",
+            "MERV - XMEV - DDF_BCRA_A3500 - 24hs",
+            "MERV - XMEV - DDF_BCRA_A3500 - CI",
+            "ROFX - DDF_BCRA_A3500 - SPOT",
+            "DLR/A3500",
+        ]
+
+        # 4) Markets a probar (todos los disponibles)
+        markets_to_try = []
+        if market_enum is not None:
+            for attr in dir(market_enum):
+                if attr.startswith("_"):
+                    continue
+                try:
+                    val = getattr(market_enum, attr)
+                    if callable(val):
+                        continue
+                    markets_to_try.append((attr, val))
+                except Exception:
+                    continue
+
+        # 5) Probar cada variante en cada market via REST
+        entries = self._market_data_entries(pyRofex)
+        attempts = []
+        for symbol in variants:
+            for mkt_name, mkt_value in markets_to_try:
+                attempt = {"symbol": symbol, "market": mkt_name}
+                try:
+                    response = pyRofex.get_market_data(
+                        ticker=symbol, entries=entries, depth=1,
+                        market=mkt_value, environment=environment,
+                    )
+                    attempt["response_keys"] = list((response or {}).keys()) if isinstance(response, dict) else []
+                    if isinstance(response, dict):
+                        # Status / message / description suele ser error
+                        for key in ("status", "message", "description"):
+                            if key in response:
+                                attempt[key] = response[key]
+                        md = response.get("marketData") or response.get("market_data")
+                        if md and isinstance(md, dict):
+                            attempt["has_marketData"] = True
+                            attempt["marketData_keys"] = list(md.keys())
+                            la = self._entry_price(md.get("LA"))
+                            bi = self._entry_price(md.get("BI"))
+                            of = self._entry_price(md.get("OF"))
+                            cl = self._entry_price(md.get("CL"))
+                            attempt["last"] = la
+                            attempt["bid"] = bi
+                            attempt["ask"] = of
+                            attempt["previous_close"] = cl
+                except Exception as exc:
+                    attempt["error"] = str(exc)
+                attempts.append(attempt)
+
+        return {
+            "available_markets": markets_listing,
+            "security_types": security_types,
+            "variants_tried": variants,
+            "attempts": attempts,
+            "summary_with_marketData": [a for a in attempts if a.get("has_marketData")],
+            "summary_with_real_price": [
+                a for a in attempts
+                if a.get("last") and float(a["last"]) > 100
+            ],
+        }
+
     def fetch_spot_via_rest(self) -> dict[str, Any]:
         """Llama al REST de pyRofex.get_market_data para los simbolos spot
         registrados, probando varios markets. Util cuando el WS no manda
