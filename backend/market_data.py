@@ -169,6 +169,10 @@ class MarketDataService:
         # Re-suscribir TODOS los futuros + spot. En chunks de 8.
         all_symbols = list(self._futures_provider_to_symbol.keys())
         all_spot_symbols = list(self._spot_provider_to_symbol.keys())
+        # Spot puede venir de MERV o ROFX; rutear al market correcto
+        market_bonds = self._market(pyRofex)
+        spot_merv = [s for s in all_spot_symbols if s.upper().startswith("MERV")]
+        spot_rofx = [s for s in all_spot_symbols if s not in spot_merv]
         if not hasattr(self, "_subscription_failed") or self._subscription_failed is None:
             self._subscription_failed = []
         if not hasattr(self, "_subscription_succeeded") or self._subscription_succeeded is None:
@@ -176,8 +180,10 @@ class MarketDataService:
         prev_failed = list(self._subscription_failed)
         prev_succeeded = list(self._subscription_succeeded)
         self._subscribe_symbol_chunk(pyRofex, environment, entries, all_symbols, market_rofx, 8)
-        if all_spot_symbols:
-            self._subscribe_symbol_chunk(pyRofex, environment, entries, all_spot_symbols, market_rofx, 8)
+        if spot_merv:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_merv, market_bonds, 8)
+        if spot_rofx:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_rofx, market_rofx, 8)
         new_failed = [s for s in self._subscription_failed if s not in prev_failed]
         new_succeeded = [s for s in self._subscription_succeeded if s not in prev_succeeded]
 
@@ -512,18 +518,25 @@ class MarketDataService:
         spot_symbols = list(self._spot_provider_to_symbol.keys())
         market_bonds = self._market(pyRofex)
         market_rofx = getattr(pyRofex.Market, "ROFX", market_bonds)
+        # Spot puede venir de MERV (ej "MERV - XMEV - TMUSD - 24hs") o ROFX
+        # (ej "DLR/SPOT"). Lo separamos para enviar al market correcto.
+        spot_merv = [s for s in spot_symbols if s.upper().startswith("MERV")]
+        spot_rofx = [s for s in spot_symbols if s not in spot_merv]
         self._subscription_failed: list[str] = []
         self._subscription_succeeded: list[str] = []
         self._subscribe_symbol_chunk(pyRofex, environment, entries, bonds_symbols, market_bonds, chunk_size)
         if futures_symbols:
             self._subscribe_symbol_chunk(pyRofex, environment, entries, futures_symbols, market_rofx, chunk_size)
-        if spot_symbols:
-            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_symbols, market_rofx, chunk_size)
+        if spot_merv:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_merv, market_bonds, chunk_size)
+        if spot_rofx:
+            self._subscribe_symbol_chunk(pyRofex, environment, entries, spot_rofx, market_rofx, chunk_size)
         logger.info(
-            "subscripcion pyRofex: %d ok / %d fallaron (incluye %d spot)",
+            "subscripcion pyRofex: %d ok / %d fallaron (incluye %d spot MERV + %d spot ROFX)",
             len(self._subscription_succeeded),
             len(self._subscription_failed),
-            len(spot_symbols),
+            len(spot_merv),
+            len(spot_rofx),
         )
 
     def _subscribe_symbol_chunk(self, pyRofex: Any, environment: Any, entries: list[Any], symbols: list[str], market: Any, chunk_size: int) -> None:
@@ -832,11 +845,17 @@ class MarketDataService:
 
     # Candidatos de simbolo del dolar spot en pyRofex / Matba. Distintas
     # cuentas / environments lo nombran diferente. Probamos todos.
+    # PRIORIDAD: el primero que tenga last es el que usamos como "el" spot.
     SPOT_SYMBOL_CANDIDATES: tuple[str, ...] = (
-        "DOLAR USA",        # nombre que aparece en la API del usuario
+        # Dolar spot mayorista en MERV (TMUSD - Tipo Money USD, liq 24hs).
+        # Este es el real usado en cuentas MERV/BYMA argentinas.
+        "MERV - XMEV - TMUSD - 24hs",
+        "MERV - XMEV - TMUSD - CI",
+        # Variantes en ROFX/Matba
+        "DLR/SPOT",
+        "DOLAR USA",
         "DOLAR_USA",
         "DOLAR/USA",
-        "DLR/SPOT",
         "DOLAR/SPOT",
         "DOLAR_SPOT",
         "USD/SPOT",
@@ -949,6 +968,7 @@ class MarketDataService:
                 sym_up in candidate_set
                 or ("SPOT" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
                 or ("USA" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
+                or "TMUSD" in sym_up  # MERV - XMEV - TMUSD - 24hs / CI
             )
             if not is_spot:
                 continue
