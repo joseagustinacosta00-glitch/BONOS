@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd34 cargado - HD: reset state entre bonos + descarga CSV");
+console.log("[Monitor] app.js v=hd35 cargado - TAMAR calculator: TAMAR emision + TAMAR proyectado");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -45,6 +45,19 @@ const saveLecap = document.querySelector("#saveLecap");
 const savedLecaps = document.querySelector("#savedLecaps");
 const lecapTemplate = document.querySelector("#lecapTemplate");
 const hardDollarTemplate = document.querySelector("#hardDollarTemplate");
+const tamarTemplate = document.querySelector("#tamarTemplate");
+const tamarTicker = document.querySelector("#tamarTicker");
+const tamarIssueDate = document.querySelector("#tamarIssueDate");
+const tamarMaturityDate = document.querySelector("#tamarMaturityDate");
+const tamarFaceValue = document.querySelector("#tamarFaceValue");
+const tamarFetchReference = document.querySelector("#tamarFetchReference");
+const tamarStatus = document.querySelector("#tamarStatus");
+const tamarReferenceSection = document.querySelector("#tamarReferenceSection");
+const tamarEmissionValue = document.querySelector("#tamarEmissionValue");
+const tamarEmissionRefDate = document.querySelector("#tamarEmissionRefDate");
+const tamarProjectionValue = document.querySelector("#tamarProjectionValue");
+const tamarProjectionCutoff = document.querySelector("#tamarProjectionCutoff");
+const tamarProjectionSamples = document.querySelector("#tamarProjectionSamples");
 const lecapSubmenu = document.querySelector("#lecapSubmenu");
 const dualSubmenu = document.querySelector("#dualSubmenu");
 const calculatorPlaceholder = document.querySelector("#calculatorPlaceholder");
@@ -755,17 +768,22 @@ function setBondModel(model) {
 
   const isLecap = model === "lecap";
   const isHardDollar = model === "hard_dollar";
+  const isTamar = model === "tamar";
   const isDual = model === "dual";
   lecapTemplate.classList.toggle("d-none", !isLecap);
   hardDollarTemplate.classList.toggle("d-none", !isHardDollar);
+  if (tamarTemplate) tamarTemplate.classList.toggle("d-none", !isTamar);
   lecapSubmenu.classList.toggle("d-none", !isLecap);
   dualSubmenu.classList.toggle("d-none", !isDual);
-  calculatorPlaceholder.classList.toggle("d-none", isLecap || isHardDollar);
+  calculatorPlaceholder.classList.toggle("d-none", isLecap || isHardDollar || isTamar);
   if (isLecap) {
     calculatorPlaceholder.textContent = "";
   } else if (isHardDollar) {
     renderHardDollarCouponInputs();
     setHdMode("search");
+  } else if (isTamar) {
+    if (tamarIssueDate) attachDdmmAutoformat(tamarIssueDate);
+    if (tamarMaturityDate) attachDdmmAutoformat(tamarMaturityDate);
   } else if (isDual) {
     calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
   } else {
@@ -2515,6 +2533,71 @@ hdDeferredReset?.addEventListener("click", resetHdDeferredStart);
 
 // Descargar cashflow como CSV
 hdDownloadCashflow?.addEventListener("click", downloadHdCashflowCsv);
+
+// ====== Bono TAMAR: cargar valores TAMAR de referencia ======
+function setTamarStatus(kind, text) {
+  if (!tamarStatus) return;
+  tamarStatus.dataset.kind = kind;
+  tamarStatus.textContent = text;
+}
+
+function formatTamarValue(value) {
+  if (value === null || value === undefined) return "s/d";
+  return new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(value) + " %";
+}
+
+async function fetchTamarReference() {
+  const issueIso = parseDdmmYyyy(tamarIssueDate?.value || "");
+  const maturityIso = parseDdmmYyyy(tamarMaturityDate?.value || "");
+  if (!issueIso || !maturityIso) {
+    setTamarStatus("error", "Cargar emision y vencimiento como DD/MM/AAAA");
+    return;
+  }
+  setTamarStatus("draft", "Consultando BCRA...");
+  try {
+    const url = `/api/calculators/bond-tamar/tamar-reference?issue_date=${issueIso}&maturity_date=${maturityIso}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo consultar BCRA");
+    }
+    const payload = await response.json();
+    const emi = payload.tamar_emission || {};
+    const proj = payload.tamar_maturity_projection || {};
+
+    if (tamarEmissionValue) tamarEmissionValue.value = formatTamarValue(emi.value);
+    if (tamarEmissionRefDate) {
+      tamarEmissionRefDate.value = emi.value_date
+        ? `${formatDateDisplay(emi.value_date)} (target ${formatDateDisplay(emi.reference_date_target)})`
+        : `Sin dato (target ${formatDateDisplay(emi.reference_date_target)})`;
+    }
+    if (tamarProjectionValue) tamarProjectionValue.value = formatTamarValue(proj.average);
+    if (tamarProjectionCutoff) {
+      tamarProjectionCutoff.value = `${formatDateDisplay(proj.publication_cutoff)} (hoy ${formatDateDisplay(proj.today)})`;
+    }
+    if (tamarProjectionSamples) {
+      const samples = proj.samples || [];
+      tamarProjectionSamples.innerHTML = samples.map((s, i) => `
+        <label>
+          <span>Muestra ${i + 1}</span>
+          <input class="form-control form-control-sm" type="text" value="${formatDateDisplay(s.date)} - ${formatTamarValue(s.value)}" readonly>
+        </label>
+      `).join("");
+    }
+    tamarReferenceSection?.classList.remove("d-none");
+    setTamarStatus("ok", "TAMAR de referencia cargado");
+  } catch (error) {
+    setTamarStatus("error", error.message || "Error al consultar BCRA");
+    console.error("[Bono TAMAR]", error);
+  }
+}
+
+tamarFetchReference?.addEventListener("click", () => {
+  fetchTamarReference().catch((err) => console.error(err));
+});
 
 if (!hdGenerateSchedule || !hdCalculate) {
   console.warn("[Bono HD] elementos de la calculadora no encontrados; revisa que index.html esté actualizado y limpia cache.");

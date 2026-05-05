@@ -652,6 +652,56 @@
               </section>
             </div>
 
+            <div id="tamarTemplate" class="d-none">
+              <form id="tamarForm" class="calculator-form hard-dollar-form" autocomplete="off">
+                <label>
+                  <span>Ticker</span>
+                  <input id="tamarTicker" class="form-control form-control-sm" type="text" placeholder="Ej: M31G6" required>
+                </label>
+                <label>
+                  <span>Fecha de emision</span>
+                  <input id="tamarIssueDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
+                </label>
+                <label>
+                  <span>Fecha de vencimiento</span>
+                  <input id="tamarMaturityDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
+                </label>
+                <label>
+                  <span>VNO</span>
+                  <input id="tamarFaceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100" required>
+                </label>
+                <button id="tamarFetchReference" class="btn btn-sm btn-dark" type="button">Cargar TAMAR de referencia</button>
+                <span id="tamarStatus" class="calc-status">Borrador</span>
+              </form>
+
+              <section id="tamarReferenceSection" class="cashflow-preview d-none" aria-label="Valores TAMAR de referencia">
+                <h3>Valores TAMAR de referencia</h3>
+                <div class="hd-amort-controls">
+                  <label>
+                    <span>TAMAR emision (% n.a.)</span>
+                    <input id="tamarEmissionValue" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Fecha de referencia (10 dias habiles antes de emision)</span>
+                    <input id="tamarEmissionRefDate" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>TAMAR proyectado a vto (% n.a.)</span>
+                    <input id="tamarProjectionValue" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Cutoff de publicacion (hoy - 2 dias habiles)</span>
+                    <input id="tamarProjectionCutoff" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                </div>
+                <p class="hd-help">El TAMAR de emision se toma del BCRA (id_variable=44) en la fecha 10 dias habiles antes de la emision. Si ese dia no hubo publicacion, se usa la publicacion anterior disponible. El TAMAR proyectado es el promedio simple de los ultimos 5 valores publicados (TAMAR se publica con 2 dias habiles de lag).</p>
+                <details>
+                  <summary class="hd-import-summary-title">Ver muestras del promedio (5 datos TAMAR)</summary>
+                  <div id="tamarProjectionSamples" class="hd-amort-controls"></div>
+                </details>
+              </section>
+            </div>
+
             <div id="lecapTemplate">
             <form id="bondDraftForm" class="calculator-form lecap-form">
               <label>
@@ -974,6 +1024,6 @@
       </section>
     </main>
 
-    <script src="/app-bundle.js?v=hd34"></script>
+    <script src="/app-bundle.js?v=hd35"></script>
   </body>
 </html>

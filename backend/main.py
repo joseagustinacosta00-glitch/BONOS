@@ -686,6 +686,79 @@ async def calculator_delete_lecap(item_id: int) -> dict:
     return {"deleted": True}
 
 
+@app.get("/api/calculators/bond-tamar/tamar-reference")
+async def calculator_bond_tamar_reference(
+    issue_date: date,
+    maturity_date: date,
+) -> dict:
+    """Devuelve los dos valores TAMAR de referencia para armar el cashflow:
+    - tamar_emission: TAMAR vigente 10 dias habiles antes de la emision.
+    - tamar_maturity_projection: promedio de los ultimos 5 valores publicados
+      (TAMAR se publica con 2 dias habiles de lag), proyectado hasta vencimiento.
+    """
+    if maturity_date <= issue_date:
+        raise HTTPException(status_code=422, detail="Vencimiento debe ser posterior a la emision.")
+
+    # Cargar serie TAMAR completa desde BCRA (cacheada)
+    series = bcra.get_series("tamar_private_banks_na")
+    raw_points = series.get("data", [])
+    if not raw_points:
+        raise HTTPException(status_code=503, detail="No hay datos TAMAR disponibles del BCRA.")
+
+    by_date: dict[date, float] = {}
+    for p in raw_points:
+        try:
+            d = date.fromisoformat(str(p["date"]))
+            v = float(p["value"])
+            by_date[d] = v
+        except (KeyError, ValueError, TypeError):
+            continue
+    sorted_dates = sorted(by_date.keys())
+    if not sorted_dates:
+        raise HTTPException(status_code=503, detail="No hay datos TAMAR validos del BCRA.")
+
+    # 1) TAMAR de emision: 10 dias habiles antes de issue_date
+    issue_minus_10bd = market_calendar.add_business_days(issue_date, -10)
+    candidates_emission = [d for d in sorted_dates if d <= issue_minus_10bd]
+    tamar_emission = None
+    if candidates_emission:
+        ref_date = candidates_emission[-1]
+        tamar_emission = {
+            "reference_date_target": issue_minus_10bd.isoformat(),
+            "value_date": ref_date.isoformat(),
+            "value": by_date[ref_date],
+        }
+    else:
+        tamar_emission = {
+            "reference_date_target": issue_minus_10bd.isoformat(),
+            "value_date": None,
+            "value": None,
+        }
+
+    # 2) TAMAR proyectado: promedio de los ultimos 5 valores publicados.
+    #    "Publicados" = con 2 dias habiles de lag desde hoy.
+    today = now_argentina().date()
+    publication_cutoff = market_calendar.add_business_days(today, -2)
+    available = [d for d in sorted_dates if d <= publication_cutoff]
+    last5_dates = available[-5:]
+    samples = [{"date": d.isoformat(), "value": by_date[d]} for d in last5_dates]
+    average = (sum(by_date[d] for d in last5_dates) / len(last5_dates)) if last5_dates else None
+
+    return {
+        "issue_date": issue_date.isoformat(),
+        "maturity_date": maturity_date.isoformat(),
+        "tamar_emission": tamar_emission,
+        "tamar_maturity_projection": {
+            "publication_cutoff": publication_cutoff.isoformat(),
+            "today": today.isoformat(),
+            "average": average,
+            "samples": samples,
+            "sample_count": len(samples),
+        },
+        "source": "BCRA Estadisticas Monetarias v4 - serie TAMAR bancos privados (id=44)",
+    }
+
+
 @app.get("/api/calculators/bond-hd/conventions")
 async def calculator_bond_hd_conventions() -> dict:
     return {
