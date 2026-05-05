@@ -670,7 +670,12 @@
                   <span>VNO</span>
                   <input id="tamarFaceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100" required>
                 </label>
-                <button id="tamarFetchReference" class="btn btn-sm btn-dark" type="button">Cargar TAMAR de referencia</button>
+                <label>
+                  <span>TEM TAMAR adicional % (spread)</span>
+                  <input id="tamarTemExtra" class="form-control form-control-sm" type="number" step="0.0001" value="0" placeholder="0 = TAMAR pura">
+                </label>
+                <button id="tamarFetchReference" class="btn btn-sm btn-outline-dark" type="button">Cargar TAMAR de referencia</button>
+                <button id="tamarCalculate" class="btn btn-sm btn-dark" type="button">Calcular TAMAR + TEM + VPV</button>
                 <span id="tamarStatus" class="calc-status">Borrador</span>
               </form>
 
@@ -699,6 +704,48 @@
                   <summary class="hd-import-summary-title">Ver muestras del promedio (5 datos TAMAR)</summary>
                   <div id="tamarProjectionSamples" class="hd-amort-controls"></div>
                 </details>
+              </section>
+
+              <section id="tamarCalcSection" class="cashflow-preview d-none" aria-label="Calculo TAMAR / TEM / VPV">
+                <h3>Calculo de promedio TAMAR, TEM y VPV</h3>
+                <div id="tamarFixedRateBanner" class="alert alert-warning" style="display:none;"></div>
+                <div class="hd-amort-controls">
+                  <label>
+                    <span>Ventana TAMAR (emision-10BD a vto-10BD)</span>
+                    <input id="tamarCalcWindow" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Promedio TAMAR ventana (% n.a.)</span>
+                    <input id="tamarCalcAverage" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Dias habiles considerados (real / proyectado)</span>
+                    <input id="tamarCalcBreakdown" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>TAMAR + spread aplicado (% n.a.)</span>
+                    <input id="tamarCalcWithSpread" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>TAMAR_TEM resultante (% mensual)</span>
+                    <input id="tamarCalcTem" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>VPV (Valor Presente Vencimiento)</span>
+                    <input id="tamarCalcVpv" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                  <label>
+                    <span>Dias totales (emision a vto)</span>
+                    <input id="tamarCalcDays" class="form-control form-control-sm" type="text" readonly>
+                  </label>
+                </div>
+                <p class="hd-help">
+                  Promedio TAMAR sobre la ventana de calculo, usando datos publicados del BCRA hasta la fecha de
+                  ultimo publicado y la proyeccion (promedio de los ultimos 5 publicados con lag de 2 dias habiles)
+                  para los dias futuros.<br>
+                  TAMAR_TEM = [(1 + TAMAR/(365/32))^(365/32)]^(1/12) - 1<br>
+                  VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12)
+                </p>
               </section>
             </div>
 
@@ -1024,6 +1071,6 @@
       </section>
     </main>
 
-    <script src="/app-bundle.js?v=hd35"></script>
+    <script src="/app-bundle.js?v=hd36"></script>
   </body>
 </html>

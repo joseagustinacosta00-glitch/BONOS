@@ -5,7 +5,7 @@ import csv
 import io
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -684,6 +684,163 @@ async def calculator_delete_lecap(item_id: int) -> dict:
     if not storage.delete_lecap(item_id):
         raise HTTPException(status_code=404, detail="LECAP no encontrada.")
     return {"deleted": True}
+
+
+@app.get("/api/calculators/bond-tamar/calculate")
+async def calculator_bond_tamar_calculate(
+    issue_date: date,
+    maturity_date: date,
+    face_value: float = 100.0,
+    tem_extra_percent: float = 0.0,
+) -> dict:
+    """Calcula promedio TAMAR sobre la ventana [emision-10BD, vencimiento-10BD],
+    TEM TAMAR via formula y VPV proyectado al vencimiento.
+
+    - Valores TAMAR pasados: del BCRA, con carry-forward si falta el dia.
+    - Valores TAMAR futuros: promedio simple de los ultimos 5 publicados
+      (TAMAR se publica con 2 dias habiles de lag).
+    - TAMAR_TEM = [(1 + TAMAR/(365/32))^(365/32)]^(1/12) - 1
+      Si tem_extra_percent > 0, se suma a TAMAR_Average antes de aplicar
+      la formula (ej. spread sobre TAMAR).
+    - VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12)  con DIAS = vto - emision
+    """
+    if maturity_date <= issue_date:
+        raise HTTPException(status_code=422, detail="Vencimiento debe ser posterior a la emision.")
+    if face_value <= 0:
+        raise HTTPException(status_code=422, detail="VNO debe ser positivo.")
+
+    series = bcra.get_series("tamar_private_banks_na")
+    raw_points = series.get("data", [])
+    if not raw_points:
+        raise HTTPException(status_code=503, detail="No hay datos TAMAR del BCRA.")
+
+    by_date: dict[date, float] = {}
+    for p in raw_points:
+        try:
+            d = date.fromisoformat(str(p["date"]))
+            by_date[d] = float(p["value"])
+        except (KeyError, ValueError, TypeError):
+            continue
+    sorted_dates = sorted(by_date.keys())
+    if not sorted_dates:
+        raise HTTPException(status_code=503, detail="No hay datos TAMAR validos del BCRA.")
+    last_published_date = sorted_dates[-1]
+
+    # 1) TAMAR de emision (igual que tamar-reference)
+    issue_minus_10bd = market_calendar.add_business_days(issue_date, -10)
+    candidates_emission = [d for d in sorted_dates if d <= issue_minus_10bd]
+    tamar_emission = (
+        {"reference_date_target": issue_minus_10bd.isoformat(),
+         "value_date": candidates_emission[-1].isoformat(),
+         "value": by_date[candidates_emission[-1]]}
+        if candidates_emission else
+        {"reference_date_target": issue_minus_10bd.isoformat(), "value_date": None, "value": None}
+    )
+
+    # 2) Proyeccion TAMAR (promedio de los ultimos 5 publicados con lag de 2 BD)
+    today = now_argentina().date()
+    publication_cutoff = market_calendar.add_business_days(today, -2)
+    available = [d for d in sorted_dates if d <= publication_cutoff]
+    last5_dates = available[-5:]
+    samples = [{"date": d.isoformat(), "value": by_date[d]} for d in last5_dates]
+    projection = (sum(by_date[d] for d in last5_dates) / len(last5_dates)) if last5_dates else None
+    if projection is None:
+        raise HTTPException(status_code=503, detail="Sin datos TAMAR para proyectar.")
+
+    # 3) Promedio TAMAR sobre la ventana [emision-10BD, vencimiento-10BD]
+    window_start = issue_minus_10bd
+    window_end = market_calendar.add_business_days(maturity_date, -10)
+    if window_end <= window_start:
+        raise HTTPException(
+            status_code=422,
+            detail="Plazo del bono insuficiente: ventana TAMAR (emision-10BD a vto-10BD) vacia.",
+        )
+
+    # Iterar dias habiles del rango. Para cada uno:
+    # - si <= last_published_date: usar TAMAR del dia (carry-forward si falta)
+    # - si > last_published_date: usar projection
+    daily_values: list[float] = []
+    actual_days = 0
+    projected_days = 0
+    last_known_value = None
+    for d in sorted_dates:
+        if d > window_start:
+            break
+        last_known_value = by_date[d]
+
+    cursor = window_start
+    while cursor <= window_end:
+        if not market_calendar.is_business_day(cursor):
+            cursor += timedelta(days=1)
+            continue
+        if cursor > last_published_date:
+            daily_values.append(projection)
+            projected_days += 1
+        else:
+            if cursor in by_date:
+                last_known_value = by_date[cursor]
+            if last_known_value is not None:
+                daily_values.append(last_known_value)
+                actual_days += 1
+        cursor += timedelta(days=1)
+
+    if not daily_values:
+        raise HTTPException(status_code=503, detail="No se pudo construir promedio TAMAR.")
+    tamar_average_percent = sum(daily_values) / len(daily_values)
+
+    # 4) TEM TAMAR via formula. TAMAR esta en % NA, convertir a decimal.
+    tamar_for_tem_percent = tamar_average_percent + tem_extra_percent
+    tamar_decimal = tamar_for_tem_percent / 100.0
+    base = 365.0 / 32.0  # ≈ 11.40625
+    if 1 + tamar_decimal / base <= 0:
+        raise HTTPException(status_code=422, detail="TAMAR resultante invalido para TEM.")
+    tea_factor = (1 + tamar_decimal / base) ** base   # 1 + TEA
+    tem_factor = tea_factor ** (1.0 / 12.0)            # 1 + TEM
+    tamar_tem_decimal = tem_factor - 1.0
+    tamar_tem_percent = tamar_tem_decimal * 100.0
+
+    # 5) VPV = VNO * (1 + TEM)^((DIAS/360) * 12)
+    days_total = (maturity_date - issue_date).days
+    vpv = face_value * ((1 + tamar_tem_decimal) ** ((days_total / 360.0) * 12.0))
+
+    return {
+        "issue_date": issue_date.isoformat(),
+        "maturity_date": maturity_date.isoformat(),
+        "face_value": face_value,
+        "tem_extra_percent": tem_extra_percent,
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "fixed_rate_warning": {
+            "from_date": window_end.isoformat(),
+            "to_date": maturity_date.isoformat(),
+            "message": (
+                f"A partir del {window_end.strftime('%d/%m/%Y')} (vencimiento - 10 dias habiles) "
+                f"la tasa pasa a ser fija. Por ahora el calculo no la incluye en el promedio "
+                f"y la tasa fija se determinara en la implementacion futura."
+            ),
+        },
+        "tamar_emission": tamar_emission,
+        "tamar_maturity_projection": {
+            "publication_cutoff": publication_cutoff.isoformat(),
+            "today": today.isoformat(),
+            "average": projection,
+            "samples": samples,
+            "sample_count": len(samples),
+        },
+        "tamar_average_percent": tamar_average_percent,
+        "tamar_average_breakdown": {
+            "business_days_total": len(daily_values),
+            "actual_days": actual_days,
+            "projected_days": projected_days,
+            "projected_value_used": projection,
+            "last_published_date": last_published_date.isoformat(),
+        },
+        "tamar_for_tem_percent": tamar_for_tem_percent,
+        "tamar_tem_percent": tamar_tem_percent,
+        "vpv": vpv,
+        "vpv_days": days_total,
+        "source": "BCRA Estadisticas Monetarias v4 - serie TAMAR bancos privados (id=44)",
+    }
 
 
 @app.get("/api/calculators/bond-tamar/tamar-reference")

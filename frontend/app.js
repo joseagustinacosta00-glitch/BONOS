@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd35 cargado - TAMAR calculator: TAMAR emision + TAMAR proyectado");
+console.log("[Monitor] app.js v=hd36 cargado - TAMAR calc: promedio ventana + TEM + VPV");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -51,7 +51,18 @@ const tamarIssueDate = document.querySelector("#tamarIssueDate");
 const tamarMaturityDate = document.querySelector("#tamarMaturityDate");
 const tamarFaceValue = document.querySelector("#tamarFaceValue");
 const tamarFetchReference = document.querySelector("#tamarFetchReference");
+const tamarCalculate = document.querySelector("#tamarCalculate");
+const tamarTemExtra = document.querySelector("#tamarTemExtra");
 const tamarStatus = document.querySelector("#tamarStatus");
+const tamarCalcSection = document.querySelector("#tamarCalcSection");
+const tamarFixedRateBanner = document.querySelector("#tamarFixedRateBanner");
+const tamarCalcWindow = document.querySelector("#tamarCalcWindow");
+const tamarCalcAverage = document.querySelector("#tamarCalcAverage");
+const tamarCalcBreakdown = document.querySelector("#tamarCalcBreakdown");
+const tamarCalcWithSpread = document.querySelector("#tamarCalcWithSpread");
+const tamarCalcTem = document.querySelector("#tamarCalcTem");
+const tamarCalcVpv = document.querySelector("#tamarCalcVpv");
+const tamarCalcDays = document.querySelector("#tamarCalcDays");
 const tamarReferenceSection = document.querySelector("#tamarReferenceSection");
 const tamarEmissionValue = document.querySelector("#tamarEmissionValue");
 const tamarEmissionRefDate = document.querySelector("#tamarEmissionRefDate");
@@ -2597,6 +2608,106 @@ async function fetchTamarReference() {
 
 tamarFetchReference?.addEventListener("click", () => {
   fetchTamarReference().catch((err) => console.error(err));
+});
+
+function formatTamarPercent(value, dec = 4) {
+  if (value === null || value === undefined) return "s/d";
+  return new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(value) + " %";
+}
+
+function formatTamarMoney(value) {
+  if (value === null || value === undefined) return "s/d";
+  return new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(value);
+}
+
+async function calculateTamar() {
+  const issueIso = parseDdmmYyyy(tamarIssueDate?.value || "");
+  const maturityIso = parseDdmmYyyy(tamarMaturityDate?.value || "");
+  const faceValue = parseFloat(tamarFaceValue?.value || "100");
+  const temExtra = parseFloat(tamarTemExtra?.value || "0") || 0;
+  if (!issueIso || !maturityIso) {
+    setTamarStatus("error", "Cargar emision y vencimiento como DD/MM/AAAA");
+    return;
+  }
+  if (!Number.isFinite(faceValue) || faceValue <= 0) {
+    setTamarStatus("error", "VNO invalido");
+    return;
+  }
+  setTamarStatus("draft", "Calculando promedio TAMAR + TEM + VPV...");
+  try {
+    const params = new URLSearchParams({
+      issue_date: issueIso,
+      maturity_date: maturityIso,
+      face_value: String(faceValue),
+      tem_extra_percent: String(temExtra),
+    });
+    const response = await fetch(`/api/calculators/bond-tamar/calculate?${params.toString()}`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo calcular");
+    }
+    const payload = await response.json();
+
+    // Tambien rellenar la seccion de "TAMAR de referencia" con los mismos datos
+    const emi = payload.tamar_emission || {};
+    const proj = payload.tamar_maturity_projection || {};
+    if (tamarEmissionValue) tamarEmissionValue.value = formatTamarPercent(emi.value);
+    if (tamarEmissionRefDate) {
+      tamarEmissionRefDate.value = emi.value_date
+        ? `${formatDateDisplay(emi.value_date)} (target ${formatDateDisplay(emi.reference_date_target)})`
+        : `Sin dato (target ${formatDateDisplay(emi.reference_date_target)})`;
+    }
+    if (tamarProjectionValue) tamarProjectionValue.value = formatTamarPercent(proj.average);
+    if (tamarProjectionCutoff) {
+      tamarProjectionCutoff.value = `${formatDateDisplay(proj.publication_cutoff)} (hoy ${formatDateDisplay(proj.today)})`;
+    }
+    if (tamarProjectionSamples) {
+      const samples = proj.samples || [];
+      tamarProjectionSamples.innerHTML = samples.map((s, i) => `
+        <label>
+          <span>Muestra ${i + 1}</span>
+          <input class="form-control form-control-sm" type="text" value="${formatDateDisplay(s.date)} - ${formatTamarPercent(s.value)}" readonly>
+        </label>
+      `).join("");
+    }
+    tamarReferenceSection?.classList.remove("d-none");
+
+    // Seccion de calculo
+    if (tamarCalcWindow) tamarCalcWindow.value = `${formatDateDisplay(payload.window_start)} -> ${formatDateDisplay(payload.window_end)}`;
+    if (tamarCalcAverage) tamarCalcAverage.value = formatTamarPercent(payload.tamar_average_percent);
+    if (tamarCalcBreakdown) {
+      const br = payload.tamar_average_breakdown || {};
+      tamarCalcBreakdown.value = `${br.business_days_total} dias (${br.actual_days} reales / ${br.projected_days} proyectados @ ${formatTamarPercent(br.projected_value_used)})`;
+    }
+    if (tamarCalcWithSpread) {
+      tamarCalcWithSpread.value = formatTamarPercent(payload.tamar_for_tem_percent);
+    }
+    if (tamarCalcTem) tamarCalcTem.value = formatTamarPercent(payload.tamar_tem_percent);
+    if (tamarCalcVpv) tamarCalcVpv.value = `${formatTamarMoney(payload.vpv)} c/${faceValue} VN`;
+    if (tamarCalcDays) tamarCalcDays.value = `${payload.vpv_days} dias calendario`;
+
+    if (tamarFixedRateBanner && payload.fixed_rate_warning) {
+      const w = payload.fixed_rate_warning;
+      tamarFixedRateBanner.innerHTML = `<strong>Tasa fija desde:</strong> ${formatDateDisplay(w.from_date)} hasta ${formatDateDisplay(w.to_date)}.<br>${w.message}`;
+      tamarFixedRateBanner.style.display = "block";
+    }
+
+    tamarCalcSection?.classList.remove("d-none");
+    setTamarStatus("ok", "Calculo completado");
+  } catch (error) {
+    setTamarStatus("error", error.message || "Error al calcular");
+    console.error("[Bono TAMAR calc]", error);
+  }
+}
+
+tamarCalculate?.addEventListener("click", () => {
+  calculateTamar().catch((err) => console.error(err));
 });
 
 if (!hdGenerateSchedule || !hdCalculate) {
