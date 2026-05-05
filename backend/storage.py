@@ -107,6 +107,37 @@ class HistoricalDataPoint:
 
 
 @dataclass(frozen=True)
+class SavedBondTamar:
+    id: int
+    ticker: str
+    issue_date: date
+    maturity_date: date
+    face_value: float
+    tem_extra_percent: float
+    payload_json: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        import json
+        try:
+            payload = json.loads(self.payload_json) if self.payload_json else {}
+        except (TypeError, ValueError):
+            payload = {}
+        return {
+            "id": self.id,
+            "ticker": self.ticker,
+            "issue_date": self.issue_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "face_value": self.face_value,
+            "tem_extra_percent": self.tem_extra_percent,
+            "payload": payload,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
 class SavedBondHd:
     id: int
     ticker: str
@@ -234,6 +265,21 @@ class CalculatorStorage:
                     bond_type TEXT NOT NULL,
                     frequency TEXT NOT NULL,
                     convention TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bond_tamar_calculations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL UNIQUE,
+                    issue_date TEXT NOT NULL,
+                    maturity_date TEXT NOT NULL,
+                    face_value REAL NOT NULL,
+                    tem_extra_percent REAL NOT NULL DEFAULT 0,
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -790,6 +836,7 @@ class CalculatorStorage:
                 "calculator_cashflows",
                 "historical_data",
                 "bond_hd_calculations",
+                "bond_tamar_calculations",
                 "ai_memory_notes",
             ):
                 try:
@@ -805,7 +852,7 @@ class CalculatorStorage:
         with closing(self._connect()) as connection:
             data: dict[str, list[dict]] = {}
             for table in ("lecap_calculators", "calculator_cashflows", "historical_data",
-                          "bond_hd_calculations", "ai_memory_notes"):
+                          "bond_hd_calculations", "bond_tamar_calculations", "ai_memory_notes"):
                 try:
                     rows = connection.execute(f"SELECT * FROM {table}").fetchall()
                     data[table] = [dict(row) for row in rows]
@@ -1000,6 +1047,109 @@ class CalculatorStorage:
                 (normalized,),
             )
         return cursor.rowcount > 0
+
+    # --- Bono TAMAR persistencia ---
+    def list_bond_tamar(self) -> list[SavedBondTamar]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       tem_extra_percent, payload_json, created_at, updated_at
+                FROM bond_tamar_calculations
+                ORDER BY ticker ASC
+                """
+            ).fetchall()
+        return [self._row_to_bond_tamar(row) for row in rows]
+
+    def get_bond_tamar(self, ticker: str) -> SavedBondTamar | None:
+        normalized = _normalize_base_ticker(ticker)
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       tem_extra_percent, payload_json, created_at, updated_at
+                FROM bond_tamar_calculations
+                WHERE ticker = ?
+                """,
+                (normalized,),
+            ).fetchone()
+        return self._row_to_bond_tamar(row) if row else None
+
+    def upsert_bond_tamar(
+        self,
+        ticker: str,
+        issue_date: date,
+        maturity_date: date,
+        face_value: float,
+        tem_extra_percent: float,
+        payload_json: str,
+    ) -> SavedBondTamar:
+        now = now_argentina_iso()
+        normalized = _normalize_base_ticker(ticker)
+        if not normalized:
+            raise ValueError("El ticker es obligatorio.")
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO bond_tamar_calculations (
+                    ticker, issue_date, maturity_date, face_value,
+                    tem_extra_percent, payload_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    issue_date = excluded.issue_date,
+                    maturity_date = excluded.maturity_date,
+                    face_value = excluded.face_value,
+                    tem_extra_percent = excluded.tem_extra_percent,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    normalized,
+                    issue_date.isoformat(),
+                    maturity_date.isoformat(),
+                    face_value,
+                    tem_extra_percent,
+                    payload_json,
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       tem_extra_percent, payload_json, created_at, updated_at
+                FROM bond_tamar_calculations
+                WHERE ticker = ?
+                """,
+                (normalized,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("No se pudo guardar el Bono TAMAR.")
+        return self._row_to_bond_tamar(row)
+
+    def delete_bond_tamar(self, ticker: str) -> bool:
+        normalized = _normalize_base_ticker(ticker)
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM bond_tamar_calculations WHERE ticker = ?",
+                (normalized,),
+            )
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_to_bond_tamar(row: sqlite3.Row) -> SavedBondTamar:
+        return SavedBondTamar(
+            id=int(row["id"]),
+            ticker=str(row["ticker"]),
+            issue_date=date.fromisoformat(str(row["issue_date"])),
+            maturity_date=date.fromisoformat(str(row["maturity_date"])),
+            face_value=float(row["face_value"]),
+            tem_extra_percent=float(row["tem_extra_percent"] or 0),
+            payload_json=str(row["payload_json"] or ""),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
 
     @staticmethod
     def _row_to_bond_hd(row: sqlite3.Row) -> SavedBondHd:

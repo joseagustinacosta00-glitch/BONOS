@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd44 cargado - TAMAR: cards + cashflow table + auxiliares colapsables");
+console.log("[Monitor] app.js v=hd45 cargado - TAMAR: persistencia (guardar/listar/cargar/borrar)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -801,6 +801,7 @@ function setBondModel(model) {
   } else if (isTamar) {
     if (tamarIssueDate) attachDdmmAutoformat(tamarIssueDate);
     if (tamarMaturityDate) attachDdmmAutoformat(tamarMaturityDate);
+    fetchTamarSavedList?.().catch(() => {});
   } else if (isDual) {
     calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
   } else {
@@ -2761,6 +2762,9 @@ async function calculateTamar() {
     }
 
     tamarCalcSection?.classList.remove("d-none");
+    // Guardar payload completo en memoria para el "Confirmar y guardar"
+    lastTamarPayload = payload;
+    if (tamarSaveButton) tamarSaveButton.disabled = false;
     setTamarStatus("ok", "Calculo completado");
   } catch (error) {
     setTamarStatus("error", error.message || "Error al calcular");
@@ -2770,6 +2774,129 @@ async function calculateTamar() {
 
 tamarCalculate?.addEventListener("click", () => {
   calculateTamar().catch((err) => console.error(err));
+});
+
+// ====== Persistencia TAMAR ======
+const tamarSaveButton = document.querySelector("#tamarSave");
+const tamarSavedList = document.querySelector("#tamarSavedList");
+const tamarSavedCount = document.querySelector("#tamarSavedCount");
+let lastTamarPayload = null;
+
+async function fetchTamarSavedList() {
+  if (!tamarSavedList) return;
+  try {
+    const response = await fetch("/api/calculators/bond-tamar/saved");
+    if (!response.ok) throw new Error("list");
+    const payload = await response.json();
+    const items = payload.items || [];
+    if (tamarSavedCount) tamarSavedCount.textContent = items.length;
+    if (!items.length) {
+      tamarSavedList.innerHTML = '<span class="empty-cell">Sin TAMAR guardados todavia.</span>';
+      return;
+    }
+    tamarSavedList.innerHTML = items.map((it) => `
+      <div class="hd-saved-item" style="display:flex; justify-content:space-between; align-items:center; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:0.5rem; margin-bottom:0.4rem;">
+        <div>
+          <strong>${it.ticker}</strong>
+          <span class="hd-derived" style="margin-left:0.5rem;">${formatDateDisplay(it.issue_date)} → ${formatDateDisplay(it.maturity_date)}</span>
+          <span class="hd-derived" style="margin-left:0.5rem;">VNO ${it.face_value}</span>
+          ${it.tem_extra_percent ? `<span class="hd-derived" style="margin-left:0.5rem;">spread ${formatTamarPercent(it.tem_extra_percent)}</span>` : ""}
+        </div>
+        <div>
+          <button type="button" class="btn btn-sm btn-outline-dark" data-tamar-load="${it.ticker}">Cargar</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-tamar-delete="${it.ticker}">Eliminar</button>
+        </div>
+      </div>
+    `).join("");
+  } catch (err) {
+    console.error("[TAMAR list] error", err);
+  }
+}
+
+function loadSavedTamarIntoForm(item) {
+  if (!item) return;
+  if (tamarTicker) tamarTicker.value = item.ticker;
+  if (tamarIssueDate) tamarIssueDate.value = formatDateDisplay(item.issue_date);
+  if (tamarMaturityDate) tamarMaturityDate.value = formatDateDisplay(item.maturity_date);
+  if (tamarFaceValue) tamarFaceValue.value = String(item.face_value);
+  if (tamarTemExtra) tamarTemExtra.value = String(item.tem_extra_percent || 0);
+  setTamarStatus("ok", `Cargado ${item.ticker}. Click "Calcular VPV" para refrescar con la TAMAR de hoy.`);
+}
+
+async function loadTamarSaved(ticker) {
+  if (!ticker) return;
+  try {
+    const response = await fetch(`/api/calculators/bond-tamar/saved/${encodeURIComponent(ticker)}`);
+    if (!response.ok) throw new Error("not found");
+    const payload = await response.json();
+    loadSavedTamarIntoForm(payload.item);
+  } catch (err) {
+    setTamarStatus("error", "No se pudo cargar el TAMAR guardado");
+    console.error(err);
+  }
+}
+
+async function deleteTamarSaved(ticker) {
+  if (!ticker) return;
+  if (!window.confirm(`Eliminar TAMAR guardado: ${ticker}?`)) return;
+  try {
+    const response = await fetch(`/api/calculators/bond-tamar/saved/${encodeURIComponent(ticker)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("delete");
+    setTamarStatus("ok", `${ticker} eliminado`);
+    fetchTamarSavedList().catch(() => {});
+  } catch (err) {
+    setTamarStatus("error", "No se pudo eliminar");
+    console.error(err);
+  }
+}
+
+async function saveTamar() {
+  if (!lastTamarPayload) {
+    setTamarStatus("error", "Calcular VPV primero antes de guardar");
+    return;
+  }
+  const issueIso = parseDdmmYyyy(tamarIssueDate?.value || "");
+  const maturityIso = parseDdmmYyyy(tamarMaturityDate?.value || "");
+  const ticker = (tamarTicker?.value || "").trim();
+  if (!ticker) {
+    setTamarStatus("error", "Ticker es obligatorio para guardar");
+    return;
+  }
+  if (!issueIso || !maturityIso) {
+    setTamarStatus("error", "Cargar emision y vencimiento en DD/MM/AAAA");
+    return;
+  }
+  setTamarStatus("draft", "Guardando...");
+  try {
+    const response = await fetch("/api/calculators/bond-tamar/saved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        issue_date: issueIso,
+        maturity_date: maturityIso,
+        face_value: parseFloat(tamarFaceValue?.value || "100"),
+        tem_extra_percent: parseFloat(tamarTemExtra?.value || "0") || 0,
+        payload: lastTamarPayload,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudo guardar");
+    }
+    setTamarStatus("ok", `${ticker} guardado`);
+    fetchTamarSavedList().catch(() => {});
+  } catch (err) {
+    setTamarStatus("error", err.message || "Error al guardar");
+  }
+}
+
+tamarSaveButton?.addEventListener("click", () => saveTamar().catch((e) => console.error(e)));
+tamarSavedList?.addEventListener("click", (event) => {
+  const loadTicker = event.target.closest("[data-tamar-load]")?.dataset?.tamarLoad;
+  if (loadTicker) { loadTamarSaved(loadTicker); return; }
+  const deleteTicker = event.target.closest("[data-tamar-delete]")?.dataset?.tamarDelete;
+  if (deleteTicker) deleteTamarSaved(deleteTicker);
 });
 
 // ====== Modal de metricas por ticker (Mercado) ======

@@ -1194,6 +1194,53 @@ async def calculator_bond_tamar_calculate(
     }
 
 
+class BondTamarSavePayload(BaseModel):
+    ticker: str = Field(min_length=1, max_length=20)
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
+    tem_extra_percent: float = 0.0
+    payload: dict
+
+
+@app.get("/api/calculators/bond-tamar/saved")
+async def calculator_bond_tamar_saved_list() -> dict:
+    return {"items": [item.to_dict() for item in storage.list_bond_tamar()]}
+
+
+@app.get("/api/calculators/bond-tamar/saved/{ticker}")
+async def calculator_bond_tamar_saved_one(ticker: str) -> dict:
+    saved = storage.get_bond_tamar(ticker)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Bono TAMAR no encontrado.")
+    return {"item": saved.to_dict()}
+
+
+@app.post("/api/calculators/bond-tamar/saved")
+async def calculator_bond_tamar_saved_upsert(payload: BondTamarSavePayload) -> dict:
+    import json as _json
+    try:
+        saved = storage.upsert_bond_tamar(
+            ticker=payload.ticker,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            tem_extra_percent=payload.tem_extra_percent,
+            payload_json=_json.dumps(payload.payload, ensure_ascii=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _maybe_backup_after_write()
+    return {"item": saved.to_dict()}
+
+
+@app.delete("/api/calculators/bond-tamar/saved/{ticker}")
+async def calculator_bond_tamar_saved_delete(ticker: str) -> dict:
+    if not storage.delete_bond_tamar(ticker):
+        raise HTTPException(status_code=404, detail="Bono TAMAR no encontrado.")
+    return {"deleted": True}
+
+
 @app.get("/api/calculators/bond-tamar/tamar-reference")
 async def calculator_bond_tamar_reference(
     issue_date: date,

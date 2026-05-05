@@ -676,8 +676,16 @@
                 </label>
                 <button id="tamarFetchReference" class="btn btn-sm btn-outline-dark" type="button">Cargar TAMAR de referencia</button>
                 <button id="tamarCalculate" class="btn btn-sm btn-dark" type="button">Calcular VPV</button>
+                <button id="tamarSave" class="btn btn-sm btn-dark" type="button" disabled>Confirmar y guardar</button>
                 <span id="tamarStatus" class="calc-status">Borrador</span>
               </form>
+
+              <details class="tamar-aux" id="tamarSavedSection">
+                <summary>Bonos TAMAR guardados (<span id="tamarSavedCount">0</span>)</summary>
+                <div id="tamarSavedList" class="hd-saved-list" style="margin-top: 0.5rem;">
+                  <span class="empty-cell">Sin TAMAR guardados todavia.</span>
+                </div>
+              </details>
 
               <section id="tamarReferenceSection" class="cashflow-preview d-none" aria-label="Valores TAMAR de referencia">
                 <div class="tamar-cards" id="tamarReferenceCards">
@@ -1153,6 +1161,6 @@
       </div>
     </div>
 
-    <script src="/app-bundle.js?v=hd44"></script>
+    <script src="/app-bundle.js?v=hd45"></script>
   </body>
 </html>
