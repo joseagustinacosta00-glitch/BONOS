@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd50 cargado - SPOT siempre visible + auto-rediscover + poll 2s");
+console.log("[Monitor] app.js v=hd51 cargado - SPOT: matchea 'DOLAR USA' + heuristica USA");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");

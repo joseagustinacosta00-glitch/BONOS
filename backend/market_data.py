@@ -833,6 +833,9 @@ class MarketDataService:
     # Candidatos de simbolo del dolar spot en pyRofex / Matba. Distintas
     # cuentas / environments lo nombran diferente. Probamos todos.
     SPOT_SYMBOL_CANDIDATES: tuple[str, ...] = (
+        "DOLAR USA",        # nombre que aparece en la API del usuario
+        "DOLAR_USA",
+        "DOLAR/USA",
         "DLR/SPOT",
         "DOLAR/SPOT",
         "DOLAR_SPOT",
@@ -929,7 +932,9 @@ class MarketDataService:
 
         # Set de simbolos candidatos en mayusculas para match case-insensitive
         candidate_set = {s.upper() for s in self.SPOT_SYMBOL_CANDIDATES}
-        # Tambien aceptar simbolos que contengan "SPOT" + DLR/DOLAR/USD
+        # Tambien matchear heuristicamente:
+        #   - "SPOT" + DLR/DOLAR/USD
+        #   - "USA" + DLR/DOLAR/USD (caso reportado: "DOLAR USA")
         now = now_argentina_iso()
         registered: list[str] = []
         for instrument in instruments:
@@ -937,9 +942,13 @@ class MarketDataService:
             if not symbol:
                 continue
             sym_up = symbol.upper()
-            # Match: candidato exacto, o contiene SPOT y referencia a dolar
-            is_spot = sym_up in candidate_set or (
-                "SPOT" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD"))
+            # Excluir explicitamente futuros DLR mensuales (DLR/MMMYY)
+            if re.match(r"^DLR/[A-Z]{3}\d{2}M?$", sym_up):
+                continue
+            is_spot = (
+                sym_up in candidate_set
+                or ("SPOT" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
+                or ("USA" in sym_up and any(k in sym_up for k in ("DLR", "DOLAR", "USD")))
             )
             if not is_spot:
                 continue

@@ -472,7 +472,7 @@ async def fx_spot_diagnose() -> dict:
         sym_up = sym.upper()
         if any(k in sym_up for k in ("DLR", "DOLAR", "USD")):
             all_dlr_or_usd.append(sym)
-            if "SPOT" in sym_up or "/CI" in sym_up or "/T0" in sym_up or "24HS" in sym_up:
+            if any(k in sym_up for k in ("SPOT", "/CI", "/T0", "24HS", "USA")):
                 candidates.append(sym)
     return {
         "total_instruments": len(instruments),
