@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd37 cargado - TAMAR calc: tasa fija TNA contra precio de mercado");
+console.log("[Monitor] app.js v=hd38 cargado - TAMAR calc: VPV usa dias 30/360 (DAYS360)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2700,7 +2700,9 @@ async function calculateTamar() {
     }
     if (tamarCalcTem) tamarCalcTem.value = formatTamarPercent(payload.tamar_tem_percent);
     if (tamarCalcVpv) tamarCalcVpv.value = `${formatTamarMoney(payload.vpv)} c/${faceValue} VN`;
-    if (tamarCalcDays) tamarCalcDays.value = `${payload.vpv_days} dias calendario`;
+    if (tamarCalcDays) {
+      tamarCalcDays.value = `${payload.vpv_days} dias 30/360 (Excel DAYS360) - ${payload.vpv_days_calendar} calendario`;
+    }
 
     if (tamarFixedRateBanner && payload.fixed_rate_warning) {
       const w = payload.fixed_rate_warning;

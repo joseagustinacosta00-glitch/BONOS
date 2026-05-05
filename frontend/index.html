@@ -755,7 +755,8 @@
                   ultimo publicado y la proyeccion (promedio de los ultimos 5 publicados con lag de 2 dias habiles)
                   para los dias futuros.<br>
                   TAMAR_TEM = [(1 + TAMAR/(365/32))^(365/32)]^(1/12) - 1<br>
-                  VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12)
+                  VPV = VNO * (1 + TAMAR_TEM)^((DIAS/360) * 12)<br>
+                  DIAS se cuenta con regla 30/360 US (igual que la funcion DAYS360 de Excel) entre emision y vencimiento.
                 </p>
 
                 <h3 style="margin-top:1rem;">Tasa fija contra precio de mercado</h3>
@@ -1104,6 +1105,6 @@
       </section>
     </main>
 
-    <script src="/app-bundle.js?v=hd37"></script>
+    <script src="/app-bundle.js?v=hd38"></script>
   </body>
 </html>

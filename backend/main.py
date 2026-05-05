@@ -32,6 +32,7 @@ from backend.bond_calculators import (
     BondHdFrequency,
     BondHdType,
     BondModelType,
+    _days_30_360,
     build_bond_draft,
     build_bond_hd_calculation,
     build_lecap_calculation,
@@ -802,7 +803,9 @@ async def calculator_bond_tamar_calculate(
     tamar_tem_percent = tamar_tem_decimal * 100.0
 
     # 5) VPV = VNO * (1 + TEM)^((DIAS/360) * 12)
-    days_total = (maturity_date - issue_date).days
+    # DIAS = conteo 30/360 US (DAYS360 de Excel) entre emision y vencimiento.
+    days_total = _days_30_360(issue_date, maturity_date, us=True)
+    days_total_calendar = (maturity_date - issue_date).days  # solo informativo
     vpv = face_value * ((1 + tamar_tem_decimal) ** ((days_total / 360.0) * 12.0))
 
     # 6) Tasa fija TNA contra precio de mercado.
@@ -861,6 +864,8 @@ async def calculator_bond_tamar_calculate(
         "tamar_tem_percent": tamar_tem_percent,
         "vpv": vpv,
         "vpv_days": days_total,
+        "vpv_days_basis": "30/360 US (DAYS360 de Excel)",
+        "vpv_days_calendar": days_total_calendar,
         "fixed_rate_calc": {
             "settlement_type": str(settlement_type).lower(),
             "settlement_date": settlement_date.isoformat(),
