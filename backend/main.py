@@ -434,14 +434,39 @@ async def market_shortest_caucion() -> dict:
 
 @app.get("/api/fx/spot")
 async def fx_spot() -> dict:
-    """Devuelve el dolar spot (last). Si hay multiples simbolos detectados,
-    devuelve el mas reciente con last cargado + la lista completa."""
-    main = market.spot_last()
+    """Devuelve el dolar spot.
+    Fuente primaria: BCRA Comunicacion A 3500 (dolar mayorista oficial,
+    publicado diariamente). Si pyRofex tiene ticks de TMUSD u otro spot
+    intraday, se pueden ver en items[]."""
+    # 1) Intentar BCRA A3500 como fuente primaria
+    bcra_spot = None
+    try:
+        series = bcra.get_series("usd_mayorista_a3500")
+        latest = series.get("latest")
+        if latest:
+            bcra_spot = {
+                "symbol": "DDF_BCRA_A3500",
+                "description": "Dolar USA - Mayorista BCRA Comunicacion A 3500",
+                "source": "BCRA",
+                "last": float(latest.get("value")),
+                "value_date": latest.get("date"),
+                "updated_at": series.get("updated_at"),
+            }
+    except Exception:
+        pass
+
+    # 2) Items de pyRofex como info adicional (TMUSD, DLR/SPOT etc.)
     items = market.spot_quotes()
+    pyrofex_spot = market.spot_last()
+
+    # Spot principal: BCRA si lo tenemos, sino pyRofex como fallback
+    main = bcra_spot or pyrofex_spot
     return {
         "spot": main,
+        "bcra_a3500": bcra_spot,
+        "pyrofex_spot": pyrofex_spot,
         "items": items,
-        "count": len(items),
+        "count": len(items) + (1 if bcra_spot else 0),
         "updated_at": now_argentina_iso(),
     }
 

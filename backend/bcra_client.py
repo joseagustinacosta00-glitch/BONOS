@@ -35,6 +35,12 @@ BCRA_SERIES: dict[str, BcraSeriesDefinition] = {
         label="TAMAR en pesos de bancos privados (en % n.a.)",
         unit="Porcentaje nominal anual",
     ),
+    "usd_mayorista_a3500": BcraSeriesDefinition(
+        key="usd_mayorista_a3500",
+        variable_id=4,
+        label="Tipo de Cambio Mayorista (Comunicacion A 3500) - Referencia BCRA",
+        unit="ARS por USD",
+    ),
 }
 
 

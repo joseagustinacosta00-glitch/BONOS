@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd52 cargado - SPOT: matchea por description + diag mejorado");
+console.log("[Monitor] app.js v=hd53 cargado - SPOT desde BCRA A3500 (fuente oficial diaria)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -729,8 +729,9 @@ function renderSpotBanner() {
   }
   if (metaEl) {
     const display = spotCache.description || spotCache.symbol || "spot";
-    const ts = spotCache.updated_at ? formatTime(spotCache.updated_at) : "";
-    metaEl.textContent = `${display}${ts ? " · " + ts : ""}`;
+    const valueDate = spotCache.value_date ? formatDateDisplay(spotCache.value_date) : "";
+    const source = spotCache.source ? ` · ${spotCache.source}` : "";
+    metaEl.textContent = `${display}${valueDate ? " · " + valueDate : ""}${source}`;
   }
 }
 
