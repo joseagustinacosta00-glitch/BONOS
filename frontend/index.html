@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd65">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd65">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd66">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd66">
   </head>
   <body>
     <main class="app-shell">
@@ -693,8 +693,47 @@
                 <span id="hdStatusBottom" class="calc-status">-</span>
               </div>
 
+              <section id="dlkFxBar" class="dlk-fx-bar d-none" aria-label="Conversion FX para Dollar-Linked">
+                <div class="dlk-fx-row">
+                  <label class="dlk-fx-field">
+                    <span>Fecha de valuacion</span>
+                    <input id="dlkValuationDate" class="form-control form-control-sm" type="date">
+                  </label>
+                  <div class="dlk-fx-card" id="dlkFxCard">
+                    <span class="dlk-fx-label">FX activo</span>
+                    <span class="dlk-fx-value" id="dlkFxValue">—</span>
+                    <span class="dlk-fx-meta" id="dlkFxMeta">Cargando…</span>
+                  </div>
+                </div>
+                <p class="hd-help">
+                  Para fecha = hoy se usa <b>DLR/SPOT</b> intraday (LA/IV/CL). Para una fecha previa, se usa el <b>A3500 (BCRA)</b> publicado para ese dia. El cashflow nominal es el mismo del bono HD; el flujo en ARS = total USD × FX.
+                </p>
+              </section>
+
+              <section id="dlkArsCashflowSection" class="cashflow-preview d-none" aria-label="Cashflow en pesos (DLK)">
+                <h3>Cashflow ajustado por FX (ARS)</h3>
+                <div class="table-wrap inner-table">
+                  <table class="table table-sm align-middle mb-0 hd-cashflow-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Fecha de pago</th>
+                        <th class="text-end">Amortizacion (USD)</th>
+                        <th class="text-end">Interes (USD)</th>
+                        <th class="text-end">Total (USD)</th>
+                        <th class="text-end">FX aplicado</th>
+                        <th class="text-end">Total (ARS)</th>
+                      </tr>
+                    </thead>
+                    <tbody id="dlkArsCashflowBody">
+                      <tr><td colspan="7" class="empty-state">Calcula el cashflow para ver la conversion a pesos</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
               <section id="hdCashflowSection" class="cashflow-preview" aria-label="Cashflow Bono HD">
-                <h3>Cashflow Bono HD</h3>
+                <h3 id="hdCashflowSectionTitle">Cashflow Bono HD</h3>
                 <div class="table-wrap inner-table">
                   <table class="table table-sm align-middle mb-0 hd-cashflow-table">
                     <thead>
@@ -1240,7 +1279,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd65"></script>
-    <script src="/app-bundle.js?v=hd65"></script>
+    <script src="/static/futures_curve.js?v=hd66"></script>
+    <script src="/app-bundle.js?v=hd66"></script>
   </body>
 </html>

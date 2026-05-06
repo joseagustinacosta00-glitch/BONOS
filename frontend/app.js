@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd65 cargado - Curva: multi-select Bid/Last/Offer/Ajuste + filtro Minorista/Mayorista + tooltip simplificado");
+console.log("[Monitor] app.js v=hd66 cargado - Calculadora DLK: reusa template HD + FX bar (SPOT live / A3500 historico) + cashflow ARS");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -169,6 +169,7 @@ let currentCurrency = "all";
 let currentMarketList = "bonds";
 let currentLecapSettlement = "t1";
 let currentMarketCategory = "general";
+let currentBondModel = "lecap";
 let currentMarketSettlement = "t1";
 let currentView = "market";
 let currentBcraSeries = "cer";
@@ -776,6 +777,11 @@ function renderSpotBanner() {
     }
   }
   renderBrechaCards();
+  // Si la calculadora DLK esta abierta y la fecha es hoy, refrescamos su FX live
+  if (currentBondModel === "dlk" && DLK_STATE && DLK_STATE.fxDate) {
+    const today = _todayIso();
+    if (DLK_STATE.fxDate >= today) updateDlkFx();
+  }
 }
 
 // ===== Brecha (MEP/CCL vs SPOT) =====
@@ -1079,19 +1085,33 @@ function setBondModel(model) {
 
   const isLecap = model === "lecap";
   const isHardDollar = model === "hard_dollar";
+  const isDlk = model === "dlk";
+  // DLK reusa el template de Hard Dollar pero agrega FX bar + cashflow ARS
+  const showHdTemplate = isHardDollar || isDlk;
   const isTamar = model === "tamar";
   const isDual = model === "dual";
+  currentBondModel = model;
   lecapTemplate.classList.toggle("d-none", !isLecap);
-  hardDollarTemplate.classList.toggle("d-none", !isHardDollar);
+  hardDollarTemplate.classList.toggle("d-none", !showHdTemplate);
   if (tamarTemplate) tamarTemplate.classList.toggle("d-none", !isTamar);
   lecapSubmenu.classList.toggle("d-none", !isLecap);
   dualSubmenu.classList.toggle("d-none", !isDual);
-  calculatorPlaceholder.classList.toggle("d-none", isLecap || isHardDollar || isTamar);
+  calculatorPlaceholder.classList.toggle("d-none", isLecap || showHdTemplate || isTamar);
+
+  // Mostrar/ocultar extras DLK + ajustar titulo del cashflow
+  const dlkBar = document.querySelector("#dlkFxBar");
+  const dlkArs = document.querySelector("#dlkArsCashflowSection");
+  const cashflowTitle = document.querySelector("#hdCashflowSectionTitle");
+  if (dlkBar) dlkBar.classList.toggle("d-none", !isDlk);
+  if (dlkArs) dlkArs.classList.toggle("d-none", !isDlk);
+  if (cashflowTitle) cashflowTitle.textContent = isDlk ? "Cashflow nominal (USD)" : "Cashflow Bono HD";
+
   if (isLecap) {
     calculatorPlaceholder.textContent = "";
-  } else if (isHardDollar) {
+  } else if (showHdTemplate) {
     renderHardDollarCouponInputs();
-    setHdMode("search");
+    setHdMode(isDlk ? "new" : "search");
+    if (isDlk) initDlkFxBar();
   } else if (isTamar) {
     if (tamarIssueDate) attachDdmmAutoformat(tamarIssueDate);
     if (tamarMaturityDate) attachDdmmAutoformat(tamarMaturityDate);
@@ -2416,6 +2436,127 @@ function renderHdCashflowTable(payload) {
       <td class="text-end">${formatNumber(row.total_per_100, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
     </tr>
   `).join("");
+  // En modo DLK, ademas pintamos el cashflow ajustado por FX
+  if (currentBondModel === "dlk") renderDlkArsCashflow();
+}
+
+// ============================ DLK calculator ============================
+const DLK_STATE = {
+  fxValue: null,
+  fxSource: null,    // "DLR/SPOT (LA|IV|CL)" o "A3500 dd/mm/aaaa"
+  fxDate: null,      // ISO YYYY-MM-DD seleccionada
+  initialized: false,
+};
+
+function _todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function initDlkFxBar() {
+  const dateInput = document.querySelector("#dlkValuationDate");
+  if (!dateInput) return;
+  if (!dateInput.value) dateInput.value = _todayIso();
+  if (!DLK_STATE.initialized) {
+    dateInput.addEventListener("change", () => updateDlkFx());
+    DLK_STATE.initialized = true;
+  }
+  updateDlkFx();
+}
+
+async function updateDlkFx() {
+  const dateInput = document.querySelector("#dlkValuationDate");
+  const valueEl = document.querySelector("#dlkFxValue");
+  const metaEl = document.querySelector("#dlkFxMeta");
+  if (!dateInput || !valueEl || !metaEl) return;
+  const selectedDate = dateInput.value || _todayIso();
+  const today = _todayIso();
+  DLK_STATE.fxDate = selectedDate;
+
+  if (selectedDate >= today) {
+    // Hoy o futuro: usar SPOT live (DLR/SPOT)
+    const spot = (spotLiveCache && spotLiveCache.last != null) ? Number(spotLiveCache.last) : null;
+    const src = spotLiveCache?.last_source || "";
+    DLK_STATE.fxValue = spot;
+    DLK_STATE.fxSource = spot != null ? `DLR/SPOT${src ? " · " + src : ""}` : "—";
+    valueEl.textContent = spot != null ? fmtNumAr(spot, 2) : "—";
+    metaEl.innerHTML = spot != null
+      ? `<b>${DLK_STATE.fxSource}</b> · valuacion al <b>${formatDateDisplay(selectedDate)}</b>`
+      : "Esperando SPOT live (mercado 10-15h)";
+  } else {
+    // Fecha pasada: A3500 historico via BCRA
+    valueEl.textContent = "…";
+    metaEl.textContent = `Buscando A3500 publicado al ${formatDateDisplay(selectedDate)}…`;
+    try {
+      // Pedimos un rango de 10 dias hacia atras para tomar la ultima publicacion habil
+      const from = new Date(selectedDate);
+      from.setDate(from.getDate() - 10);
+      const fromIso = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+      const url = `/api/bcra/series/usd_mayorista_a3500?desde=${fromIso}&hasta=${selectedDate}&limit=20`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("bcra http " + r.status);
+      const payload = await r.json();
+      const points = payload?.points || payload?.data || [];
+      // Tomar el ultimo dato cuya fecha sea <= selectedDate
+      let chosen = null;
+      for (const p of points) {
+        const d = p.date || p.fecha || p.value_date;
+        const v = p.value != null ? p.value : p.valor;
+        if (!d || v == null) continue;
+        if (d <= selectedDate && (!chosen || d > chosen.d)) chosen = { d, v: Number(v) };
+      }
+      if (chosen) {
+        DLK_STATE.fxValue = chosen.v;
+        DLK_STATE.fxSource = `A3500 (BCRA · ${formatDateDisplay(chosen.d)})`;
+        valueEl.textContent = fmtNumAr(chosen.v, 4);
+        metaEl.innerHTML = `<b>${DLK_STATE.fxSource}</b> · valuacion al <b>${formatDateDisplay(selectedDate)}</b>`;
+      } else {
+        DLK_STATE.fxValue = null;
+        DLK_STATE.fxSource = null;
+        valueEl.textContent = "—";
+        metaEl.textContent = `Sin A3500 publicado para esa fecha`;
+      }
+    } catch (err) {
+      DLK_STATE.fxValue = null;
+      DLK_STATE.fxSource = null;
+      valueEl.textContent = "—";
+      metaEl.textContent = `Error al consultar BCRA: ${err.message || err}`;
+    }
+  }
+  // Re-render cashflow ARS si ya hay calculo
+  if (currentBondModel === "dlk") renderDlkArsCashflow();
+}
+
+function renderDlkArsCashflow() {
+  const body = document.querySelector("#dlkArsCashflowBody");
+  if (!body) return;
+  const cashflows = (hdLastCalculation && hdLastCalculation.cashflows) || [];
+  if (!cashflows.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Calcula el cashflow para ver la conversion a pesos</td></tr>';
+    return;
+  }
+  const fx = DLK_STATE.fxValue;
+  if (fx == null || !isFinite(fx) || fx <= 0) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">FX no disponible — elegi una fecha con cotizacion publicada</td></tr>';
+    return;
+  }
+  body.innerHTML = cashflows.map((row) => {
+    const amortUsd = Number(row.amortization_per_100) || 0;
+    const interestUsd = Number(row.interest_per_100) || 0;
+    const totalUsd = Number(row.total_per_100) || 0;
+    const totalArs = totalUsd * fx;
+    return `
+      <tr>
+        <td>${row.number}</td>
+        <td>${formatDate(row.effective_payment_date || row.payment_date)}</td>
+        <td class="text-end">${formatNumber(amortUsd, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(interestUsd, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(totalUsd, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(fx, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end"><b>${formatNumber(totalArs, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
+      </tr>
+    `;
+  }).join("");
 }
 
 async function fetchLecapMarket() {

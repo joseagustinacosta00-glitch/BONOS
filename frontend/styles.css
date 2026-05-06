@@ -1097,6 +1097,17 @@ tbody td {
 .brecha-row-value { font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; color: #b45309; line-height: 1.1; white-space: nowrap; }
 .brecha-row-value.neg { color: #047857; }
 .brecha-empty { font-size: 0.72rem; color: #a16207; font-style: italic; padding: 0.3rem 0; }
+
+/* ===== DLK FX bar ===== */
+.dlk-fx-bar { background: linear-gradient(90deg, #f0fdf4 0%, #ecfeff 100%); border: 1px solid #bbf7d0; border-left: 6px solid #16a34a; border-radius: 0.6rem; padding: 0.7rem 0.95rem; margin-bottom: 0.75rem; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.dlk-fx-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.dlk-fx-field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.72rem; color: #166534; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.dlk-fx-field input { width: 160px; }
+.dlk-fx-card { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.4rem 0.85rem; background: rgba(22, 163, 74, 0.08); border-radius: 0.4rem; border: 1px solid rgba(22, 163, 74, 0.2); flex: 1; min-width: 200px; }
+.dlk-fx-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #166534; }
+.dlk-fx-value { font-size: 1.5rem; font-weight: 800; color: #16a34a; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.dlk-fx-meta { font-size: 0.72rem; color: #475569; }
+.dlk-fx-meta b { color: #166534; }
 .spot-card { padding: 0.85rem 1.1rem; border-radius: 0.6rem; display: flex; flex-direction: column; gap: 0.2rem; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
 .spot-card-live { background: linear-gradient(90deg, #ecfdf5 0%, #f0fdf4 100%); border: 1px solid #bbf7d0; border-left: 6px solid #16a34a; }
 .spot-card-a3500 { background: linear-gradient(90deg, #eff6ff 0%, #f8fafc 100%); border: 1px solid #bfdbfe; border-left: 6px solid #0d6efd; }
