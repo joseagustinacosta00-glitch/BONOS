@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd72 cargado - Curva DLK: multi-Bid/Last/Offer + 5 modelos + labels (TNA+ticker) + click para what-if");
+console.log("[Monitor] app.js v=hd73 cargado - Sinteticas ARS + Forwards en DLK + modal amigable + labels mas grandes");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -755,6 +755,29 @@ function renderFuturosDlk() {
   if (window.FuturesCurve) window.FuturesCurve.update(futList);
   // Curva TNA DLK (reducida, mismo settlement T+0/T+1)
   renderDlkCurve(dlkBySymbol, settleIso, spotForTna);
+  // Sinteticas ARS: arbitraje DLK ofrecido vs futuro descontado al fixing
+  renderSyntheticArsCurve(dlkBySymbol, settleIso, spotForTna);
+}
+
+// ===== Sinteticas ARS · Tasa colocadora =====
+// Mapping bono -> simbolo de futuro DLR para arbitrar.
+const DLK_TO_FUTURE = {
+  TZV26: "DLR/JUN26",
+  D30S6: "DLR/SEP26",
+  TZV27: "DLR/JUN27",
+  TZV28: "DLR/JUN28",
+};
+
+// Resta n dias habiles a una fecha ISO (skip sabados/domingos, sin feriados).
+function _prevBusinessDays(dateIso, n) {
+  const d = new Date(`${dateIso}T00:00:00`);
+  let count = 0;
+  while (count < n) {
+    d.setDate(d.getDate() - 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // ===== Curva TNA bonos DLK: estado + helpers + render =====
@@ -807,6 +830,15 @@ function _initDlkCurveControls() {
       renderFuturosDlk();
     });
   }
+  // Toggle Forwards
+  const fwdChk = document.getElementById("dlkShowForward");
+  if (fwdChk) {
+    fwdChk.checked = localStorage.getItem("dlkShowForward") === "1";
+    fwdChk.addEventListener("change", () => {
+      try { localStorage.setItem("dlkShowForward", fwdChk.checked ? "1" : "0"); } catch (_) {}
+      renderFuturosDlk();
+    });
+  }
   // Reset overrides
   const resetBtn = document.getElementById("dlkResetOverrides");
   if (resetBtn) {
@@ -847,49 +879,133 @@ const _dlkLabelsPlugin = {
         if (!raw || !raw._p) return;
         const x = point.x;
         const y = point.y;
-        // Linea 1 (mas arriba): TNA en color de la serie
+        // Linea 1 (mas arriba): TNA en color de la serie, mas grande y bold
         ctx.fillStyle = ds.borderColor || "#cbd5e1";
-        ctx.font = "700 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-        ctx.fillText(`${raw._p.tna.toFixed(1)}%`, x, y - 22);
-        // Linea 2: ticker, mas claro
-        ctx.fillStyle = "#e2e8f0";
-        ctx.font = "600 9px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-        ctx.fillText(raw._p.ticker, x, y - 11);
+        ctx.font = "700 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.fillText(`${raw._p.tna.toFixed(2)}%`, x, y - 28);
+        // Linea 2: ticker, blanco brillante y bold
+        ctx.fillStyle = "#f1f5f9";
+        ctx.font = "700 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.fillText(raw._p.ticker, x, y - 14);
       });
       ctx.restore();
     });
   },
 };
 
-function _promptDlkOverride(ticker, currentTna, currentPrice, spot, days) {
-  const help = `Modificar ${ticker} (cotiza a precio ${fmtNumAr(currentPrice, 2)}, tasa ${currentTna.toFixed(2)}%).\n\n` +
-               `Ingresa una nueva TNA (con %) o un nuevo precio (sin %).\n` +
-               `Ej: "28%" para fijar TNA = 28%.\n` +
-               `Ej: "1450" para fijar precio = 1450.\n` +
-               `Vacio para borrar el what-if existente.`;
-  const cur = DLK_CURVE_STATE.overrides[ticker];
-  const def = cur ? (cur.type === "tna" ? `${cur.value}%` : `${cur.value}`) : "";
-  const v = window.prompt(help, def);
-  if (v == null) return null; // cancelado
-  const trimmed = String(v).trim();
-  if (trimmed === "") {
-    delete DLK_CURVE_STATE.overrides[ticker];
-    _saveDlkCurveState();
-    return "deleted";
+// Modal amigable para editar TNA / precio de un punto en la curva DLK.
+let _dlkModalOpenedFor = null;
+let _dlkModalMode = "tna";
+function _openDlkEditModal(ctx) {
+  // ctx: { ticker, tna, price, spot, days, mat }
+  const overlay = document.getElementById("dlkEditModal");
+  const titleEl = document.getElementById("dlkEditModalTitle");
+  const metaEl = document.getElementById("dlkEditModalMeta");
+  const inputEl = document.getElementById("dlkEditModalInput");
+  const helpEl = document.getElementById("dlkEditModalHelp");
+  const deleteBtn = document.getElementById("dlkEditModalDelete");
+  if (!overlay || !inputEl) return;
+  _dlkModalOpenedFor = ctx;
+  // Modo segun lo que haya guardado (si hay) o TNA por default
+  const cur = DLK_CURVE_STATE.overrides[ctx.ticker];
+  _dlkModalMode = (cur && cur.type) || "tna";
+  // Sync toggle visual
+  document.querySelectorAll("#dlkEditModalToggle button").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === _dlkModalMode);
+  });
+  if (titleEl) titleEl.textContent = `Editar ${ctx.ticker}`;
+  if (metaEl) {
+    metaEl.innerHTML = `
+      Mercado: <b>${fmtNumAr(ctx.price, 2)}</b> · TNA <b>${ctx.tna.toFixed(2)}%</b><br>
+      Vto: <b>${formatDateDisplay(ctx.mat)}</b> · Dias al vto: <b>${Math.round(ctx.days)}</b>
+    `;
   }
-  const isPct = trimmed.endsWith("%");
-  const numStr = isPct ? trimmed.slice(0, -1).trim() : trimmed;
-  const num = Number(numStr.replace(",", "."));
-  if (!isFinite(num)) {
-    alert("Valor invalido.");
-    return null;
+  // Default value en el input
+  if (cur) {
+    inputEl.value = cur.value;
+  } else {
+    inputEl.value = _dlkModalMode === "tna" ? ctx.tna.toFixed(2) : ctx.price.toFixed(2);
   }
-  DLK_CURVE_STATE.overrides[ticker] = isPct
-    ? { type: "tna", value: num }
-    : { type: "price", value: num };
-  _saveDlkCurveState();
-  return "set";
+  _updateDlkModalHelp();
+  // Boton borrar habilitado solo si hay override
+  if (deleteBtn) deleteBtn.style.display = cur ? "" : "none";
+  overlay.classList.remove("d-none");
+  setTimeout(() => inputEl.focus(), 30);
 }
+
+function _updateDlkModalHelp() {
+  const helpEl = document.getElementById("dlkEditModalHelp");
+  if (!helpEl) return;
+  helpEl.textContent = _dlkModalMode === "tna"
+    ? "Ingresa una TNA en %. El precio se back-calcula desde la TNA, el spot y los dias al vencimiento."
+    : "Ingresa un precio. La TNA se calcula a partir del precio, el spot y los dias al vencimiento.";
+}
+
+function _closeDlkEditModal() {
+  const overlay = document.getElementById("dlkEditModal");
+  if (overlay) overlay.classList.add("d-none");
+  _dlkModalOpenedFor = null;
+}
+
+function _applyDlkEditModal() {
+  if (!_dlkModalOpenedFor) return;
+  const inputEl = document.getElementById("dlkEditModalInput");
+  if (!inputEl) return;
+  const raw = String(inputEl.value || "").trim().replace(",", ".");
+  if (raw === "") return;
+  const num = Number(raw);
+  if (!isFinite(num)) { alert("Valor invalido."); return; }
+  DLK_CURVE_STATE.overrides[_dlkModalOpenedFor.ticker] = { type: _dlkModalMode, value: num };
+  _saveDlkCurveState();
+  _closeDlkEditModal();
+  renderFuturosDlk();
+}
+
+function _deleteDlkEditModal() {
+  if (!_dlkModalOpenedFor) return;
+  delete DLK_CURVE_STATE.overrides[_dlkModalOpenedFor.ticker];
+  _saveDlkCurveState();
+  _closeDlkEditModal();
+  renderFuturosDlk();
+}
+
+(function _initDlkEditModalListeners() {
+  // Hookeamos una sola vez. Como los elementos pueden no existir todavia
+  // (si el DOM no termino de parsear), usamos DOMContentLoaded fallback.
+  function bind() {
+    const overlay = document.getElementById("dlkEditModal");
+    if (!overlay) { setTimeout(bind, 50); return; }
+    document.getElementById("dlkEditModalClose")?.addEventListener("click", _closeDlkEditModal);
+    document.getElementById("dlkEditModalCancel")?.addEventListener("click", _closeDlkEditModal);
+    document.getElementById("dlkEditModalApply")?.addEventListener("click", _applyDlkEditModal);
+    document.getElementById("dlkEditModalDelete")?.addEventListener("click", _deleteDlkEditModal);
+    document.getElementById("dlkEditModalInput")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") _applyDlkEditModal();
+      if (e.key === "Escape") _closeDlkEditModal();
+    });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) _closeDlkEditModal();
+    });
+    document.querySelectorAll("#dlkEditModalToggle button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _dlkModalMode = btn.dataset.mode;
+        document.querySelectorAll("#dlkEditModalToggle button").forEach(b => {
+          b.classList.toggle("active", b === btn);
+        });
+        _updateDlkModalHelp();
+        // Re-poblar input con el valor sugerido del nuevo modo
+        const inputEl = document.getElementById("dlkEditModalInput");
+        if (inputEl && _dlkModalOpenedFor) {
+          inputEl.value = _dlkModalMode === "tna"
+            ? _dlkModalOpenedFor.tna.toFixed(2)
+            : _dlkModalOpenedFor.price.toFixed(2);
+          inputEl.focus();
+        }
+      });
+    });
+  }
+  bind();
+})();
 
 function renderDlkCurve(dlkBySymbol, settleIso, spot) {
   const canvas = document.querySelector("#dlkCurveChart");
@@ -1040,6 +1156,42 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
     });
   }
 
+  // Forward implicita entre vencimientos consecutivos (usando el primer field activo)
+  const showForward = !!document.getElementById("dlkShowForward")?.checked;
+  if (showForward && seriesByField[0] && seriesByField[0].points.length >= 2) {
+    const pts = seriesByField[0].points.slice().sort((a, b) => a.x - b.x);
+    const fwdPoints = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const span = b.x - a.x;
+      if (span <= 0 || a.price <= 0 || b.price <= 0) continue;
+      // forward implicito: ((p_A / p_B) - 1) * 365 / span * 100
+      // (DLK: precio mas bajo => yield mas alto, mismo razonamiento que TNA)
+      const fwd = ((a.price / b.price) - 1) * 365 / span * 100;
+      const midDays = (a.x + b.x) / 2;
+      fwdPoints.push({
+        x: midDays, y: fwd,
+        _fwd: { from: a.ticker, to: b.ticker, fromDays: a.x, toDays: b.x, span, fwd },
+      });
+    }
+    if (fwdPoints.length) {
+      datasets.push({
+        type: "line",
+        label: "Forward",
+        data: fwdPoints,
+        borderColor: "#fbbf24",
+        backgroundColor: "rgba(251,191,36,0.08)",
+        borderDash: [3, 3],
+        borderWidth: 1.5,
+        pointRadius: 4,
+        pointBackgroundColor: "#fbbf24",
+        pointHoverRadius: 6,
+        order: 4,
+        spanGaps: true,
+      });
+    }
+  }
+
   // Universo de puntos para callback de eje X
   const allPoints = seriesByField.flatMap(s => s.points).sort((a, b) => a.x - b.x);
 
@@ -1050,13 +1202,13 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { top: 24, right: 14, bottom: 4, left: 4 } },
+      layout: { padding: { top: 36, right: 18, bottom: 4, left: 6 } },
       scales: {
         x: {
           type: "linear",
           grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
           ticks: {
-            color: "#94a3b8", font: { size: 9 }, maxRotation: 0,
+            color: "#94a3b8", font: { size: 10 }, maxRotation: 0,
             callback(v) {
               const p = allPoints.find(pp => pp.x === v);
               if (p && p.mat) {
@@ -1074,7 +1226,7 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
         y: {
           grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
           ticks: {
-            color: "#94a3b8", font: { size: 9 },
+            color: "#94a3b8", font: { size: 10 },
             callback: v => `${Number(v).toFixed(0)}%`,
           },
           border: { color: "rgba(148,163,184,0.2)" },
@@ -1087,8 +1239,9 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
         const raw = ds && ds.data[el.index];
         if (!raw || !raw._p) return;
         const p = raw._p;
-        const result = _promptDlkOverride(p.ticker, p.tna, p.price, spot, p.x);
-        if (result) renderFuturosDlk();
+        _openDlkEditModal({
+          ticker: p.ticker, tna: p.tna, price: p.price, spot, days: p.x, mat: p.mat,
+        });
       },
       plugins: {
         legend: { display: false },
@@ -1105,20 +1258,32 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
           callbacks: {
             title(ctx) {
               const raw = ctx[0].raw;
-              if (!raw || !raw._p) return "";
-              const tag = raw._p.override ? " (what-if)" : ` (${DLK_FIELD_DEFS[raw._p.field]?.label || ""})`;
-              return `${raw._p.ticker}${tag}`;
+              if (raw && raw._p) {
+                const tag = raw._p.override ? " (what-if)" : ` (${DLK_FIELD_DEFS[raw._p.field]?.label || ""})`;
+                return `${raw._p.ticker}${tag}`;
+              }
+              if (raw && raw._fwd) return `Forward ${raw._fwd.from} → ${raw._fwd.to}`;
+              return "";
             },
             label(ctx) {
               const raw = ctx.raw;
-              if (!raw || !raw._p) return "";
-              const lines = [
-                `Precio: ${fmtNumAr(raw._p.price, 2)}`,
-                `Tasa: ${raw._p.tna.toFixed(2)}%`,
-              ];
-              if (!raw._p.override) lines.push(`Vto: ${formatDateDisplay(raw._p.mat)} (${Math.round(raw._p.x)}d)`);
-              if (raw._p.override) lines.push(`(click otra vez para editar)`);
-              return lines;
+              if (raw && raw._p) {
+                const lines = [
+                  `Precio: ${fmtNumAr(raw._p.price, 2)}`,
+                  `Tasa: ${raw._p.tna.toFixed(2)}%`,
+                ];
+                if (!raw._p.override) lines.push(`Vto: ${formatDateDisplay(raw._p.mat)} (${Math.round(raw._p.x)}d)`);
+                if (raw._p.override) lines.push(`(click otra vez para editar)`);
+                return lines;
+              }
+              if (raw && raw._fwd) {
+                return [
+                  `${raw._fwd.from} (${Math.round(raw._fwd.fromDays)}d) → ${raw._fwd.to} (${Math.round(raw._fwd.toDays)}d)`,
+                  `Span: ${Math.round(raw._fwd.span)}d`,
+                  `Forward TNA: ${raw._fwd.fwd.toFixed(2)}%`,
+                ];
+              }
+              return "";
             },
           },
         },
@@ -1134,6 +1299,297 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
     _dlkCurveChart.update("none");
   } else {
     _dlkCurveChart = new Chart(canvas.getContext("2d"), cfg);
+  }
+}
+
+// ===== Render: Curva sintetica ARS (tasa colocadora) =====
+let _syntheticChart = null;
+let _syntheticListenersReady = false;
+
+function _initSyntheticControls() {
+  if (_syntheticListenersReady) return;
+  ["syntheticDiscountModel", "syntheticCurveModel"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const saved = localStorage.getItem(id);
+    if (saved) el.value = saved;
+    el.addEventListener("change", () => {
+      try { localStorage.setItem(id, el.value); } catch (_) {}
+      renderFuturosDlk();
+    });
+  });
+  const fwd = document.getElementById("syntheticShowForward");
+  if (fwd) {
+    fwd.checked = localStorage.getItem("syntheticShowForward") === "1";
+    fwd.addEventListener("change", () => {
+      try { localStorage.setItem("syntheticShowForward", fwd.checked ? "1" : "0"); } catch (_) {}
+      renderFuturosDlk();
+    });
+  }
+  _syntheticListenersReady = true;
+}
+
+function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
+  const canvas = document.querySelector("#syntheticChart");
+  const meta = document.querySelector("#syntheticMeta");
+  if (!canvas || typeof Chart === "undefined") return;
+  _initSyntheticControls();
+
+  const discountModelName = document.getElementById("syntheticDiscountModel")?.value || "linear";
+  const curveModelName = document.getElementById("syntheticCurveModel")?.value || "linear";
+
+  // 1) Construir curva de futuros (TNA al BID, que es el lado vendedor) y fitearla con el modelo de descuento.
+  const todayIso = _todayIso();
+  const futList = futuresCache || [];
+  const futureByName = {};
+  const futurePoints = [];
+  for (const f of futList) {
+    if (!f || !f.symbol || !f.expiration) continue;
+    futureByName[f.symbol] = f;
+    const bid = f.bid != null ? Number(f.bid) : null;
+    const fdays = f.days_to_maturity != null ? Number(f.days_to_maturity) : _daysBetweenIso(todayIso, f.expiration);
+    if (bid == null || !isFinite(bid) || bid <= 0 || fdays <= 0 || spot == null) continue;
+    const fwdTna = ((bid / spot) - 1) * 365 / fdays * 100;
+    if (!isFinite(fwdTna)) continue;
+    futurePoints.push({ x: fdays, y: fwdTna });
+  }
+  futurePoints.sort((a, b) => a.x - b.x);
+  let discountModel = null;
+  if (futurePoints.length >= 2 && window.FuturesCurve?.fitModel) {
+    const observed = futurePoints.map(p => ({ isIncludedInCurve: true, daysToMaturity: p.x, tnaPct: p.y }));
+    discountModel = window.FuturesCurve.fitModel(observed, discountModelName);
+  }
+
+  // 2) Para cada bono DLK con futuro mapeado, calcular la sintetica.
+  const synthPoints = [];
+  for (const ticker of DLK_ORDER) {
+    const matIso = DLK_MATURITIES[ticker];
+    const futSym = DLK_TO_FUTURE[ticker];
+    if (!matIso || !futSym) continue;
+    const bondQ = dlkBySymbol[ticker];
+    const futQ = futureByName[futSym];
+    if (!bondQ || !futQ || !futQ.expiration) continue;
+    const bondAsk = bondQ.ask != null ? Number(bondQ.ask) : null;
+    const futBid = futQ.bid != null ? Number(futQ.bid) : null;
+    if (bondAsk == null || futBid == null || bondAsk <= 0 || futBid <= 0) continue;
+
+    // Fixing del bono = 3 dias habiles antes del vencimiento del bono
+    const fixingIso = _prevBusinessDays(matIso, 3);
+    const futExpIso = String(futQ.expiration);
+    const daysSettleToFixing = _daysBetweenIso(settleIso, fixingIso);
+    const daysFixingToFutExp = _daysBetweenIso(fixingIso, futExpIso);
+    if (daysSettleToFixing <= 0) continue; // ya pasamos el fixing
+
+    // 3) Descontar el futuro al fixing usando el modelo de descuento.
+    let discountedFut = futBid;
+    if (daysFixingToFutExp > 0 && discountModel) {
+      const daysTodayToFixing = _daysBetweenIso(todayIso, fixingIso);
+      const tnaAtFixing = discountModel.predict(daysTodayToFixing);
+      if (tnaAtFixing != null && isFinite(tnaAtFixing)) {
+        discountedFut = futBid / (1 + (tnaAtFixing / 100) * daysFixingToFutExp / 365);
+      }
+    }
+
+    // 4) Tasa sintetica colocadora = ((futuro_descontado / bono_offer) - 1) * 365 / dias * 100
+    const synthTna = ((discountedFut / bondAsk) - 1) * 365 / daysSettleToFixing * 100;
+    if (!isFinite(synthTna)) continue;
+
+    synthPoints.push({
+      x: daysSettleToFixing,
+      y: synthTna,
+      ticker, mat: matIso, fixingIso, futSym,
+      bondAsk, futBid, discountedFut, daysFixingToFutExp,
+      tna: synthTna, price: bondAsk,
+    });
+  }
+  synthPoints.sort((a, b) => a.x - b.x);
+
+  if (meta) {
+    if (spot == null) meta.textContent = "Esperando SPOT…";
+    else if (!synthPoints.length) meta.textContent = "Sin datos suficientes (faltan precios bid/ask)";
+    else {
+      meta.textContent = `${synthPoints.length} bonos · descuento: ${discountModelName} · curva: ${curveModelName} · ${currentMarketSettlement.toUpperCase()}`;
+    }
+  }
+
+  // 5) Fit del modelo de la CURVA sintetica (independiente del descuento)
+  let synthModel = null;
+  if (synthPoints.length >= 2 && window.FuturesCurve?.fitModel) {
+    const observed = synthPoints.map(p => ({ isIncludedInCurve: true, daysToMaturity: p.x, tnaPct: p.y }));
+    synthModel = window.FuturesCurve.fitModel(observed, curveModelName);
+  }
+
+  const datasets = [];
+  // Linea uniendo puntos
+  datasets.push({
+    type: "line",
+    label: "Sintetica",
+    data: synthPoints.map(p => ({ x: p.x, y: p.y, _p: p })),
+    borderColor: "#a78bfa",
+    backgroundColor: "rgba(167,139,250,0.06)",
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.2,
+    order: 2,
+    spanGaps: true,
+  });
+  // Scatter con labels
+  datasets.push({
+    type: "scatter",
+    label: "Sintetica puntos",
+    data: synthPoints.map(p => ({ x: p.x, y: p.y, _p: p })),
+    backgroundColor: "#a78bfa",
+    borderColor: "#7c3aed",
+    pointRadius: 5,
+    pointHoverRadius: 7,
+    order: 1,
+    _labelPoints: true,
+  });
+  // Curva teorica
+  if (synthModel && synthPoints.length >= 2) {
+    const minX = synthPoints[0].x;
+    const maxX = synthPoints[synthPoints.length - 1].x;
+    const N = 60;
+    const theo = [];
+    for (let i = 0; i <= N; i++) {
+      const x = minX + (maxX - minX) * (i / N);
+      const y = synthModel.predict(x);
+      if (y != null && isFinite(y)) theo.push({ x, y });
+    }
+    datasets.push({
+      type: "line",
+      label: "Sintetica teorica",
+      data: theo,
+      borderColor: "#a78bfa",
+      borderDash: [4, 4],
+      borderWidth: 1.2,
+      pointRadius: 0,
+      order: 3,
+      spanGaps: true,
+    });
+  }
+  // Forwards entre sinteticas consecutivas
+  if (document.getElementById("syntheticShowForward")?.checked && synthPoints.length >= 2) {
+    const fwdPoints = [];
+    for (let i = 0; i < synthPoints.length - 1; i++) {
+      const a = synthPoints[i], b = synthPoints[i + 1];
+      const span = b.x - a.x;
+      if (span <= 0 || a.bondAsk <= 0 || b.bondAsk <= 0) continue;
+      const fwd = ((a.bondAsk / b.bondAsk) - 1) * 365 / span * 100;
+      const midDays = (a.x + b.x) / 2;
+      fwdPoints.push({
+        x: midDays, y: fwd,
+        _fwd: { from: a.ticker, to: b.ticker, fromDays: a.x, toDays: b.x, span, fwd },
+      });
+    }
+    if (fwdPoints.length) {
+      datasets.push({
+        type: "line",
+        label: "Forward sint.",
+        data: fwdPoints,
+        borderColor: "#fbbf24",
+        backgroundColor: "rgba(251,191,36,0.08)",
+        borderDash: [3, 3],
+        borderWidth: 1.5,
+        pointRadius: 4,
+        pointBackgroundColor: "#fbbf24",
+        pointHoverRadius: 6,
+        order: 4,
+        spanGaps: true,
+      });
+    }
+  }
+
+  const cfg = {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      layout: { padding: { top: 36, right: 18, bottom: 4, left: 6 } },
+      scales: {
+        x: {
+          type: "linear",
+          grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
+          ticks: {
+            color: "#94a3b8", font: { size: 10 }, maxRotation: 0,
+            callback(v) {
+              const p = synthPoints.find(pp => pp.x === v);
+              if (p && p.fixingIso) {
+                const parts = p.fixingIso.split("-");
+                if (parts.length === 3) {
+                  const m = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][Number(parts[1])-1];
+                  return `${m}-${parts[0].slice(-2)}`;
+                }
+              }
+              return `${Math.round(v)}d`;
+            },
+          },
+          border: { color: "rgba(148,163,184,0.2)" },
+        },
+        y: {
+          grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
+          ticks: {
+            color: "#94a3b8", font: { size: 10 },
+            callback: v => `${Number(v).toFixed(0)}%`,
+          },
+          border: { color: "rgba(148,163,184,0.2)" },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "rgba(15,23,42,0.95)",
+          borderColor: "rgba(148,163,184,0.25)",
+          borderWidth: 1,
+          padding: 10,
+          titleColor: "#f8fafc",
+          titleFont: { size: 11, weight: "600" },
+          bodyColor: "#cbd5e1",
+          bodyFont: { size: 11 },
+          displayColors: false,
+          callbacks: {
+            title(ctx) {
+              const raw = ctx[0].raw;
+              if (raw && raw._p) return `${raw._p.ticker} sintética`;
+              if (raw && raw._fwd) return `Forward ${raw._fwd.from} → ${raw._fwd.to}`;
+              return "";
+            },
+            label(ctx) {
+              const raw = ctx.raw;
+              if (raw && raw._p) {
+                return [
+                  `Bono offer: ${fmtNumAr(raw._p.bondAsk, 2)}`,
+                  `Futuro ${raw._p.futSym} bid: ${fmtNumAr(raw._p.futBid, 2)}`,
+                  `Futuro descontado al fixing: ${fmtNumAr(raw._p.discountedFut, 2)}`,
+                  `Fixing: ${formatDateDisplay(raw._p.fixingIso)} (3 dh antes vto)`,
+                  `TNA sintetica: ${raw._p.tna.toFixed(2)}%`,
+                ];
+              }
+              if (raw && raw._fwd) {
+                return [
+                  `${raw._fwd.from} (${Math.round(raw._fwd.fromDays)}d) → ${raw._fwd.to} (${Math.round(raw._fwd.toDays)}d)`,
+                  `Span: ${Math.round(raw._fwd.span)}d`,
+                  `Forward TNA: ${raw._fwd.fwd.toFixed(2)}%`,
+                ];
+              }
+              return "";
+            },
+          },
+        },
+      },
+    },
+    plugins: [_dlkLabelsPlugin],
+  };
+
+  if (_syntheticChart) {
+    _syntheticChart.data = cfg.data;
+    _syntheticChart.options = cfg.options;
+    _syntheticChart.resize();
+    _syntheticChart.update("none");
+  } else {
+    _syntheticChart = new Chart(canvas.getContext("2d"), cfg);
   }
 }
 

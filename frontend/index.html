@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd72">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd72">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd73">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd73">
   </head>
   <body>
     <main class="app-shell">
@@ -245,10 +245,51 @@
                       <option value="polynomial">Polinomico</option>
                     </select>
                   </label>
+                  <label class="dlk-ctrl">
+                    <input type="checkbox" id="dlkShowForward">
+                    <span>Forwards</span>
+                  </label>
                   <button type="button" id="dlkResetOverrides" class="dlk-ctrl-btn" title="Borra todas las modificaciones manuales (what-ifs)">Reset what-ifs</button>
                 </div>
                 <div class="dlk-curve-wrap">
                   <canvas id="dlkCurveChart"></canvas>
+                </div>
+              </section>
+
+              <!-- Sinteticas ARS · Tasa colocadora (compro DLK al offer, vendo futuro al bid) -->
+              <section class="dlk-curve-panel" id="syntheticPanel">
+                <div class="dlk-curve-header">
+                  <span class="dlk-curve-title">Sinteticas ARS · Tasa colocadora</span>
+                  <span class="dlk-curve-meta" id="syntheticMeta">—</span>
+                </div>
+                <div class="dlk-curve-controls">
+                  <label class="dlk-ctrl">
+                    <span>Modelo descuento futuro</span>
+                    <select id="syntheticDiscountModel">
+                      <option value="linear" selected>Lineal</option>
+                      <option value="spline">Spline</option>
+                      <option value="nelson_siegel">Nelson-Siegel</option>
+                      <option value="svensson">Svensson</option>
+                      <option value="polynomial">Polinomico</option>
+                    </select>
+                  </label>
+                  <label class="dlk-ctrl">
+                    <span>Modelo curva sint.</span>
+                    <select id="syntheticCurveModel">
+                      <option value="linear" selected>Lineal</option>
+                      <option value="spline">Spline</option>
+                      <option value="nelson_siegel">Nelson-Siegel</option>
+                      <option value="svensson">Svensson</option>
+                      <option value="polynomial">Polinomico</option>
+                    </select>
+                  </label>
+                  <label class="dlk-ctrl">
+                    <input type="checkbox" id="syntheticShowForward">
+                    <span>Forwards</span>
+                  </label>
+                </div>
+                <div class="dlk-curve-wrap">
+                  <canvas id="syntheticChart"></canvas>
                 </div>
               </section>
             </div>
@@ -1325,8 +1366,33 @@
       </div>
     </div>
 
+    <!-- Modal de edicion de punto en la curva DLK (what-if) -->
+    <div id="dlkEditModal" class="dlk-modal-overlay d-none" role="dialog" aria-modal="true">
+      <div class="dlk-modal">
+        <div class="dlk-modal-header">
+          <h4 id="dlkEditModalTitle">Editar punto</h4>
+          <button type="button" class="dlk-modal-close" id="dlkEditModalClose" aria-label="Cerrar">×</button>
+        </div>
+        <div class="dlk-modal-body">
+          <div class="dlk-modal-meta" id="dlkEditModalMeta">—</div>
+          <div class="dlk-modal-toggle" id="dlkEditModalToggle">
+            <button type="button" data-mode="tna" class="active">TNA (%)</button>
+            <button type="button" data-mode="price">Precio</button>
+          </div>
+          <input type="number" id="dlkEditModalInput" class="form-control" step="0.01" placeholder="Nuevo valor">
+          <p class="dlk-modal-help" id="dlkEditModalHelp">El nuevo valor se reemplaza en la curva como un what-if (estrella dorada).</p>
+        </div>
+        <div class="dlk-modal-actions">
+          <button type="button" class="btn btn-sm btn-outline-danger" id="dlkEditModalDelete">Borrar what-if</button>
+          <span style="flex:1"></span>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="dlkEditModalCancel">Cancelar</button>
+          <button type="button" class="btn btn-sm btn-dark" id="dlkEditModalApply">Aplicar</button>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd72"></script>
-    <script src="/app-bundle.js?v=hd72"></script>
+    <script src="/static/futures_curve.js?v=hd73"></script>
+    <script src="/app-bundle.js?v=hd73"></script>
   </body>
 </html>
