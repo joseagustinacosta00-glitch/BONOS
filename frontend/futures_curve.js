@@ -507,7 +507,9 @@
 
       <div class="futures-curve-chart-card">
         <div class="futures-curve-warning" id="fcWarning" hidden></div>
-        <canvas id="futuresCurveChart"></canvas>
+        <div class="futures-curve-chart-wrap">
+          <canvas id="futuresCurveChart"></canvas>
+        </div>
       </div>
 
       <div class="futures-curve-legend">
@@ -823,6 +825,7 @@
     if (STATE.chart) {
       STATE.chart.data = cfg.data;
       STATE.chart.options = cfg.options;
+      STATE.chart.resize();
       STATE.chart.update("none");
     } else {
       STATE.chart = new Chart(canvas.getContext("2d"), cfg);

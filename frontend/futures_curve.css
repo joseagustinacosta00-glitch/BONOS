@@ -130,18 +130,22 @@
 .fc-kpi-value.pos { color: #5eead4; }
 .fc-kpi-value.neg { color: #fb7185; }
 
-/* ---- Chart card ---- */
+/* ---- Chart card ----
+   Chart.js v4 con responsive=true + maintainAspectRatio=false necesita
+   un wrapper con dimensiones explicitas. NO setear width/height en el
+   canvas porque Chart.js los maneja internamente via inline styles. */
 .futures-curve-chart-card {
   background: rgba(2, 6, 23, 0.4);
   border: 1px solid rgba(148, 163, 184, 0.08);
   border-radius: 0.5rem;
   padding: 0.5rem 0.65rem;
   position: relative;
-  height: 360px;
+  width: 100%;
 }
-.futures-curve-chart-card canvas {
-  width: 100% !important;
-  height: 100% !important;
+.futures-curve-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 380px;
 }
 
 .futures-curve-warning {
@@ -180,7 +184,7 @@
 
 /* ---- Responsive ---- */
 @media (max-width: 720px) {
-  .futures-curve-chart-card { height: 280px; }
+  .futures-curve-chart-wrap { height: 280px; }
   .futures-curve-kpis { grid-template-columns: repeat(2, 1fr); }
   .futures-curve-header { flex-direction: column; gap: 0.3rem; }
 }

@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd61 cargado - Modulo Curva de Futuros institucional (futures_curve.js + Chart.js)");
+console.log("[Monitor] app.js v=hd62 cargado - Fix layout curva: wrapper con dimensiones explicitas + resize");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
