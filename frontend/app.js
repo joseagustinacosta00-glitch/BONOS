@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd66 cargado - Calculadora DLK: reusa template HD + FX bar (SPOT live / A3500 historico) + cashflow ARS");
+console.log("[Monitor] app.js v=hd67 cargado - HOTFIX: remueve declaracion duplicada de currentBondModel que rompia el script");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -173,7 +173,6 @@ let currentBondModel = "lecap";
 let currentMarketSettlement = "t1";
 let currentView = "market";
 let currentBcraSeries = "cer";
-let currentBondModel = "lecap";
 let latestLecapCalculation = null;
 let latestLecapMarket = [];
 let lecapMarketLoading = false;
