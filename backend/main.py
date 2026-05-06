@@ -119,7 +119,7 @@ class BondHdCalculationRequest(BaseModel):
     maturity_date: date
     face_value: float = Field(gt=0)
     bond_type: str = Field(pattern="^(bullet|amortizable|zero_coupon)$")
-    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
+    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly|one_payment)$")
     convention: str = Field(pattern="^(30_360_eu|30_360_us|180_360_eu|180_360_us|act_360|act_365|act_act)$")
     coupons: list[BondHdCouponPayload] = Field(min_length=1)
 
@@ -130,7 +130,7 @@ class BondHdSavePayload(BaseModel):
     maturity_date: date
     face_value: float = Field(gt=0)
     bond_type: str = Field(pattern="^(bullet|amortizable|zero_coupon)$")
-    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
+    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly|one_payment)$")
     convention: str = Field(pattern="^(30_360_eu|30_360_us|180_360_eu|180_360_us|act_360|act_365|act_act)$")
     payload: dict
 
@@ -138,7 +138,7 @@ class BondHdSavePayload(BaseModel):
 class BondHdScheduleRequest(BaseModel):
     issue_date: date
     maturity_date: date
-    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly)$")
+    frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly|one_payment)$")
 
 
 class TPlusConversionRequest(BaseModel):

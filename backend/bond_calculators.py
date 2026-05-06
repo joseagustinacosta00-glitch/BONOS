@@ -378,6 +378,7 @@ class BondHdFrequency(StrEnum):
     SEMIANNUAL = "semiannual"
     QUARTERLY = "quarterly"
     MONTHLY = "monthly"
+    ONE_PAYMENT = "one_payment"
 
 
 class BondHdConvention(StrEnum):
@@ -395,6 +396,7 @@ HD_FREQUENCY_MONTH_STEP: dict[BondHdFrequency, int] = {
     BondHdFrequency.SEMIANNUAL: 6,
     BondHdFrequency.QUARTERLY: 3,
     BondHdFrequency.MONTHLY: 1,
+    BondHdFrequency.ONE_PAYMENT: 0,  # No subdivide: un unico cupon hasta el vencimiento.
 }
 
 HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
@@ -402,6 +404,11 @@ HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
     BondHdFrequency.SEMIANNUAL: 2,
     BondHdFrequency.QUARTERLY: 4,
     BondHdFrequency.MONTHLY: 12,
+    # ONE_PAYMENT: no aplica una "frecuencia anual" porque hay un solo cupon.
+    # Para conventions tipo 180/360 que dependen de periods_per_year usamos 1
+    # (el cupon es anual-equivalente "estirado") y el calculo real va por
+    # year_fraction de la convencion elegida.
+    BondHdFrequency.ONE_PAYMENT: 1,
 }
 
 HD_CONVENTION_LABELS: dict[BondHdConvention, str] = {
@@ -572,6 +579,9 @@ def generate_bond_hd_default_dates(
 ) -> list[date]:
     if maturity_date <= issue_date:
         return []
+    if frequency == BondHdFrequency.ONE_PAYMENT:
+        # Un solo cupon que paga e intereses + amortiza 100% al vencimiento.
+        return [maturity_date]
     step = HD_FREQUENCY_MONTH_STEP[frequency]
     from calendar import monthrange
 

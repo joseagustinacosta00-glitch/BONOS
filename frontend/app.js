@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd67 cargado - HOTFIX: remueve declaracion duplicada de currentBondModel que rompia el script");
+console.log("[Monitor] app.js v=hd68 cargado - DLK: TC inicial + multiplicador (FX/TCi) + frecuencia one-payment-maturity");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2454,13 +2454,48 @@ function _todayIso() {
 
 function initDlkFxBar() {
   const dateInput = document.querySelector("#dlkValuationDate");
+  const tcInput = document.querySelector("#dlkTcInicial");
   if (!dateInput) return;
   if (!dateInput.value) dateInput.value = _todayIso();
   if (!DLK_STATE.initialized) {
     dateInput.addEventListener("change", () => updateDlkFx());
+    if (tcInput) {
+      tcInput.addEventListener("input", () => {
+        renderDlkMultiplier();
+        renderDlkArsCashflow();
+      });
+    }
     DLK_STATE.initialized = true;
   }
   updateDlkFx();
+}
+
+function _getDlkTcInicial() {
+  const tcInput = document.querySelector("#dlkTcInicial");
+  if (!tcInput || tcInput.value === "") return null;
+  const v = Number(tcInput.value);
+  return (isFinite(v) && v > 0) ? v : null;
+}
+
+function renderDlkMultiplier() {
+  const multValue = document.querySelector("#dlkMultValue");
+  const multMeta = document.querySelector("#dlkMultMeta");
+  if (!multValue || !multMeta) return;
+  const fx = DLK_STATE.fxValue;
+  const tc = _getDlkTcInicial();
+  if (fx == null) {
+    multValue.textContent = "—";
+    multMeta.textContent = "Esperando FX";
+    return;
+  }
+  if (tc == null) {
+    multValue.textContent = "—";
+    multMeta.textContent = "Ingresa TC inicial (emision)";
+    return;
+  }
+  const mult = fx / tc;
+  multValue.textContent = mult.toLocaleString("es-AR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  multMeta.innerHTML = `<b>${fmtNumAr(fx, 2)} / ${fmtNumAr(tc, 2)}</b>`;
 }
 
 async function updateDlkFx() {
@@ -2522,7 +2557,8 @@ async function updateDlkFx() {
       metaEl.textContent = `Error al consultar BCRA: ${err.message || err}`;
     }
   }
-  // Re-render cashflow ARS si ya hay calculo
+  // Re-render multiplicador y cashflow ARS si ya hay calculo
+  renderDlkMultiplier();
   if (currentBondModel === "dlk") renderDlkArsCashflow();
 }
 
@@ -2531,28 +2567,34 @@ function renderDlkArsCashflow() {
   if (!body) return;
   const cashflows = (hdLastCalculation && hdLastCalculation.cashflows) || [];
   if (!cashflows.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Calcula el cashflow para ver la conversion a pesos</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Calcula el cashflow para ver la conversion ajustada</td></tr>';
     return;
   }
   const fx = DLK_STATE.fxValue;
+  const tc = _getDlkTcInicial();
   if (fx == null || !isFinite(fx) || fx <= 0) {
     body.innerHTML = '<tr><td colspan="7" class="empty-state">FX no disponible — elegi una fecha con cotizacion publicada</td></tr>';
     return;
   }
+  if (tc == null) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Ingresa el TC inicial (emision) para calcular el multiplicador</td></tr>';
+    return;
+  }
+  const mult = fx / tc;
   body.innerHTML = cashflows.map((row) => {
-    const amortUsd = Number(row.amortization_per_100) || 0;
-    const interestUsd = Number(row.interest_per_100) || 0;
-    const totalUsd = Number(row.total_per_100) || 0;
-    const totalArs = totalUsd * fx;
+    const amort = Number(row.amortization_per_100) || 0;
+    const interest = Number(row.interest_per_100) || 0;
+    const total = Number(row.total_per_100) || 0;
+    const totalAdj = total * mult;
     return `
       <tr>
         <td>${row.number}</td>
         <td>${formatDate(row.effective_payment_date || row.payment_date)}</td>
-        <td class="text-end">${formatNumber(amortUsd, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(interestUsd, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(totalUsd, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(fx, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end"><b>${formatNumber(totalArs, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
+        <td class="text-end">${formatNumber(amort, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(interest, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(total, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(mult, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end"><b>${formatNumber(totalAdj, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
       </tr>
     `;
   }).join("");
