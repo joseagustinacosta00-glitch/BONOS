@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd71 cargado - DLK: cashflow con TC aplicable + curva TNA bonos + buscar guardados por familia");
+console.log("[Monitor] app.js v=hd72 cargado - Curva DLK: multi-Bid/Last/Offer + 5 modelos + labels (TNA+ticker) + click para what-if");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -757,47 +757,291 @@ function renderFuturosDlk() {
   renderDlkCurve(dlkBySymbol, settleIso, spotForTna);
 }
 
+// ===== Curva TNA bonos DLK: estado + helpers + render =====
+const DLK_CURVE_STATE = {
+  fields: new Set(JSON.parse(localStorage.getItem("dlkCurveFields") || '["last"]')),
+  overrides: JSON.parse(localStorage.getItem("dlkCurveOverrides") || "{}"), // { ticker: { type: "tna"|"price", value } }
+  initialized: false,
+};
+const DLK_FIELD_DEFS = {
+  bid:   { label: "Bid",   stroke: "#16a34a", fill: "rgba(22,163,74,0.06)" },
+  last:  { label: "Last",  stroke: "#0d6efd", fill: "rgba(13,110,253,0.06)" },
+  offer: { label: "Offer", stroke: "#dc2626", fill: "rgba(220,38,38,0.06)" },
+};
+function _saveDlkCurveState() {
+  try { localStorage.setItem("dlkCurveFields", JSON.stringify([...DLK_CURVE_STATE.fields])); } catch (_) {}
+  try { localStorage.setItem("dlkCurveOverrides", JSON.stringify(DLK_CURVE_STATE.overrides)); } catch (_) {}
+}
+function _dlkPriceForField(q, field) {
+  if (!q) return null;
+  if (field === "bid") return q.bid != null ? Number(q.bid) : null;
+  if (field === "offer" || field === "ask") return q.ask != null ? Number(q.ask) : null;
+  return q.last != null ? Number(q.last) : null;
+}
+
 let _dlkCurveChart = null;
+let _dlkCurveListenersReady = false;
+
+function _initDlkCurveControls() {
+  if (_dlkCurveListenersReady) return;
+  // Toggle group bid/last/offer
+  document.querySelectorAll(".dlk-toggle-group[data-group='dlkPrice'] button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const v = btn.dataset.val;
+      if (DLK_CURVE_STATE.fields.has(v)) {
+        if (DLK_CURVE_STATE.fields.size > 1) DLK_CURVE_STATE.fields.delete(v);
+      } else {
+        DLK_CURVE_STATE.fields.add(v);
+      }
+      _saveDlkCurveState();
+      renderFuturosDlk();
+    });
+  });
+  // Modelo select
+  const modelSel = document.getElementById("dlkCurveModel");
+  if (modelSel) {
+    const saved = localStorage.getItem("dlkCurveModel");
+    if (saved) modelSel.value = saved;
+    modelSel.addEventListener("change", () => {
+      try { localStorage.setItem("dlkCurveModel", modelSel.value); } catch (_) {}
+      renderFuturosDlk();
+    });
+  }
+  // Reset overrides
+  const resetBtn = document.getElementById("dlkResetOverrides");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      if (!Object.keys(DLK_CURVE_STATE.overrides).length) {
+        alert("No hay what-ifs activos.");
+        return;
+      }
+      if (confirm("¿Borrar todos los what-ifs?")) {
+        DLK_CURVE_STATE.overrides = {};
+        _saveDlkCurveState();
+        renderFuturosDlk();
+      }
+    });
+  }
+  _dlkCurveListenersReady = true;
+}
+
+function _syncDlkToggleButtons() {
+  document.querySelectorAll(".dlk-toggle-group[data-group='dlkPrice'] button").forEach(btn => {
+    btn.classList.toggle("active", DLK_CURVE_STATE.fields.has(btn.dataset.val));
+  });
+}
+
+// Plugin Chart.js para dibujar labels (TNA + ticker) sobre los puntos.
+const _dlkLabelsPlugin = {
+  id: "dlkLabels",
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    chart.data.datasets.forEach((ds, dsi) => {
+      if (!ds._labelPoints) return;
+      const meta = chart.getDatasetMeta(dsi);
+      if (!meta || !meta.data) return;
+      ctx.save();
+      ctx.textAlign = "center";
+      meta.data.forEach((point, i) => {
+        const raw = ds.data[i];
+        if (!raw || !raw._p) return;
+        const x = point.x;
+        const y = point.y;
+        // Linea 1 (mas arriba): TNA en color de la serie
+        ctx.fillStyle = ds.borderColor || "#cbd5e1";
+        ctx.font = "700 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.fillText(`${raw._p.tna.toFixed(1)}%`, x, y - 22);
+        // Linea 2: ticker, mas claro
+        ctx.fillStyle = "#e2e8f0";
+        ctx.font = "600 9px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        ctx.fillText(raw._p.ticker, x, y - 11);
+      });
+      ctx.restore();
+    });
+  },
+};
+
+function _promptDlkOverride(ticker, currentTna, currentPrice, spot, days) {
+  const help = `Modificar ${ticker} (cotiza a precio ${fmtNumAr(currentPrice, 2)}, tasa ${currentTna.toFixed(2)}%).\n\n` +
+               `Ingresa una nueva TNA (con %) o un nuevo precio (sin %).\n` +
+               `Ej: "28%" para fijar TNA = 28%.\n` +
+               `Ej: "1450" para fijar precio = 1450.\n` +
+               `Vacio para borrar el what-if existente.`;
+  const cur = DLK_CURVE_STATE.overrides[ticker];
+  const def = cur ? (cur.type === "tna" ? `${cur.value}%` : `${cur.value}`) : "";
+  const v = window.prompt(help, def);
+  if (v == null) return null; // cancelado
+  const trimmed = String(v).trim();
+  if (trimmed === "") {
+    delete DLK_CURVE_STATE.overrides[ticker];
+    _saveDlkCurveState();
+    return "deleted";
+  }
+  const isPct = trimmed.endsWith("%");
+  const numStr = isPct ? trimmed.slice(0, -1).trim() : trimmed;
+  const num = Number(numStr.replace(",", "."));
+  if (!isFinite(num)) {
+    alert("Valor invalido.");
+    return null;
+  }
+  DLK_CURVE_STATE.overrides[ticker] = isPct
+    ? { type: "tna", value: num }
+    : { type: "price", value: num };
+  _saveDlkCurveState();
+  return "set";
+}
+
 function renderDlkCurve(dlkBySymbol, settleIso, spot) {
   const canvas = document.querySelector("#dlkCurveChart");
   const meta = document.querySelector("#dlkCurveMeta");
   if (!canvas || typeof Chart === "undefined") return;
+  _initDlkCurveControls();
+  _syncDlkToggleButtons();
 
-  // Construir puntos: ticker -> (days, tna)
-  const points = [];
-  for (const symbol of DLK_ORDER) {
-    const matIso = DLK_MATURITIES[symbol];
-    const q = dlkBySymbol[symbol];
-    if (!matIso || !q || q.last == null) continue;
-    const days = _daysBetweenIso(settleIso, matIso);
-    const tna = calcDlkTna(Number(q.last), spot, days);
-    if (tna == null || !isFinite(tna)) continue;
-    points.push({ x: days, y: tna, ticker: symbol, mat: matIso, price: Number(q.last) });
+  const fields = [...DLK_CURVE_STATE.fields].filter(f => DLK_FIELD_DEFS[f]);
+  if (!fields.length) {
+    if (meta) meta.textContent = "Activa al menos un precio (Bid/Last/Offer)";
+    if (_dlkCurveChart) { _dlkCurveChart.destroy(); _dlkCurveChart = null; }
+    const ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
   }
-  points.sort((a, b) => a.x - b.x);
+  const modelName = document.getElementById("dlkCurveModel")?.value || "linear";
+
+  // Construir puntos por field
+  const seriesByField = fields.map(field => {
+    const def = DLK_FIELD_DEFS[field];
+    const points = [];
+    for (const symbol of DLK_ORDER) {
+      const matIso = DLK_MATURITIES[symbol];
+      const q = dlkBySymbol[symbol];
+      if (!matIso || !q) continue;
+      const price = _dlkPriceForField(q, field);
+      if (price == null || !isFinite(price) || price <= 0) continue;
+      const days = _daysBetweenIso(settleIso, matIso);
+      const tna = calcDlkTna(price, spot, days);
+      if (tna == null || !isFinite(tna)) continue;
+      points.push({ x: days, y: tna, ticker: symbol, mat: matIso, price, tna, field });
+    }
+    points.sort((a, b) => a.x - b.x);
+    // Fit del modelo (reutilizamos FuturesCurve.fitModel si esta expuesto)
+    let model = null;
+    const observed = points.map(p => ({ isIncludedInCurve: true, daysToMaturity: p.x, tnaPct: p.y }));
+    if (window.FuturesCurve && window.FuturesCurve.fitModel) {
+      model = window.FuturesCurve.fitModel(observed, modelName);
+    }
+    return { def, field, points, model };
+  });
 
   if (meta) {
+    const totalPoints = seriesByField.reduce((n, s) => n + s.points.length, 0);
     if (spot == null) meta.textContent = "Esperando SPOT…";
-    else if (!points.length) meta.textContent = "Sin datos suficientes";
-    else meta.textContent = `Spot: ${fmtNumAr(spot, 2)} · ${currentMarketSettlement.toUpperCase()} · ${points.length} bonos`;
+    else if (!totalPoints) meta.textContent = "Sin datos suficientes";
+    else {
+      const fieldsTxt = fields.map(f => DLK_FIELD_DEFS[f].label).join(" · ");
+      const ovCount = Object.keys(DLK_CURVE_STATE.overrides).length;
+      const ovTxt = ovCount > 0 ? ` · ${ovCount} what-if${ovCount > 1 ? "s" : ""}` : "";
+      meta.textContent = `Spot: ${fmtNumAr(spot, 2)} · ${currentMarketSettlement.toUpperCase()} · ${fieldsTxt} · Modelo: ${modelName}${ovTxt}`;
+    }
   }
 
-  const datasets = [
-    {
+  const datasets = [];
+  // Por field: linea observada + scatter con labels (solo el primer field activo lleva labels para no saturar) + curva teorica
+  for (let si = 0; si < seriesByField.length; si++) {
+    const s = seriesByField[si];
+    const isFirst = si === 0;
+    const c = s.def;
+    // Linea observada uniendo puntos
+    datasets.push({
       type: "line",
-      label: "TNA DLK",
-      data: points.map(p => ({ x: p.x, y: p.y, _p: p })),
-      borderColor: "#60a5fa",
-      backgroundColor: "rgba(96, 165, 250, 0.1)",
+      label: `${c.label} obs`,
+      data: s.points.map(p => ({ x: p.x, y: p.y, _p: p })),
+      borderColor: c.stroke,
+      backgroundColor: c.fill,
       borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.2,
+      order: 2,
+      spanGaps: true,
+    });
+    // Scatter de los puntos (solo el primer field activo lleva labels arriba)
+    datasets.push({
+      type: "scatter",
+      label: `${c.label} puntos`,
+      data: s.points.map(p => ({ x: p.x, y: p.y, _p: p })),
+      backgroundColor: c.stroke,
+      borderColor: c.stroke,
       pointRadius: 5,
       pointHoverRadius: 7,
-      pointBackgroundColor: "#60a5fa",
-      pointBorderColor: "#1e40af",
-      tension: 0.2,
-      spanGaps: true,
-    },
-  ];
+      order: 1,
+      _labelPoints: isFirst,
+    });
+    // Curva teorica densa
+    if (s.model && s.points.length >= 2) {
+      const minX = s.points[0].x;
+      const maxX = s.points[s.points.length - 1].x;
+      const N = 60;
+      const theoLine = [];
+      for (let i = 0; i <= N; i++) {
+        const x = minX + (maxX - minX) * (i / N);
+        const y = s.model.predict(x);
+        if (y != null && isFinite(y)) theoLine.push({ x, y });
+      }
+      datasets.push({
+        type: "line",
+        label: `${c.label} teorica`,
+        data: theoLine,
+        borderColor: c.stroke,
+        borderDash: [4, 4],
+        borderWidth: 1.2,
+        pointRadius: 0,
+        order: 3,
+        spanGaps: true,
+      });
+    }
+  }
+
+  // Overrides (what-ifs) — un punto por ticker. Se calcula contra el primer field activo.
+  const primaryField = fields[0];
+  const overridePoints = [];
+  for (const ticker of Object.keys(DLK_CURVE_STATE.overrides)) {
+    const matIso = DLK_MATURITIES[ticker];
+    if (!matIso) continue;
+    const days = _daysBetweenIso(settleIso, matIso);
+    if (days <= 0) continue;
+    const ov = DLK_CURVE_STATE.overrides[ticker];
+    let tna = null, price = null;
+    if (ov.type === "tna") {
+      tna = ov.value;
+      // back-calc precio: tna = ((100 * spot / price) - 1) * 365 / days * 100
+      // -> price = 100 * spot / (1 + tna/100 * days/365)
+      if (spot != null) price = 100 * spot / (1 + (tna / 100) * days / 365);
+    } else if (ov.type === "price") {
+      price = ov.value;
+      if (spot != null) tna = calcDlkTna(price, spot, days);
+    }
+    if (tna == null || !isFinite(tna)) continue;
+    overridePoints.push({
+      x: days, y: tna, ticker, mat: matIso, price, tna, field: primaryField, override: true,
+    });
+  }
+  if (overridePoints.length) {
+    datasets.push({
+      type: "scatter",
+      label: "What-if",
+      data: overridePoints.map(p => ({ x: p.x, y: p.y, _p: p })),
+      backgroundColor: "#fbbf24",
+      borderColor: "#92400e",
+      borderWidth: 2,
+      pointStyle: "rectRot",
+      pointRadius: 7,
+      pointHoverRadius: 9,
+      order: 0,
+      _labelPoints: true,
+    });
+  }
+
+  // Universo de puntos para callback de eje X
+  const allPoints = seriesByField.flatMap(s => s.points).sort((a, b) => a.x - b.x);
 
   const cfg = {
     type: "scatter",
@@ -806,16 +1050,15 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      layout: { padding: { top: 6, right: 12, bottom: 4, left: 4 } },
+      layout: { padding: { top: 24, right: 14, bottom: 4, left: 4 } },
       scales: {
         x: {
           type: "linear",
-          title: { display: false },
           grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
           ticks: {
             color: "#94a3b8", font: { size: 9 }, maxRotation: 0,
             callback(v) {
-              const p = points.find(pp => pp.x === v);
+              const p = allPoints.find(pp => pp.x === v);
               if (p && p.mat) {
                 const parts = p.mat.split("-");
                 if (parts.length === 3) {
@@ -829,7 +1072,6 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
           border: { color: "rgba(148,163,184,0.2)" },
         },
         y: {
-          title: { display: false },
           grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
           ticks: {
             color: "#94a3b8", font: { size: 9 },
@@ -837,6 +1079,16 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
           },
           border: { color: "rgba(148,163,184,0.2)" },
         },
+      },
+      onClick(_evt, els) {
+        if (!els || !els.length || !_dlkCurveChart) return;
+        const el = els[0];
+        const ds = _dlkCurveChart.data.datasets[el.datasetIndex];
+        const raw = ds && ds.data[el.index];
+        if (!raw || !raw._p) return;
+        const p = raw._p;
+        const result = _promptDlkOverride(p.ticker, p.tna, p.price, spot, p.x);
+        if (result) renderFuturosDlk();
       },
       plugins: {
         legend: { display: false },
@@ -853,21 +1105,26 @@ function renderDlkCurve(dlkBySymbol, settleIso, spot) {
           callbacks: {
             title(ctx) {
               const raw = ctx[0].raw;
-              return raw && raw._p ? raw._p.ticker : "";
+              if (!raw || !raw._p) return "";
+              const tag = raw._p.override ? " (what-if)" : ` (${DLK_FIELD_DEFS[raw._p.field]?.label || ""})`;
+              return `${raw._p.ticker}${tag}`;
             },
             label(ctx) {
               const raw = ctx.raw;
               if (!raw || !raw._p) return "";
-              return [
+              const lines = [
                 `Precio: ${fmtNumAr(raw._p.price, 2)}`,
-                `Tasa: ${raw._p.y.toFixed(2)}%`,
-                `Vto: ${formatDateDisplay(raw._p.mat)} (${Math.round(raw._p.x)}d)`,
+                `Tasa: ${raw._p.tna.toFixed(2)}%`,
               ];
+              if (!raw._p.override) lines.push(`Vto: ${formatDateDisplay(raw._p.mat)} (${Math.round(raw._p.x)}d)`);
+              if (raw._p.override) lines.push(`(click otra vez para editar)`);
+              return lines;
             },
           },
         },
       },
     },
+    plugins: [_dlkLabelsPlugin],
   };
 
   if (_dlkCurveChart) {

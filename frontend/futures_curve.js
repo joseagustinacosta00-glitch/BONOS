@@ -930,5 +930,6 @@
     render();
   }
 
-  window.FuturesCurve = { update };
+  // API publica + helpers reutilizables (la curva de bonos DLK los consume)
+  window.FuturesCurve = { update, fitModel, PRICE_FIELD_DEFS };
 })();

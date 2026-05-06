@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd71">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd71">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd72">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd72">
   </head>
   <body>
     <main class="app-shell">
@@ -225,6 +225,27 @@
                 <div class="dlk-curve-header">
                   <span class="dlk-curve-title">Curva TNA · Bonos DLK</span>
                   <span class="dlk-curve-meta" id="dlkCurveMeta">—</span>
+                </div>
+                <div class="dlk-curve-controls">
+                  <div class="dlk-ctrl">
+                    <span>Precio</span>
+                    <div class="dlk-toggle-group" data-group="dlkPrice">
+                      <button type="button" data-val="bid" style="--c:#16a34a">Bid</button>
+                      <button type="button" data-val="last" style="--c:#0d6efd">Last</button>
+                      <button type="button" data-val="offer" style="--c:#dc2626">Offer</button>
+                    </div>
+                  </div>
+                  <label class="dlk-ctrl">
+                    <span>Modelo</span>
+                    <select id="dlkCurveModel">
+                      <option value="linear" selected>Lineal</option>
+                      <option value="spline">Spline</option>
+                      <option value="nelson_siegel">Nelson-Siegel</option>
+                      <option value="svensson">Svensson</option>
+                      <option value="polynomial">Polinomico</option>
+                    </select>
+                  </label>
+                  <button type="button" id="dlkResetOverrides" class="dlk-ctrl-btn" title="Borra todas las modificaciones manuales (what-ifs)">Reset what-ifs</button>
                 </div>
                 <div class="dlk-curve-wrap">
                   <canvas id="dlkCurveChart"></canvas>
@@ -1305,7 +1326,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd71"></script>
-    <script src="/app-bundle.js?v=hd71"></script>
+    <script src="/static/futures_curve.js?v=hd72"></script>
+    <script src="/app-bundle.js?v=hd72"></script>
   </body>
 </html>
