@@ -1,0 +1,186 @@
+/* Futures Curve - dashboard institucional dark theme.
+   Scoped a .futures-curve-panel para no afectar el resto de la app. */
+
+.futures-curve-panel {
+  background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem 0.85rem;
+  margin: 1rem 0 0.5rem;
+  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* ---- Header ---- */
+.futures-curve-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  padding-bottom: 0.65rem;
+}
+.futures-curve-title {
+  margin: 0 0 0.15rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #f1f5f9;
+  text-transform: uppercase;
+}
+.futures-curve-title .muted {
+  color: #94a3b8;
+  font-weight: 400;
+  text-transform: none;
+}
+.futures-curve-subtitle {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  letter-spacing: 0.01em;
+}
+.futures-curve-subtitle b { color: #cbd5e1; font-weight: 600; }
+
+.futures-curve-status {
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+/* ---- Controles ---- */
+.futures-curve-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.95rem;
+  padding: 0.55rem 0.7rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.45rem;
+  margin-bottom: 0.7rem;
+}
+.fc-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin: 0;
+}
+.fc-ctrl span { letter-spacing: 0.02em; }
+.fc-ctrl select,
+.fc-ctrl input[type="number"] {
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.74rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.fc-ctrl select:focus,
+.fc-ctrl input:focus {
+  border-color: rgba(94, 234, 212, 0.6);
+}
+.fc-ctrl input[type="number"] { width: 70px; }
+.fc-ctrl.fc-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.fc-ctrl input[type="checkbox"] {
+  accent-color: #5eead4;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* ---- KPIs ---- */
+.futures-curve-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.7rem;
+}
+.fc-kpi {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.fc-kpi-label {
+  font-size: 0.62rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+.fc-kpi-value {
+  font-size: 0.92rem;
+  color: #f1f5f9;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.fc-kpi-value.pos { color: #5eead4; }
+.fc-kpi-value.neg { color: #fb7185; }
+
+/* ---- Chart card ---- */
+.futures-curve-chart-card {
+  background: rgba(2, 6, 23, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  position: relative;
+  height: 360px;
+}
+.futures-curve-chart-card canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.futures-curve-warning {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fcd34d;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.3rem;
+  font-size: 0.72rem;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* ---- Leyenda ---- */
+.futures-curve-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  justify-content: center;
+  margin-top: 0.6rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  font-size: 0.68rem;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+.futures-curve-legend .lg { display: inline-flex; align-items: center; gap: 0.25rem; }
+.futures-curve-legend .lg-obs { color: #5eead4; }
+.futures-curve-legend .lg-exc { color: #94a3b8; }
+.futures-curve-legend .lg-theo { color: #94a3b8; }
+.futures-curve-legend .lg-fwd { color: #fbbf24; }
+
+/* ---- Responsive ---- */
+@media (max-width: 720px) {
+  .futures-curve-chart-card { height: 280px; }
+  .futures-curve-kpis { grid-template-columns: repeat(2, 1fr); }
+  .futures-curve-header { flex-direction: column; gap: 0.3rem; }
+}
