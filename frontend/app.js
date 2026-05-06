@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd76 cargado - Bonos guardados: clasificacion jerarquica (Pesos/DLK/HD) + selector al guardar");
+console.log("[Monitor] app.js v=hd77 cargado - TAMAR: input Fecha de valuacion + recalculo VPV automatico al cambiar (futuro o pasado)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2155,6 +2155,7 @@ function setBondModel(model) {
   } else if (isTamar) {
     if (tamarIssueDate) attachDdmmAutoformat(tamarIssueDate);
     if (tamarMaturityDate) attachDdmmAutoformat(tamarMaturityDate);
+    if (tamarAsOfDate && !tamarAsOfDate.value) tamarAsOfDate.value = _todayIso();
     fetchTamarSavedList?.().catch(() => {});
   } else if (isDual) {
     calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
@@ -4339,6 +4340,10 @@ async function calculateTamar() {
       face_value: String(faceValue),
       tem_extra_percent: String(temExtra),
     });
+    // as_of_date: si esta seteado, recalcula como si hoy fuera esa fecha
+    // (para ver VPV historico o forward).
+    const asOfIso = (tamarAsOfDate && tamarAsOfDate.value) ? tamarAsOfDate.value : null;
+    if (asOfIso) params.set("as_of_date", asOfIso);
     const response = await fetch(`/api/calculators/bond-tamar/calculate?${params.toString()}`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
@@ -4459,6 +4464,19 @@ async function calculateTamar() {
 
 tamarCalculate?.addEventListener("click", () => {
   calculateTamar().catch((err) => console.error(err));
+});
+
+// Recalcula automaticamente cuando cambia la fecha de valuacion.
+// Solo dispara si ya hubo un calculo previo (para no fallar antes de tener
+// emision/vencimiento cargados). Si el usuario abre por primera vez la
+// calculadora, el VPV se calcula al apretar "Calcular VPV" como antes.
+tamarAsOfDate?.addEventListener("change", () => {
+  if (!tamarIssueDate?.value || !tamarMaturityDate?.value) return;
+  setTamarStatus("draft", "Recalculando VPV a la fecha…");
+  calculateTamar().catch((err) => {
+    console.error(err);
+    setTamarStatus("error", "Error al recalcular");
+  });
 });
 
 // ====== Persistencia TAMAR ======
