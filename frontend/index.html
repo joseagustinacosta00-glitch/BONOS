@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd75">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd75">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd76">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd76">
   </head>
   <body>
     <main class="app-shell">
@@ -863,6 +863,30 @@
                   </table>
                 </div>
                 <div class="hd-save-controls">
+                  <label class="hd-classification-label">
+                    <span>Clasificacion</span>
+                    <select id="hdClassification" class="form-select form-select-sm">
+                      <option value="" selected>— sin clasificar —</option>
+                      <optgroup label="Bonos en pesos">
+                        <option value="boncer">Boncer (CER vto >1 año)</option>
+                        <option value="lecer">Lecer (CER vto ≤1 año)</option>
+                        <option value="dual_cer_tamar">Dual CER + TAMAR</option>
+                        <option value="dual_fija_tamar">Dual Fija + TAMAR</option>
+                        <option value="tamar">TAMAR</option>
+                        <option value="lecap">Lecap (Fija ≤1 año)</option>
+                        <option value="boncap">Boncap (Fija >1 año)</option>
+                      </optgroup>
+                      <optgroup label="Dollar-Linked">
+                        <option value="soberano_dlk">Soberano DLK (>1 año)</option>
+                        <option value="letra_dlk">Letra DLK (≤1 año)</option>
+                        <option value="corpo_dlk">Corpo DLK</option>
+                      </optgroup>
+                      <optgroup label="Hard Dollar">
+                        <option value="soberano_hd">Soberano HD</option>
+                        <option value="corpo_hd">Corpo HD</option>
+                      </optgroup>
+                    </select>
+                  </label>
                   <button id="hdSaveCashflow" type="button" class="btn btn-sm btn-dark" disabled>Confirmar y guardar</button>
                   <span id="hdSaveStatus" class="calc-status"></span>
                 </div>
@@ -1405,7 +1429,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd75"></script>
-    <script src="/app-bundle.js?v=hd75"></script>
+    <script src="/static/futures_curve.js?v=hd76"></script>
+    <script src="/app-bundle.js?v=hd76"></script>
   </body>
 </html>

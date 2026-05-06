@@ -596,6 +596,83 @@ tbody td {
   gap: 4px;
 }
 
+/* Selector de clasificacion en el form HD */
+.hd-classification-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: #475569;
+  margin-right: 0.5rem;
+}
+.hd-classification-label > select {
+  width: auto;
+  min-width: 200px;
+}
+
+/* Tag de clasificacion en cada item guardado */
+.hd-saved-cls {
+  color: #6366f1;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
+/* Arbol jerarquico de clasificaciones */
+.hd-saved-tree-node {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  background: #fff;
+  margin-bottom: 4px;
+}
+.hd-saved-tree-node[open] { box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.hd-saved-tree-node > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: #27364a;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.hd-saved-tree-node > summary::-webkit-details-marker { display: none; }
+.hd-saved-tree-node > summary::before {
+  content: "▸";
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  width: 0.8rem;
+}
+.hd-saved-tree-node[open] > summary::before { transform: rotate(90deg); }
+.hd-saved-tree-node > summary small { color: var(--muted); margin-left: auto; font-weight: normal; }
+.hd-saved-tree-node > summary em { color: var(--muted); font-style: normal; font-size: 0.75rem; }
+.hd-saved-tree-body {
+  padding: 4px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Estilo distinto por nivel de profundidad */
+.hd-saved-tree-branch.level-0 > summary { background: #1e293b; color: #f8fafc; border-radius: 7px 7px 0 0; }
+.hd-saved-tree-branch.level-0 > summary::before { color: #cbd5e1; }
+.hd-saved-tree-branch.level-0 > summary small { color: #94a3b8; }
+.hd-saved-tree-branch.level-0[open] > summary { border-radius: 7px 7px 0 0; }
+
+.hd-saved-tree-branch.level-1 > summary { background: #f1f5f9; color: #1e293b; font-weight: 600; }
+.hd-saved-tree-branch.level-1 { border-color: #e2e8f0; margin-left: 0.5rem; }
+
+.hd-saved-tree-leaf.level-2 > summary { background: #fafafa; padding-left: 14px; }
+.hd-saved-tree-leaf.level-2 { border-color: #e8eef4; margin-left: 0.5rem; }
+
+.hd-saved-tree-leaf.level-1 > summary { background: #f1f5f9; padding-left: 14px; font-weight: 600; }
+.hd-saved-tree-leaf.level-1 { border-color: #e2e8f0; margin-left: 0.5rem; }
+
+.hd-saved-unclassified > summary { background: #fef3c7; color: #92400e; }
+
 .hd-save-controls {
   display: flex;
   gap: 12px;

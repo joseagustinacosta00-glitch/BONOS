@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd75 cargado - Sintetica: descuento por curva al fixing + modos Last/Colocadora/Tomadora + sidebar mapeados con vol");
+console.log("[Monitor] app.js v=hd76 cargado - Bonos guardados: clasificacion jerarquica (Pesos/DLK/HD) + selector al guardar");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -3068,22 +3068,115 @@ async function fetchHdSavedList() {
 }
 
 // Detecta la "familia" de un ticker: AL30D -> AL30, GD35C -> GD35, etc.
-// Quita sufijos D (USD), C (Cable), V/N (variantes) y M (mayorista) finales.
 function _hdFamilyOf(ticker) {
   const t = String(ticker || "").toUpperCase().trim();
   if (!t) return "";
   return t.replace(/[DCVNM]+$/, "") || t;
 }
 
+// Taxonomia jerarquica de clasificaciones de bonos guardados.
+// Hojas (leaves) tienen "key" que matchea con el campo classification del payload.
+const HD_CLASSIFICATION_TREE = [
+  {
+    title: "Bonos en pesos",
+    children: [
+      {
+        title: "Bonceres y Leceres",
+        children: [
+          { key: "boncer", title: "Bonceres", desc: "CER vto >1 año" },
+          { key: "lecer",  title: "Leceres",  desc: "CER vto ≤1 año" },
+        ],
+      },
+      {
+        title: "Duales",
+        children: [
+          { key: "dual_cer_tamar",  title: "Duales CER + TAMAR" },
+          { key: "dual_fija_tamar", title: "Duales Fija + TAMAR" },
+        ],
+      },
+      {
+        title: "Tamares",
+        children: [{ key: "tamar", title: "TAMAR" }],
+      },
+      {
+        title: "Lecaps y Boncaps",
+        children: [
+          { key: "lecap",  title: "Lecaps",  desc: "Fija ≤1 año" },
+          { key: "boncap", title: "Boncaps", desc: "Fija >1 año" },
+        ],
+      },
+    ],
+  },
+  {
+    title: "Dollar-Linked",
+    children: [
+      { key: "soberano_dlk", title: "Soberanos DLK", desc: ">1 año" },
+      { key: "letra_dlk",    title: "Letras DLK",    desc: "≤1 año" },
+      { key: "corpo_dlk",    title: "Corpo DLK" },
+    ],
+  },
+  {
+    title: "Hard Dollar",
+    children: [
+      { key: "soberano_hd", title: "Soberanos HD" },
+      { key: "corpo_hd",    title: "Corpo HD" },
+    ],
+  },
+];
+
+// Lee la clasificacion guardada de un item. Tolerante a items legacy sin payload.
+function _hdItemClassification(item) {
+  return (item && item.payload && item.payload.classification) || null;
+}
+
 function _hdSavedItemHtml(item) {
+  const cls = _hdItemClassification(item);
+  const clsTag = cls ? `<small class="hd-saved-cls">[${cls}]</small>` : "";
   return `
     <div class="hd-saved-row">
       <button type="button" class="hd-saved-item" data-hd-saved-ticker="${item.ticker}">
-        <strong>${item.ticker}</strong>
+        <strong>${item.ticker}</strong> ${clsTag}
         <small>${formatDateDisplay(item.issue_date)} → ${formatDateDisplay(item.maturity_date)} · ${item.bond_type} · ${item.frequency}</small>
       </button>
       <button type="button" class="btn btn-sm btn-outline-danger hd-saved-delete" data-hd-saved-delete="${item.ticker}" title="Eliminar">x</button>
     </div>
+  `;
+}
+
+// Recorre el arbol y devuelve HTML jerarquico. byKey: { classification_key -> [items] }
+function _renderClassificationNode(node, byKey, level, openLeaves) {
+  // Hoja: tiene key
+  if (node.key != null) {
+    const list = byKey.get(node.key) || [];
+    const count = list.length;
+    if (!count) return ""; // hojas vacias no se muestran
+    const sorted = list.slice().sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
+    const desc = node.desc ? ` <em>· ${node.desc}</em>` : "";
+    const open = openLeaves.has(node.key);
+    return `
+      <details class="hd-saved-tree-node hd-saved-tree-leaf level-${level}" ${open ? "open" : ""}>
+        <summary><strong>${node.title}</strong>${desc} <small>(${count})</small></summary>
+        <div class="hd-saved-tree-body">
+          ${sorted.map(_hdSavedItemHtml).join("")}
+        </div>
+      </details>
+    `;
+  }
+  // Branch: tiene children
+  const childrenHtml = (node.children || [])
+    .map(c => _renderClassificationNode(c, byKey, level + 1, openLeaves))
+    .filter(Boolean)
+    .join("");
+  if (!childrenHtml) return "";
+  // Si la rama solo tiene 1 hijo y es hoja, devolver hoja directa (evita anidado redundante).
+  // Eg: "Tamares" > "TAMAR" — mostrar solo "Tamares".
+  return `
+    <details class="hd-saved-tree-node hd-saved-tree-branch level-${level}" open>
+      <summary><strong>${node.title}</strong></summary>
+      <div class="hd-saved-tree-body">
+        ${childrenHtml}
+      </div>
+    </details>
   `;
 }
 
@@ -3111,29 +3204,50 @@ function renderHdSavedList(items) {
     }
   }
 
-  // Agrupar por familia
-  const byFamily = new Map();
+  // Agrupar items por classification key
+  const byKey = new Map();
+  const unclassified = [];
   for (const it of items) {
-    const fam = _hdFamilyOf(it.ticker);
-    if (!byFamily.has(fam)) byFamily.set(fam, []);
-    byFamily.get(fam).push(it);
+    const k = _hdItemClassification(it);
+    if (!k) {
+      unclassified.push(it);
+    } else {
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(it);
+    }
   }
-  // Familias con >1 bono van como <details>; con 1 bono se renderizan al inline.
-  const families = [...byFamily.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  const famHtml = families.map(([fam, list]) => {
-    const sorted = list.slice().sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
+
+  // Hojas que abrir si el filtro matchea con algun item
+  const openLeaves = new Set();
+  if (filter) {
+    for (const [k, arr] of byKey.entries()) {
+      if (arr.some(it => String(it.ticker || "").toUpperCase().startsWith(filter))) {
+        openLeaves.add(k);
+      }
+    }
+  }
+
+  const treeHtml = HD_CLASSIFICATION_TREE
+    .map(node => _renderClassificationNode(node, byKey, 0, openLeaves))
+    .filter(Boolean)
+    .join("");
+
+  // Sin clasificar: catch-all al final
+  let unclassifiedHtml = "";
+  if (unclassified.length) {
+    const sorted = unclassified.slice().sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
     const open = filter && sorted.some(it => String(it.ticker || "").toUpperCase().startsWith(filter));
-    return `
-      <details class="hd-saved-family" ${open ? "open" : ""}>
-        <summary><strong>${fam}</strong> <small>(${sorted.length})</small></summary>
-        <div class="hd-saved-family-body">
+    unclassifiedHtml = `
+      <details class="hd-saved-tree-node hd-saved-tree-leaf level-0 hd-saved-unclassified" ${open ? "open" : ""}>
+        <summary><strong>Sin clasificar</strong> <small>(${sorted.length})</small></summary>
+        <div class="hd-saved-tree-body">
           ${sorted.map(_hdSavedItemHtml).join("")}
         </div>
       </details>
     `;
-  }).join("");
+  }
 
-  hdSavedList.innerHTML = highlightHtml + famHtml;
+  hdSavedList.innerHTML = highlightHtml + treeHtml + unclassifiedHtml;
   hdSavedList.querySelectorAll("[data-hd-saved-ticker]").forEach((button) => {
     button.addEventListener("click", () => loadHdSaved(button.dataset.hdSavedTicker));
   });
@@ -3243,6 +3357,10 @@ async function saveHdCashflow() {
     return;
   }
   setHdSaveStatus("draft", "Guardando...");
+  // Clasificacion: la persistimos dentro del payload JSON para no migrar el
+  // schema del backend. Si esta vacia se guarda como "unclassified".
+  const classification = (document.getElementById("hdClassification")?.value || "").trim() || null;
+  const payloadWithMeta = { ...hdLastCalculation, classification };
   try {
     const response = await fetch("/api/calculators/bond-hd/saved", {
       method: "POST",
@@ -3255,7 +3373,7 @@ async function saveHdCashflow() {
         bond_type: hdLastCalculation.bond_type,
         frequency: hdLastCalculation.frequency,
         convention: hdLastCalculation.convention,
-        payload: hdLastCalculation,
+        payload: payloadWithMeta,
       }),
     });
     if (!response.ok) {
