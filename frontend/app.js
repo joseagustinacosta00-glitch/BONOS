@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd78 cargado - Auth con login/logout + panel admin de usuarios y sesiones");
+console.log("[Monitor] app.js v=hd79 cargado - Login Marketerminal (verde ingles + crema marfil + dorado)");
 
 // ====== AUTH bootstrap (primer cosa al cargar) ======
 // Si una request /api/* devuelve 401, redirigimos al login. Para evitar loops

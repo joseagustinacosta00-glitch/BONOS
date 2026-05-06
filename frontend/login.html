@@ -1,40 +1,101 @@
-<!doctype html>
-<html lang="es-AR">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <title>Monitor de Bonos · Acceso</title>
-    <link rel="stylesheet" href="/static/login.css?v=hd78">
-  </head>
-  <body>
-    <main class="login-shell">
-      <section class="login-card" aria-labelledby="loginTitle">
-        <header class="login-header">
-          <div class="login-mark" aria-hidden="true">M</div>
-          <h1 id="loginTitle">Monitor de Bonos</h1>
-          <p class="login-subtitle">Acceso restringido</p>
-        </header>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketerminal · Acceso</title>
 
-        <form id="loginForm" class="login-form" autocomplete="on" novalidate>
-          <label class="login-field">
-            <span>Usuario</span>
-            <input id="loginUsername" type="text" name="username" required autocomplete="username" autofocus>
-          </label>
-          <label class="login-field">
-            <span>Contraseña</span>
-            <input id="loginPassword" type="password" name="password" required autocomplete="current-password">
-          </label>
-          <button id="loginSubmit" type="submit" class="login-btn">Ingresar</button>
-          <p id="loginError" class="login-error" role="alert" aria-live="polite"></p>
-        </form>
-      </section>
+  <!-- Opcional: descomentá para usar Cormorant Garamond y que se vea idéntico al diseño -->
+  <!-- <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" /> -->
 
-      <footer class="login-foot">
-        <small>Las credenciales las administra el responsable del sistema.</small>
-      </footer>
-    </main>
+  <link rel="stylesheet" href="/static/login.css?v=hd79" />
+</head>
+<body>
 
-    <script src="/static/login.js?v=hd78"></script>
-  </body>
+  <main class="login-shell">
+
+    <!-- Panel izquierdo: editorial -->
+    <section class="login-editorial" aria-hidden="true">
+
+      <div class="brand-mark">
+        <svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="11" cy="11" r="10" fill="none" stroke="#C9A961" stroke-width="0.8"/>
+          <path d="M11 2 L11 20 M2 11 L20 11" stroke="#C9A961" stroke-width="0.5" opacity="0.5"/>
+          <circle cx="11" cy="11" r="3.5" fill="none" stroke="#C9A961" stroke-width="0.8"/>
+        </svg>
+        <span>M · T</span>
+      </div>
+
+      <div class="editorial-body">
+        <h1 class="wordmark">Marketerminal</h1>
+        <span class="rule"></span>
+        <p class="quote">&ldquo;The best way to handle uncertainty is to measure it.&rdquo;</p>
+        <p class="quote-attr">— Edward O. Thorp</p>
+      </div>
+
+      <div class="editorial-foot">
+        <ul class="sections">
+          <li>Fixed Income</li>
+          <li>FX</li>
+          <li>And more in the curve</li>
+        </ul>
+        <span class="rule rule--small"></span>
+        <p class="domain">marketerminal.com.ar</p>
+      </div>
+
+    </section>
+
+    <!-- Panel derecho: formulario -->
+    <section class="login-panel">
+
+      <header class="login-header">
+        <p class="overline">Acceso privado</p>
+        <h2>Bienvenido</h2>
+      </header>
+
+      <form id="loginForm" class="login-form" novalidate>
+
+        <div class="field">
+          <label for="loginUsername">Usuario</label>
+          <input
+            id="loginUsername"
+            name="username"
+            type="text"
+            placeholder="usuario"
+            autocomplete="username"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="loginPassword">Clave</label>
+          <input
+            id="loginPassword"
+            name="password"
+            type="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+
+        <p id="loginError" class="login-error" role="alert" aria-live="polite"></p>
+
+        <button id="loginSubmit" type="submit" class="login-submit">
+          Ingresar
+        </button>
+
+      </form>
+
+    </section>
+
+  </main>
+
+  <script src="/static/login.js?v=hd79"></script>
+</body>
 </html>
