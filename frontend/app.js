@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd68 cargado - DLK: TC inicial + multiplicador (FX/TCi) + frecuencia one-payment-maturity");
+console.log("[Monitor] app.js v=hd69 cargado - DLK: multiplicador = FX (A3500 prioritario, fallback SPOT) y filtra solo flujos no cobrados");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2454,48 +2454,13 @@ function _todayIso() {
 
 function initDlkFxBar() {
   const dateInput = document.querySelector("#dlkValuationDate");
-  const tcInput = document.querySelector("#dlkTcInicial");
   if (!dateInput) return;
   if (!dateInput.value) dateInput.value = _todayIso();
   if (!DLK_STATE.initialized) {
     dateInput.addEventListener("change", () => updateDlkFx());
-    if (tcInput) {
-      tcInput.addEventListener("input", () => {
-        renderDlkMultiplier();
-        renderDlkArsCashflow();
-      });
-    }
     DLK_STATE.initialized = true;
   }
   updateDlkFx();
-}
-
-function _getDlkTcInicial() {
-  const tcInput = document.querySelector("#dlkTcInicial");
-  if (!tcInput || tcInput.value === "") return null;
-  const v = Number(tcInput.value);
-  return (isFinite(v) && v > 0) ? v : null;
-}
-
-function renderDlkMultiplier() {
-  const multValue = document.querySelector("#dlkMultValue");
-  const multMeta = document.querySelector("#dlkMultMeta");
-  if (!multValue || !multMeta) return;
-  const fx = DLK_STATE.fxValue;
-  const tc = _getDlkTcInicial();
-  if (fx == null) {
-    multValue.textContent = "—";
-    multMeta.textContent = "Esperando FX";
-    return;
-  }
-  if (tc == null) {
-    multValue.textContent = "—";
-    multMeta.textContent = "Ingresa TC inicial (emision)";
-    return;
-  }
-  const mult = fx / tc;
-  multValue.textContent = mult.toLocaleString("es-AR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-  multMeta.innerHTML = `<b>${fmtNumAr(fx, 2)} / ${fmtNumAr(tc, 2)}</b>`;
 }
 
 async function updateDlkFx() {
@@ -2507,58 +2472,74 @@ async function updateDlkFx() {
   const today = _todayIso();
   DLK_STATE.fxDate = selectedDate;
 
-  if (selectedDate >= today) {
-    // Hoy o futuro: usar SPOT live (DLR/SPOT)
-    const spot = (spotLiveCache && spotLiveCache.last != null) ? Number(spotLiveCache.last) : null;
-    const src = spotLiveCache?.last_source || "";
-    DLK_STATE.fxValue = spot;
-    DLK_STATE.fxSource = spot != null ? `DLR/SPOT${src ? " · " + src : ""}` : "—";
-    valueEl.textContent = spot != null ? fmtNumAr(spot, 2) : "—";
-    metaEl.innerHTML = spot != null
-      ? `<b>${DLK_STATE.fxSource}</b> · valuacion al <b>${formatDateDisplay(selectedDate)}</b>`
-      : "Esperando SPOT live (mercado 10-15h)";
-  } else {
-    // Fecha pasada: A3500 historico via BCRA
-    valueEl.textContent = "…";
-    metaEl.textContent = `Buscando A3500 publicado al ${formatDateDisplay(selectedDate)}…`;
-    try {
-      // Pedimos un rango de 10 dias hacia atras para tomar la ultima publicacion habil
-      const from = new Date(selectedDate);
-      from.setDate(from.getDate() - 10);
-      const fromIso = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
-      const url = `/api/bcra/series/usd_mayorista_a3500?desde=${fromIso}&hasta=${selectedDate}&limit=20`;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error("bcra http " + r.status);
+  // Prioridad: A3500 publicado para esa fecha. Fallback (solo si fecha == hoy
+  // y A3500 aun no publicado): DLR/SPOT live.
+  valueEl.textContent = "…";
+  metaEl.textContent = `Buscando A3500 publicado al ${formatDateDisplay(selectedDate)}…`;
+  let a3500 = null;
+  try {
+    const from = new Date(selectedDate);
+    from.setDate(from.getDate() - 10);
+    const fromIso = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+    const url = `/api/bcra/series/usd_mayorista_a3500?desde=${fromIso}&hasta=${selectedDate}&limit=20`;
+    const r = await fetch(url);
+    if (r.ok) {
       const payload = await r.json();
       const points = payload?.points || payload?.data || [];
-      // Tomar el ultimo dato cuya fecha sea <= selectedDate
-      let chosen = null;
+      // Buscamos el A3500 cuya fecha coincida exactamente con selectedDate
+      // (solo cuenta como "publicado para ese dia" si la fecha matchea).
       for (const p of points) {
         const d = p.date || p.fecha || p.value_date;
         const v = p.value != null ? p.value : p.valor;
-        if (!d || v == null) continue;
-        if (d <= selectedDate && (!chosen || d > chosen.d)) chosen = { d, v: Number(v) };
+        if (d === selectedDate && v != null) {
+          a3500 = Number(v);
+          break;
+        }
       }
-      if (chosen) {
-        DLK_STATE.fxValue = chosen.v;
-        DLK_STATE.fxSource = `A3500 (BCRA · ${formatDateDisplay(chosen.d)})`;
-        valueEl.textContent = fmtNumAr(chosen.v, 4);
-        metaEl.innerHTML = `<b>${DLK_STATE.fxSource}</b> · valuacion al <b>${formatDateDisplay(selectedDate)}</b>`;
-      } else {
-        DLK_STATE.fxValue = null;
-        DLK_STATE.fxSource = null;
-        valueEl.textContent = "—";
-        metaEl.textContent = `Sin A3500 publicado para esa fecha`;
+      // Si no hay match exacto y la fecha es pasada, tomamos el ultimo
+      // publicado <= selectedDate (los habiles previos cubren el feriado).
+      if (a3500 == null && selectedDate < today) {
+        let chosen = null;
+        for (const p of points) {
+          const d = p.date || p.fecha || p.value_date;
+          const v = p.value != null ? p.value : p.valor;
+          if (!d || v == null) continue;
+          if (d <= selectedDate && (!chosen || d > chosen.d)) chosen = { d, v: Number(v) };
+        }
+        if (chosen) a3500 = chosen.v;
       }
-    } catch (err) {
+    }
+  } catch (err) {
+    // Silencioso: si BCRA falla y la fecha es hoy, vamos al fallback SPOT.
+  }
+
+  if (a3500 != null) {
+    DLK_STATE.fxValue = a3500;
+    DLK_STATE.fxSource = `A3500 (BCRA · ${formatDateDisplay(selectedDate)})`;
+    valueEl.textContent = fmtNumAr(a3500, 4);
+    metaEl.innerHTML = `<b>${DLK_STATE.fxSource}</b>`;
+  } else if (selectedDate === today) {
+    // Fallback: SPOT live (durante la rueda, antes de que BCRA publique A3500)
+    const spot = (spotLiveCache && spotLiveCache.last != null) ? Number(spotLiveCache.last) : null;
+    const src = spotLiveCache?.last_source || "";
+    if (spot != null) {
+      DLK_STATE.fxValue = spot;
+      DLK_STATE.fxSource = `DLR/SPOT${src ? " · " + src : ""}`;
+      valueEl.textContent = fmtNumAr(spot, 2);
+      metaEl.innerHTML = `<b>${DLK_STATE.fxSource}</b> · A3500 aun no publicado para hoy`;
+    } else {
       DLK_STATE.fxValue = null;
       DLK_STATE.fxSource = null;
       valueEl.textContent = "—";
-      metaEl.textContent = `Error al consultar BCRA: ${err.message || err}`;
+      metaEl.textContent = "Sin A3500 ni SPOT live disponibles";
     }
+  } else {
+    DLK_STATE.fxValue = null;
+    DLK_STATE.fxSource = null;
+    valueEl.textContent = "—";
+    metaEl.textContent = `Sin A3500 publicado para esa fecha`;
   }
-  // Re-render multiplicador y cashflow ARS si ya hay calculo
-  renderDlkMultiplier();
+
   if (currentBondModel === "dlk") renderDlkArsCashflow();
 }
 
@@ -2567,25 +2548,29 @@ function renderDlkArsCashflow() {
   if (!body) return;
   const cashflows = (hdLastCalculation && hdLastCalculation.cashflows) || [];
   if (!cashflows.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Calcula el cashflow para ver la conversion ajustada</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Calcula el cashflow para ver los flujos no cobrados</td></tr>';
     return;
   }
   const fx = DLK_STATE.fxValue;
-  const tc = _getDlkTcInicial();
   if (fx == null || !isFinite(fx) || fx <= 0) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">FX no disponible — elegi una fecha con cotizacion publicada</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">FX no disponible — sin A3500 publicado ni SPOT live</td></tr>';
     return;
   }
-  if (tc == null) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Ingresa el TC inicial (emision) para calcular el multiplicador</td></tr>';
+  // Filtrar solo flujos no cobrados (fecha de pago > fecha de valuacion)
+  const refDate = DLK_STATE.fxDate || _todayIso();
+  const unpaid = cashflows.filter((row) => {
+    const payDate = row.effective_payment_date || row.payment_date;
+    return payDate && payDate > refDate;
+  });
+  if (!unpaid.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Todos los flujos ya estan cobrados a esta fecha</td></tr>';
     return;
   }
-  const mult = fx / tc;
-  body.innerHTML = cashflows.map((row) => {
+  body.innerHTML = unpaid.map((row) => {
     const amort = Number(row.amortization_per_100) || 0;
     const interest = Number(row.interest_per_100) || 0;
     const total = Number(row.total_per_100) || 0;
-    const totalAdj = total * mult;
+    const totalAdj = total * fx;
     return `
       <tr>
         <td>${row.number}</td>
@@ -2593,7 +2578,7 @@ function renderDlkArsCashflow() {
         <td class="text-end">${formatNumber(amort, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
         <td class="text-end">${formatNumber(interest, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
         <td class="text-end">${formatNumber(total, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(mult, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(fx, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
         <td class="text-end"><b>${formatNumber(totalAdj, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
       </tr>
     `;
