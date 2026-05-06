@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd69">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd69">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd70">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd70">
   </head>
   <body>
     <main class="app-shell">
@@ -208,11 +208,12 @@
                   <thead>
                     <tr>
                       <th scope="col">Ticker</th>
-                      <th scope="col">Vto</th>
+                      <th scope="col" title="Click para editar fecha (se guarda local)">Vto</th>
                       <th scope="col" class="text-end">Bid</th>
                       <th scope="col" class="text-end">Ask</th>
                       <th scope="col" class="text-end">Last</th>
                       <th scope="col" class="text-end">Var %</th>
+                      <th scope="col" class="text-end" title="TNA implicita = ((100 * FX / precio) - 1) * 365 / dias_a_vto. Settlement segun T+0/T+1.">TNA</th>
                       <th scope="col" class="text-end">Hora</th>
                     </tr>
                   </thead>
@@ -1284,7 +1285,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd69"></script>
-    <script src="/app-bundle.js?v=hd69"></script>
+    <script src="/static/futures_curve.js?v=hd70"></script>
+    <script src="/app-bundle.js?v=hd70"></script>
   </body>
 </html>

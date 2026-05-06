@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd69 cargado - DLK: multiplicador = FX (A3500 prioritario, fallback SPOT) y filtra solo flujos no cobrados");
+console.log("[Monitor] app.js v=hd70 cargado - DLK tabla: columna TNA + Vto editable + settlement T+0/T+1 aware");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -532,14 +532,89 @@ function _buildDlkRow(symbol) {
   const tr = document.createElement("tr");
   tr.dataset.key = symbol;
   const tdSym = document.createElement("td"); tdSym.className = "ticker"; tdSym.innerHTML = `<strong>${symbol}</strong>`;
-  const tdVenc = document.createElement("td"); tdVenc.textContent = "-";
+  const tdVenc = document.createElement("td");
+  tdVenc.style.cursor = "pointer";
+  tdVenc.title = "Click para editar fecha de vencimiento";
+  tdVenc.textContent = "-";
+  // Click sobre la celda Vto: prompt para fecha (DD/MM/YYYY o YYYY-MM-DD), persiste en localStorage
+  tdVenc.addEventListener("click", () => {
+    const current = DLK_MATURITIES[symbol] || "";
+    const v = window.prompt(`Vto de ${symbol} (YYYY-MM-DD o DD/MM/YYYY)`, current);
+    if (v == null) return;
+    const iso = _parseDateInputToIso(v.trim());
+    if (!iso) {
+      if (v.trim() === "") {
+        delete DLK_MATURITIES[symbol];
+      } else {
+        alert("Fecha invalida. Usa YYYY-MM-DD o DD/MM/YYYY.");
+        return;
+      }
+    } else {
+      DLK_MATURITIES[symbol] = iso;
+    }
+    try { localStorage.setItem("dlkMaturities", JSON.stringify(DLK_MATURITIES)); } catch (_) {}
+    renderFuturosDlk();
+  });
   const tdBid = document.createElement("td"); tdBid.className = "text-end"; tdBid.textContent = "-";
   const tdAsk = document.createElement("td"); tdAsk.className = "text-end"; tdAsk.textContent = "-";
   const tdLast = document.createElement("td"); tdLast.className = "text-end"; tdLast.textContent = "-";
   const tdChg = document.createElement("td"); tdChg.className = "text-end"; tdChg.textContent = "-";
+  const tdTna = document.createElement("td"); tdTna.className = "text-end"; tdTna.textContent = "-";
   const tdTime = document.createElement("td"); tdTime.className = "text-end"; tdTime.textContent = "-";
-  tr.append(tdSym, tdVenc, tdBid, tdAsk, tdLast, tdChg, tdTime);
-  return { tr, cells: { venc: tdVenc, bid: tdBid, ask: tdAsk, last: tdLast, chg: tdChg, time: tdTime } };
+  tr.append(tdSym, tdVenc, tdBid, tdAsk, tdLast, tdChg, tdTna, tdTime);
+  return { tr, cells: { venc: tdVenc, bid: tdBid, ask: tdAsk, last: tdLast, chg: tdChg, tna: tdTna, time: tdTime } };
+}
+
+// ===== DLK maturities (editables por celda Vto, persisten en localStorage) =====
+const DLK_DEFAULT_MATURITIES = {
+  TZV26: "2026-06-30",
+  D30S6: "2026-09-30",
+  TZV27: "2027-06-30",
+  TZV28: "2028-06-30",
+};
+const DLK_MATURITIES = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("dlkMaturities") || "null");
+    if (saved && typeof saved === "object") return { ...DLK_DEFAULT_MATURITIES, ...saved };
+  } catch (_) {}
+  return { ...DLK_DEFAULT_MATURITIES };
+})();
+
+function _parseDateInputToIso(s) {
+  if (!s) return null;
+  // Acepta YYYY-MM-DD o DD/MM/YYYY
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (isoMatch) return s;
+  const dmyMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (dmyMatch) {
+    const dd = String(dmyMatch[1]).padStart(2, "0");
+    const mm = String(dmyMatch[2]).padStart(2, "0");
+    return `${dmyMatch[3]}-${mm}-${dd}`;
+  }
+  return null;
+}
+
+// Proximo dia habil simple (skip sabados/domingos). No considera feriados.
+function _nextBusinessDayJs(dateIso) {
+  const d = new Date(`${dateIso}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function _daysBetweenIso(fromIso, toIso) {
+  const a = new Date(`${fromIso}T00:00:00`);
+  const b = new Date(`${toIso}T00:00:00`);
+  return Math.round((b - a) / 86400000);
+}
+
+function calcDlkTna(currentPrice, spot, daysToMaturity) {
+  if (currentPrice == null || !isFinite(currentPrice) || currentPrice <= 0) return null;
+  if (spot == null || !isFinite(spot) || spot <= 0) return null;
+  if (daysToMaturity == null || daysToMaturity <= 0) return null;
+  // Asumimos pago al vencimiento = 100 nominal * FX_actual (bullet 100, sin cupon)
+  const maturityValueArs = 100 * spot;
+  return ((maturityValueArs / currentPrice) - 1) * 365 / daysToMaturity * 100;
 }
 
 function _buildFutRow(symbol) {
@@ -598,11 +673,23 @@ function renderFuturosDlk() {
   for (const q of latestQuotes) {
     if (q.category === "dlk") dlkBySymbol[q.symbol] = q;
   }
+  // Resolver settlement date para TNA segun T+0 / T+1 (currentMarketSettlement)
+  const todayIso = _todayIso();
+  const settleIso = currentMarketSettlement === "t1"
+    ? _nextBusinessDayJs(todayIso)
+    : todayIso;
+  const spotForTna = (spotLiveCache && spotLiveCache.last != null)
+    ? Number(spotLiveCache.last) : null;
+
   for (const symbol of DLK_ORDER) {
     const ref = ensureDlkRow(symbol);
     const q = dlkBySymbol[symbol];
-    if (!q) continue;
-    _setIfChanged(ref.cells.venc, "-");
+    const matIso = DLK_MATURITIES[symbol] || null;
+    _setIfChanged(ref.cells.venc, matIso ? formatDateDisplay(matIso) : "—");
+    if (!q) {
+      _setIfChanged(ref.cells.tna, "-");
+      continue;
+    }
     _setIfChanged(ref.cells.bid, fmtNumAr(q.bid, 2));
     _setIfChanged(ref.cells.ask, fmtNumAr(q.ask, 2));
     _setIfChanged(ref.cells.last, fmtNumAr(q.last, 2));
@@ -610,6 +697,17 @@ function renderFuturosDlk() {
     const chgTxt = (chgVal == null) ? "-" : `${fmtNumAr(chgVal, 2)}%`;
     const chgCls = "text-end " + (chgVal > 0 ? "positive" : chgVal < 0 ? "negative" : "");
     _setIfChanged(ref.cells.chg, chgTxt, chgCls);
+    // TNA implicita
+    let tnaTxt = "-";
+    if (matIso && spotForTna != null && q.last != null) {
+      const days = _daysBetweenIso(settleIso, matIso);
+      const tna = calcDlkTna(Number(q.last), spotForTna, days);
+      if (tna != null && isFinite(tna)) {
+        tnaTxt = `${fmtNumAr(tna, 2)}%`;
+        ref.cells.tna.title = `Spot: ${fmtNumAr(spotForTna, 2)} · Settle: ${formatDateDisplay(settleIso)} (${currentMarketSettlement.toUpperCase()}) · Dias: ${days}`;
+      }
+    }
+    _setIfChanged(ref.cells.tna, tnaTxt);
     _setIfChanged(ref.cells.time, q.updated_at ? formatTime(q.updated_at) : "-");
   }
 
@@ -2861,6 +2959,8 @@ document.querySelectorAll("[data-market-settlement]").forEach((button) => {
       candidate.classList.toggle("btn-outline-dark", !active);
     });
     renderQuotes();
+    // Re-render DLK para que TNA refleje T+0/T+1
+    if (currentMarketCategory === "futuros_dlk") renderFuturosDlk();
   });
 });
 
