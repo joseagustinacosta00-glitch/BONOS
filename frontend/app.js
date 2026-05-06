@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd63 cargado - SPOT lee IV (index value) intraday: LA -> IV -> CL");
+console.log("[Monitor] app.js v=hd64 cargado - Card de Brecha (MEP/CCL × Spread/Relativo) en menus FX y Futuros");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -672,6 +672,7 @@ async function pollFxRatios() {
     if (currentMarketCategory === "fx" && currentMarketList !== "lecaps") {
       renderFxRatios();
     }
+    renderBrechaCards();
   }
 }
 
@@ -727,17 +728,28 @@ function fmtSpotValue(v) {
   }).format(v);
 }
 
+function _spotSourceTag(src) {
+  if (src === "LA") return " · LA";
+  if (src === "IV") return " · IV (intraday)";
+  if (src === "CL") return " · CL (cierre)";
+  return "";
+}
+
 function renderSpotBanner() {
-  // SPOT LIVE (pyRofex: LA si hay, sino CL como fallback)
-  const liveValue = document.querySelector("#spotLiveValue");
-  const liveMeta = document.querySelector("#spotLiveMeta");
-  if (liveValue && liveMeta) {
+  // SPOT LIVE: pinta los dos contenedores duplicados (FX y Futuros)
+  const liveTargets = [
+    { v: "#spotLiveValue",   m: "#spotLiveMeta" },
+    { v: "#spotLiveValueFx", m: "#spotLiveMetaFx" },
+  ];
+  for (const t of liveTargets) {
+    const liveValue = document.querySelector(t.v);
+    const liveMeta = document.querySelector(t.m);
+    if (!liveValue || !liveMeta) continue;
     if (spotLiveCache && spotLiveCache.last != null) {
       liveValue.textContent = fmtSpotValue(spotLiveCache.last);
       const sym = spotLiveCache.symbol || "DLR/SPOT";
       const ts = spotLiveCache.updated_at ? formatTime(spotLiveCache.updated_at) : "";
-      const sourceTag = spotLiveCache.last_source === "CL" ? " · CL (cierre)" : " · LA";
-      liveMeta.innerHTML = `<strong>${sym}</strong>${ts ? " · " + ts : ""}${sourceTag}`;
+      liveMeta.innerHTML = `<strong>${sym}</strong>${ts ? " · " + ts : ""}${_spotSourceTag(spotLiveCache.last_source)}`;
     } else {
       liveValue.textContent = "—";
       liveMeta.textContent = spotItemsCount === 0
@@ -746,9 +758,14 @@ function renderSpotBanner() {
     }
   }
   // A3500
-  const a3500Value = document.querySelector("#spotA3500Value");
-  const a3500Meta = document.querySelector("#spotA3500Meta");
-  if (a3500Value && a3500Meta) {
+  const a3500Targets = [
+    { v: "#spotA3500Value",   m: "#spotA3500Meta" },
+    { v: "#spotA3500ValueFx", m: "#spotA3500MetaFx" },
+  ];
+  for (const t of a3500Targets) {
+    const a3500Value = document.querySelector(t.v);
+    const a3500Meta = document.querySelector(t.m);
+    if (!a3500Value || !a3500Meta) continue;
     if (spotA3500Cache && spotA3500Cache.last != null) {
       a3500Value.textContent = fmtSpotValue(spotA3500Cache.last);
       const date = spotA3500Cache.value_date ? formatDateDisplay(spotA3500Cache.value_date) : "";
@@ -757,6 +774,137 @@ function renderSpotBanner() {
       a3500Value.textContent = "—";
       a3500Meta.textContent = "Esperando publicacion BCRA";
     }
+  }
+  renderBrechaCards();
+}
+
+// ===== Brecha (MEP/CCL vs SPOT) =====
+const BRECHA_STATE = {
+  types: new Set(JSON.parse(localStorage.getItem("brechaTypes") || '["spread","relativo"]')),
+  sources: new Set(JSON.parse(localStorage.getItem("brechaSources") || '["mep","ccl"]')),
+};
+function _saveBrechaState() {
+  localStorage.setItem("brechaTypes", JSON.stringify([...BRECHA_STATE.types]));
+  localStorage.setItem("brechaSources", JSON.stringify([...BRECHA_STATE.sources]));
+}
+
+function _findRatio(label) {
+  // label: "MEP" o "CCL" — match contra fxRatiosCache items (AL30/AL30D = MEP, AL30/AL30C = CCL)
+  if (!Array.isArray(fxRatiosCache)) return null;
+  for (const it of fxRatiosCache) {
+    if (it && String(it.label || "").toUpperCase() === label) {
+      return Number(it.ratio);
+    }
+  }
+  return null;
+}
+
+function _ensureBrechaCardUI(card) {
+  if (card.dataset.uiReady === "1") return;
+  card.innerHTML = `
+    <div class="brecha-header">
+      <span class="brecha-title">Brecha vs SPOT</span>
+      <div class="brecha-toggles">
+        <div class="brecha-toggle-group" data-group="type">
+          <button type="button" data-val="spread">Spread</button>
+          <button type="button" data-val="relativo">Relativo</button>
+        </div>
+        <div class="brecha-toggle-group" data-group="source">
+          <button type="button" data-val="mep">MEP</button>
+          <button type="button" data-val="ccl">CCL</button>
+        </div>
+      </div>
+    </div>
+    <div class="brecha-rows"></div>
+  `;
+  // Listeners
+  card.querySelectorAll("button[data-val]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const group = btn.parentElement.dataset.group;
+      const val = btn.dataset.val;
+      const set = group === "type" ? BRECHA_STATE.types : BRECHA_STATE.sources;
+      if (set.has(val)) {
+        // No permitir desactivar el ultimo de cada grupo
+        if (set.size > 1) set.delete(val);
+      } else {
+        set.add(val);
+      }
+      _saveBrechaState();
+      renderBrechaCards();
+    });
+  });
+  card.dataset.uiReady = "1";
+}
+
+function renderBrechaCards() {
+  const cards = document.querySelectorAll(".brecha-card");
+  if (!cards.length) return;
+  const spot = (spotLiveCache && spotLiveCache.last != null) ? Number(spotLiveCache.last) : null;
+  const mep = _findRatio("MEP");
+  const ccl = _findRatio("CCL");
+
+  for (const card of cards) {
+    _ensureBrechaCardUI(card);
+    // Sync estado de botones
+    card.querySelectorAll("button[data-val]").forEach(btn => {
+      const group = btn.parentElement.dataset.group;
+      const val = btn.dataset.val;
+      const set = group === "type" ? BRECHA_STATE.types : BRECHA_STATE.sources;
+      btn.classList.toggle("active", set.has(val));
+    });
+    const rowsEl = card.querySelector(".brecha-rows");
+    if (!rowsEl) continue;
+
+    if (spot == null) {
+      rowsEl.innerHTML = `<div class="brecha-empty">Esperando SPOT…</div>`;
+      continue;
+    }
+    if (mep == null && ccl == null) {
+      rowsEl.innerHTML = `<div class="brecha-empty">Esperando ratios MEP/CCL…</div>`;
+      continue;
+    }
+
+    const sources = [...BRECHA_STATE.sources];
+    const types = [...BRECHA_STATE.types];
+    const variants = [];
+    for (const src of ["mep", "ccl"]) {
+      if (!sources.includes(src)) continue;
+      const ratio = src === "mep" ? mep : ccl;
+      if (ratio == null) continue;
+      for (const ty of ["spread", "relativo"]) {
+        if (!types.includes(ty)) continue;
+        if (ty === "spread") {
+          const v = ratio - spot;
+          variants.push({
+            label: `Spread ${src.toUpperCase()}`,
+            sub: `Ratio ${fmtNumAr(ratio, 2)} − SPOT`,
+            value: fmtNumAr(v, 2),
+            neg: v < 0,
+          });
+        } else {
+          const v = ((ratio / spot) - 1) * 100;
+          variants.push({
+            label: `Relativo ${src.toUpperCase()}`,
+            sub: `(Ratio / SPOT) − 1`,
+            value: `${fmtNumAr(v, 2)}%`,
+            neg: v < 0,
+          });
+        }
+      }
+    }
+
+    if (!variants.length) {
+      rowsEl.innerHTML = `<div class="brecha-empty">Activá al menos un Tipo y una Fuente</div>`;
+      continue;
+    }
+
+    rowsEl.innerHTML = variants
+      .map(r => `
+        <div class="brecha-row">
+          <span class="brecha-row-label">${r.label}<small>${r.sub}</small></span>
+          <span class="brecha-row-value ${r.neg ? "neg" : ""}">${r.value}</span>
+        </div>
+      `).join("");
   }
 }
 

@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd63">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd63">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd64">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd64">
   </head>
   <body>
     <main class="app-shell">
@@ -151,7 +151,23 @@
           </table>
         </section>
 
-        <section id="fxTableWrap" class="table-wrap" aria-label="Ratios FX" style="display:none;">
+        <section id="fxTableWrap" aria-label="Ratios FX" style="display:none;">
+          <div class="spot-brecha-banner">
+            <div class="spot-banner-pair">
+              <div class="spot-card spot-card-live">
+                <span class="spot-card-label">SPOT LIVE <small>(pyRofex 10-15h)</small></span>
+                <span class="spot-card-value" id="spotLiveValueFx">—</span>
+                <span class="spot-card-meta" id="spotLiveMetaFx">Esperando ticks intraday…</span>
+              </div>
+              <div class="spot-card spot-card-a3500">
+                <span class="spot-card-label">A3500 <small>(BCRA cierre VWAP)</small></span>
+                <span class="spot-card-value" id="spotA3500ValueFx">—</span>
+                <span class="spot-card-meta" id="spotA3500MetaFx">—</span>
+              </div>
+            </div>
+            <div class="brecha-card" data-brecha-card="fx"></div>
+          </div>
+          <div class="table-wrap">
           <table class="table table-hover align-middle mb-0">
             <thead>
               <tr>
@@ -165,20 +181,24 @@
             </thead>
             <tbody id="fxBody"></tbody>
           </table>
+          </div>
         </section>
 
         <section id="futTableWrap" aria-label="Futuros y DLK" style="display:none;">
-          <div id="spotBanner" class="spot-banner-pair">
-            <div class="spot-card spot-card-live">
-              <span class="spot-card-label">SPOT LIVE <small>(pyRofex 10-15h)</small></span>
-              <span class="spot-card-value" id="spotLiveValue">—</span>
-              <span class="spot-card-meta" id="spotLiveMeta">Esperando ticks intraday…</span>
+          <div class="spot-brecha-banner">
+            <div id="spotBanner" class="spot-banner-pair">
+              <div class="spot-card spot-card-live">
+                <span class="spot-card-label">SPOT LIVE <small>(pyRofex 10-15h)</small></span>
+                <span class="spot-card-value" id="spotLiveValue">—</span>
+                <span class="spot-card-meta" id="spotLiveMeta">Esperando ticks intraday…</span>
+              </div>
+              <div class="spot-card spot-card-a3500">
+                <span class="spot-card-label">A3500 <small>(BCRA cierre VWAP)</small></span>
+                <span class="spot-card-value" id="spotA3500Value">—</span>
+                <span class="spot-card-meta" id="spotA3500Meta">—</span>
+              </div>
             </div>
-            <div class="spot-card spot-card-a3500">
-              <span class="spot-card-label">A3500 <small>(BCRA cierre VWAP)</small></span>
-              <span class="spot-card-value" id="spotA3500Value">—</span>
-              <span class="spot-card-meta" id="spotA3500Meta">—</span>
-            </div>
+            <div class="brecha-card" data-brecha-card="fut"></div>
           </div>
           <div class="fut-split">
             <div class="fut-split-col">
@@ -1220,7 +1240,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd63"></script>
-    <script src="/app-bundle.js?v=hd63"></script>
+    <script src="/static/futures_curve.js?v=hd64"></script>
+    <script src="/app-bundle.js?v=hd64"></script>
   </body>
 </html>
