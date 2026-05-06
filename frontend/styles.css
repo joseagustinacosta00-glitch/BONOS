@@ -1335,8 +1335,8 @@ tbody td {
   font-size: 0.6rem; color: #64748b; font-variant-numeric: tabular-nums;
 }
 .synth-fut-row {
-  display: grid; grid-template-columns: 38px 1fr; align-items: baseline;
-  font-size: 0.7rem; padding: 0.1rem 0;
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 0.72rem; padding: 0.12rem 0;
 }
 .synth-fut-row-label {
   font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.6rem;
@@ -1348,8 +1348,28 @@ tbody td {
   display: flex; justify-content: space-between; gap: 0.4rem; align-items: baseline;
   font-variant-numeric: tabular-nums;
 }
-.synth-fut-row-orig { color: #94a3b8; font-size: 0.68rem; }
+.synth-fut-row-orig { color: #cbd5e1; font-size: 0.78rem; font-weight: 600; text-align: right; }
 .synth-fut-row-disc { color: #f1f5f9; font-weight: 600; font-size: 0.78rem; }
+.synth-fut-bondtag {
+  font-size: 0.64rem; color: #94a3b8;
+  margin: 0.15rem 0 0.3rem; padding-bottom: 0.25rem;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.12);
+}
+.synth-fut-bondtag b { color: #e2e8f0; font-weight: 700; }
+.synth-fut-curve {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 0.35rem; padding: 0.3rem 0.4rem;
+  background: rgba(167, 139, 250, 0.12); border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 0.3rem;
+}
+.synth-fut-curve-label {
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: #c4b5fd;
+}
+.synth-fut-curve-value {
+  font-size: 0.92rem; font-weight: 800; color: #ddd6fe;
+  font-variant-numeric: tabular-nums;
+}
 .spot-card { padding: 0.85rem 1.1rem; border-radius: 0.6rem; display: flex; flex-direction: column; gap: 0.2rem; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
 .spot-card-live { background: linear-gradient(90deg, #ecfdf5 0%, #f0fdf4 100%); border: 1px solid #bbf7d0; border-left: 6px solid #16a34a; }
 .spot-card-a3500 { background: linear-gradient(90deg, #eff6ff 0%, #f8fafc 100%); border: 1px solid #bfdbfe; border-left: 6px solid #0d6efd; }

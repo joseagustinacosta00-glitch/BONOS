@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd74 cargado - Fix sintetica (bond/100) + sidebar de futuros descontados (BID/LAST/OFFER atados al modelo)");
+console.log("[Monitor] app.js v=hd75 cargado - Sintetica: descuento por curva al fixing + modos Last/Colocadora/Tomadora + sidebar mapeados con vol");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -1308,7 +1308,7 @@ let _syntheticListenersReady = false;
 
 function _initSyntheticControls() {
   if (_syntheticListenersReady) return;
-  ["syntheticDiscountModel", "syntheticCurveModel"].forEach(id => {
+  ["syntheticMode", "syntheticDiscountModel", "syntheticCurveModel"].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     const saved = localStorage.getItem(id);
@@ -1329,68 +1329,100 @@ function _initSyntheticControls() {
   _syntheticListenersReady = true;
 }
 
-// Sidebar de futuros descontados al modelo de la curva.
-// Cada card muestra ticker, volumen y BID/LAST/OFFER originales + descontados.
-function _renderSyntheticSidebar(futList, discountModel, spot, todayIso) {
+// Modos sintetico: define que precios usar de bono y de futuro + sentido (signo).
+function _syntheticModeSpec(mode) {
+  switch (mode) {
+    case "colocadora":
+      return {
+        label: "Colocadora",
+        bondField: "ask",   // compro DLK al offer
+        futField:  "bid",   // vendo futuro al bid
+      };
+    case "tomadora":
+      return {
+        label: "Tomadora",
+        bondField: "bid",   // vendo DLK al bid
+        futField:  "ask",   // compro futuro al offer
+      };
+    case "last_vs_last":
+    default:
+      return { label: "Last vs Last", bondField: "last", futField: "last" };
+  }
+}
+
+function _futurePrice(f, field) {
+  if (!f) return null;
+  if (field === "bid")  return f.bid != null ? Number(f.bid) : null;
+  if (field === "ask")  return f.ask != null ? Number(f.ask) : null;
+  return f.last != null ? Number(f.last) : null;
+}
+function _bondPrice(q, field) {
+  if (!q) return null;
+  if (field === "bid")  return q.bid != null ? Number(q.bid) : null;
+  if (field === "ask")  return q.ask != null ? Number(q.ask) : null;
+  return q.last != null ? Number(q.last) : null;
+}
+
+// Sidebar: solo los futuros MAPEADOS a un bono DLK que tengan volumen.
+// Muestra BID / LAST / OFFER originales + el valor del futuro al fixing por curva
+// (linea destacada). El fixing es 3 dias habiles antes del vencimiento del BONO
+// asociado (no del futuro).
+function _renderSyntheticSidebar(futList, dlkBySymbol, curveAtFixingFn) {
   const sidebar = document.querySelector("#syntheticSidebar");
   if (!sidebar) return;
-  if (!Array.isArray(futList) || !futList.length || spot == null) {
+  if (!Array.isArray(futList) || !futList.length) {
     sidebar.innerHTML = `<div class="synth-sidebar-empty">Sin futuros disponibles</div>`;
     return;
   }
-  // Filtrar futuros con volumen
-  const withVol = futList.filter(f => {
-    const v = f.trade_volume != null ? Number(f.trade_volume) : (f.volume != null ? Number(f.volume) : 0);
-    return v > 0 && f.expiration && f.days_to_maturity != null && f.days_to_maturity > 0;
-  });
-  if (!withVol.length) {
-    sidebar.innerHTML = `<div class="synth-sidebar-empty">Sin futuros con volumen</div>`;
-    return;
-  }
-  // Ordenar por dias al vto ascendente
-  withVol.sort((a, b) => Number(a.days_to_maturity) - Number(b.days_to_maturity));
-  // Para cada future: factor de descuento = 1 / (1 + curve_TNA(days)/100 * days/365)
-  const cards = withVol.map(f => {
-    const days = Number(f.days_to_maturity);
-    const vol = Number(f.trade_volume || f.volume || 0);
-    let df = 1;
-    if (discountModel) {
-      const tna = discountModel.predict(days);
-      if (tna != null && isFinite(tna)) {
-        df = 1 / (1 + (tna / 100) * days / 365);
-      }
-    }
+  const futureByName = {};
+  for (const f of futList) if (f && f.symbol) futureByName[f.symbol] = f;
+  // Para cada bono DLK que tenga futuro mapeado y volumen
+  const cards = [];
+  for (const ticker of DLK_ORDER) {
+    const matIso = DLK_MATURITIES[ticker];
+    const futSym = DLK_TO_FUTURE[ticker];
+    if (!matIso || !futSym) continue;
+    const f = futureByName[futSym];
+    if (!f || !f.expiration) continue;
+    const vol = f.trade_volume != null ? Number(f.trade_volume) : (f.volume != null ? Number(f.volume) : 0);
+    if (vol <= 0) continue;
+    const fixingIso = _prevBusinessDays(matIso, 3);
+    const futAtFixing = curveAtFixingFn(fixingIso);
     const rows = [
       { lbl: "BID", cls: "bid",   v: f.bid != null ? Number(f.bid) : null },
       { lbl: "LST", cls: "last",  v: f.last != null ? Number(f.last) : null },
       { lbl: "OFR", cls: "offer", v: f.ask != null ? Number(f.ask) : null },
     ];
     const rowsHtml = rows.map(r => {
-      if (r.v == null || !isFinite(r.v) || r.v <= 0) {
-        return `<div class="synth-fut-row ${r.cls}"><span class="synth-fut-row-label">${r.lbl}</span><span class="synth-fut-row-values"><span class="synth-fut-row-disc">—</span></span></div>`;
-      }
-      const disc = r.v * df;
+      const valTxt = (r.v == null || !isFinite(r.v) || r.v <= 0) ? "—" : fmtNumAr(r.v, 2);
       return `
         <div class="synth-fut-row ${r.cls}">
           <span class="synth-fut-row-label">${r.lbl}</span>
-          <span class="synth-fut-row-values">
-            <span class="synth-fut-row-orig">${fmtNumAr(r.v, 2)}</span>
-            <span class="synth-fut-row-disc">${fmtNumAr(disc, 2)}</span>
-          </span>
+          <span class="synth-fut-row-orig">${valTxt}</span>
         </div>
       `;
     }).join("");
-    return `
+    const fixingTxt = fmtNumAr(futAtFixing, 2);
+    cards.push(`
       <div class="synth-fut-card">
         <div class="synth-fut-head">
           <span class="synth-fut-ticker">${f.symbol}</span>
-          <span class="synth-fut-vol">${fmtIntAr(vol)} cn · ${days}d</span>
+          <span class="synth-fut-vol">${fmtIntAr(vol)} cn</span>
         </div>
+        <div class="synth-fut-bondtag">para <b>${ticker}</b> · fixing ${formatDateDisplay(fixingIso)}</div>
         ${rowsHtml}
+        <div class="synth-fut-curve">
+          <span class="synth-fut-curve-label">Curva al fixing</span>
+          <span class="synth-fut-curve-value">${fixingTxt}</span>
+        </div>
       </div>
-    `;
-  }).join("");
-  sidebar.innerHTML = cards;
+    `);
+  }
+  if (!cards.length) {
+    sidebar.innerHTML = `<div class="synth-sidebar-empty">Sin futuros mapeados con volumen</div>`;
+    return;
+  }
+  sidebar.innerHTML = cards.join("");
 }
 
 function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
@@ -1399,10 +1431,12 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
   if (!canvas || typeof Chart === "undefined") return;
   _initSyntheticControls();
 
+  const modeName = document.getElementById("syntheticMode")?.value || "last_vs_last";
+  const mode = _syntheticModeSpec(modeName);
   const discountModelName = document.getElementById("syntheticDiscountModel")?.value || "linear";
   const curveModelName = document.getElementById("syntheticCurveModel")?.value || "linear";
 
-  // 1) Construir curva de futuros (TNA al BID, que es el lado vendedor) y fitearla con el modelo de descuento.
+  // 1) Construir curva de futuros con el FIELD del modo (bid/last/ask) y fitear el modelo de descuento.
   const todayIso = _todayIso();
   const futList = futuresCache || [];
   const futureByName = {};
@@ -1410,10 +1444,10 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
   for (const f of futList) {
     if (!f || !f.symbol || !f.expiration) continue;
     futureByName[f.symbol] = f;
-    const bid = f.bid != null ? Number(f.bid) : null;
+    const px = _futurePrice(f, mode.futField);
     const fdays = f.days_to_maturity != null ? Number(f.days_to_maturity) : _daysBetweenIso(todayIso, f.expiration);
-    if (bid == null || !isFinite(bid) || bid <= 0 || fdays <= 0 || spot == null) continue;
-    const fwdTna = ((bid / spot) - 1) * 365 / fdays * 100;
+    if (px == null || !isFinite(px) || px <= 0 || fdays <= 0 || spot == null) continue;
+    const fwdTna = ((px / spot) - 1) * 365 / fdays * 100;
     if (!isFinite(fwdTna)) continue;
     futurePoints.push({ x: fdays, y: fwdTna });
   }
@@ -1424,10 +1458,18 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     discountModel = window.FuturesCurve.fitModel(observed, discountModelName);
   }
 
-  // 1.5) Sidebar: lista de futuros con volumen, mostrando precios descontados
-  // (BID/LAST/OFFER) usando el modelo de descuento sobre la curva, descontando
-  // hacia HOY (no al fixing — para ver el SPOT implicito de cada contrato).
-  _renderSyntheticSidebar(futList, discountModel, spot, todayIso);
+  // Helper: valor del futuro al fixing por curva = SPOT * (1 + curveTNA(daysToFixing) * daysToFixing / 365)
+  function _curveAtFixing(fixingIso) {
+    if (spot == null || !discountModel) return null;
+    const dToFix = _daysBetweenIso(todayIso, fixingIso);
+    if (dToFix <= 0) return null;
+    const tnaPct = discountModel.predict(dToFix);
+    if (tnaPct == null || !isFinite(tnaPct)) return null;
+    return spot * (1 + (tnaPct / 100) * dToFix / 365);
+  }
+
+  // 1.5) Sidebar: solo futuros mapeados a bonos DLK que tengan volumen.
+  _renderSyntheticSidebar(futList, dlkBySymbol, _curveAtFixing);
 
   // 2) Para cada bono DLK con futuro mapeado, calcular la sintetica.
   const synthPoints = [];
@@ -1438,48 +1480,40 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     const bondQ = dlkBySymbol[ticker];
     const futQ = futureByName[futSym];
     if (!bondQ || !futQ || !futQ.expiration) continue;
-    const bondAskRaw = bondQ.ask != null ? Number(bondQ.ask) : null;
-    const futBid = futQ.bid != null ? Number(futQ.bid) : null;
-    if (bondAskRaw == null || futBid == null || bondAskRaw <= 0 || futBid <= 0) continue;
-    // Bono cotiza por 100 VN (precio en pesos por 100 USD-equiv) => normalizar
-    const bondAskPerUsd = bondAskRaw / 100;
+    const bondPxRaw = _bondPrice(bondQ, mode.bondField);
+    const futPx = _futurePrice(futQ, mode.futField);
+    if (bondPxRaw == null || futPx == null || bondPxRaw <= 0 || futPx <= 0) continue;
+    // Bono cotiza por 100 VN => normalizar a "por USD"
+    const bondPxPerUsd = bondPxRaw / 100;
 
     // Fixing del bono = 3 dias habiles antes del vencimiento del bono
     const fixingIso = _prevBusinessDays(matIso, 3);
-    const futExpIso = String(futQ.expiration);
     const daysSettleToFixing = _daysBetweenIso(settleIso, fixingIso);
-    const daysFixingToFutExp = _daysBetweenIso(fixingIso, futExpIso);
-    if (daysSettleToFixing <= 0) continue; // ya pasamos el fixing
+    if (daysSettleToFixing <= 0) continue;
 
-    // 3) Descontar el futuro al fixing usando el modelo de descuento.
-    let discountedFut = futBid;
-    if (daysFixingToFutExp > 0 && discountModel) {
-      const daysTodayToFixing = _daysBetweenIso(todayIso, fixingIso);
-      const tnaAtFixing = discountModel.predict(daysTodayToFixing);
-      if (tnaAtFixing != null && isFinite(tnaAtFixing)) {
-        discountedFut = futBid / (1 + (tnaAtFixing / 100) * daysFixingToFutExp / 365);
-      }
-    }
+    // 3) Valor del futuro al fixing POR CURVA (no es discount del precio, es la curva).
+    const futAtFixing = _curveAtFixing(fixingIso);
+    if (futAtFixing == null) continue;
 
-    // 4) Tasa sintetica colocadora = ((futuro_descontado / (bono_offer/100)) - 1) * 365 / dias_settlement_a_fixing * 100
-    const synthTna = ((discountedFut / bondAskPerUsd) - 1) * 365 / daysSettleToFixing * 100;
+    // 4) TNA sintetica = ((futuro_al_fixing_por_curva / (bono/100)) - 1) * 365 / dias_settlement_a_fixing * 100
+    const synthTna = ((futAtFixing / bondPxPerUsd) - 1) * 365 / daysSettleToFixing * 100;
     if (!isFinite(synthTna)) continue;
 
     synthPoints.push({
       x: daysSettleToFixing,
       y: synthTna,
       ticker, mat: matIso, fixingIso, futSym,
-      bondAsk: bondAskRaw, bondAskPerUsd, futBid, discountedFut, daysFixingToFutExp,
-      tna: synthTna, price: bondAskRaw,
+      bondPxRaw, bondPxPerUsd, futPx, futAtFixing,
+      tna: synthTna, price: bondPxRaw,
     });
   }
   synthPoints.sort((a, b) => a.x - b.x);
 
   if (meta) {
     if (spot == null) meta.textContent = "Esperando SPOT…";
-    else if (!synthPoints.length) meta.textContent = "Sin datos suficientes (faltan precios bid/ask)";
+    else if (!synthPoints.length) meta.textContent = "Sin datos suficientes";
     else {
-      meta.textContent = `${synthPoints.length} bonos · descuento: ${discountModelName} · curva: ${curveModelName} · ${currentMarketSettlement.toUpperCase()}`;
+      meta.textContent = `${synthPoints.length} bonos · ${mode.label} · descuento: ${discountModelName} · curva: ${curveModelName} · ${currentMarketSettlement.toUpperCase()}`;
     }
   }
 
@@ -1545,8 +1579,8 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     for (let i = 0; i < synthPoints.length - 1; i++) {
       const a = synthPoints[i], b = synthPoints[i + 1];
       const span = b.x - a.x;
-      if (span <= 0 || a.bondAsk <= 0 || b.bondAsk <= 0) continue;
-      const fwd = ((a.bondAsk / b.bondAsk) - 1) * 365 / span * 100;
+      if (span <= 0 || a.bondPxRaw <= 0 || b.bondPxRaw <= 0) continue;
+      const fwd = ((a.bondPxRaw / b.bondPxRaw) - 1) * 365 / span * 100;
       const midDays = (a.x + b.x) / 2;
       fwdPoints.push({
         x: midDays, y: fwd,
@@ -1631,9 +1665,9 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
               const raw = ctx.raw;
               if (raw && raw._p) {
                 return [
-                  `Bono offer: ${fmtNumAr(raw._p.bondAsk, 2)} (= ${fmtNumAr(raw._p.bondAskPerUsd, 2)} /USD)`,
-                  `Futuro ${raw._p.futSym} bid: ${fmtNumAr(raw._p.futBid, 2)}`,
-                  `Futuro descontado al fixing: ${fmtNumAr(raw._p.discountedFut, 2)}`,
+                  `Bono ${mode.bondField.toUpperCase()}: ${fmtNumAr(raw._p.bondPxRaw, 2)} (= ${fmtNumAr(raw._p.bondPxPerUsd, 2)} /USD)`,
+                  `Futuro ${raw._p.futSym} ${mode.futField.toUpperCase()}: ${fmtNumAr(raw._p.futPx, 2)}`,
+                  `Futuro al fixing por curva: ${fmtNumAr(raw._p.futAtFixing, 2)}`,
                   `Fixing: ${formatDateDisplay(raw._p.fixingIso)} (3 dh antes vto)`,
                   `TNA sintetica: ${raw._p.tna.toFixed(2)}%`,
                 ];
