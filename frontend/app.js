@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd73 cargado - Sinteticas ARS + Forwards en DLK + modal amigable + labels mas grandes");
+console.log("[Monitor] app.js v=hd74 cargado - Fix sintetica (bond/100) + sidebar de futuros descontados (BID/LAST/OFFER atados al modelo)");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -1329,6 +1329,70 @@ function _initSyntheticControls() {
   _syntheticListenersReady = true;
 }
 
+// Sidebar de futuros descontados al modelo de la curva.
+// Cada card muestra ticker, volumen y BID/LAST/OFFER originales + descontados.
+function _renderSyntheticSidebar(futList, discountModel, spot, todayIso) {
+  const sidebar = document.querySelector("#syntheticSidebar");
+  if (!sidebar) return;
+  if (!Array.isArray(futList) || !futList.length || spot == null) {
+    sidebar.innerHTML = `<div class="synth-sidebar-empty">Sin futuros disponibles</div>`;
+    return;
+  }
+  // Filtrar futuros con volumen
+  const withVol = futList.filter(f => {
+    const v = f.trade_volume != null ? Number(f.trade_volume) : (f.volume != null ? Number(f.volume) : 0);
+    return v > 0 && f.expiration && f.days_to_maturity != null && f.days_to_maturity > 0;
+  });
+  if (!withVol.length) {
+    sidebar.innerHTML = `<div class="synth-sidebar-empty">Sin futuros con volumen</div>`;
+    return;
+  }
+  // Ordenar por dias al vto ascendente
+  withVol.sort((a, b) => Number(a.days_to_maturity) - Number(b.days_to_maturity));
+  // Para cada future: factor de descuento = 1 / (1 + curve_TNA(days)/100 * days/365)
+  const cards = withVol.map(f => {
+    const days = Number(f.days_to_maturity);
+    const vol = Number(f.trade_volume || f.volume || 0);
+    let df = 1;
+    if (discountModel) {
+      const tna = discountModel.predict(days);
+      if (tna != null && isFinite(tna)) {
+        df = 1 / (1 + (tna / 100) * days / 365);
+      }
+    }
+    const rows = [
+      { lbl: "BID", cls: "bid",   v: f.bid != null ? Number(f.bid) : null },
+      { lbl: "LST", cls: "last",  v: f.last != null ? Number(f.last) : null },
+      { lbl: "OFR", cls: "offer", v: f.ask != null ? Number(f.ask) : null },
+    ];
+    const rowsHtml = rows.map(r => {
+      if (r.v == null || !isFinite(r.v) || r.v <= 0) {
+        return `<div class="synth-fut-row ${r.cls}"><span class="synth-fut-row-label">${r.lbl}</span><span class="synth-fut-row-values"><span class="synth-fut-row-disc">—</span></span></div>`;
+      }
+      const disc = r.v * df;
+      return `
+        <div class="synth-fut-row ${r.cls}">
+          <span class="synth-fut-row-label">${r.lbl}</span>
+          <span class="synth-fut-row-values">
+            <span class="synth-fut-row-orig">${fmtNumAr(r.v, 2)}</span>
+            <span class="synth-fut-row-disc">${fmtNumAr(disc, 2)}</span>
+          </span>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="synth-fut-card">
+        <div class="synth-fut-head">
+          <span class="synth-fut-ticker">${f.symbol}</span>
+          <span class="synth-fut-vol">${fmtIntAr(vol)} cn · ${days}d</span>
+        </div>
+        ${rowsHtml}
+      </div>
+    `;
+  }).join("");
+  sidebar.innerHTML = cards;
+}
+
 function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
   const canvas = document.querySelector("#syntheticChart");
   const meta = document.querySelector("#syntheticMeta");
@@ -1360,6 +1424,11 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     discountModel = window.FuturesCurve.fitModel(observed, discountModelName);
   }
 
+  // 1.5) Sidebar: lista de futuros con volumen, mostrando precios descontados
+  // (BID/LAST/OFFER) usando el modelo de descuento sobre la curva, descontando
+  // hacia HOY (no al fixing — para ver el SPOT implicito de cada contrato).
+  _renderSyntheticSidebar(futList, discountModel, spot, todayIso);
+
   // 2) Para cada bono DLK con futuro mapeado, calcular la sintetica.
   const synthPoints = [];
   for (const ticker of DLK_ORDER) {
@@ -1369,9 +1438,11 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     const bondQ = dlkBySymbol[ticker];
     const futQ = futureByName[futSym];
     if (!bondQ || !futQ || !futQ.expiration) continue;
-    const bondAsk = bondQ.ask != null ? Number(bondQ.ask) : null;
+    const bondAskRaw = bondQ.ask != null ? Number(bondQ.ask) : null;
     const futBid = futQ.bid != null ? Number(futQ.bid) : null;
-    if (bondAsk == null || futBid == null || bondAsk <= 0 || futBid <= 0) continue;
+    if (bondAskRaw == null || futBid == null || bondAskRaw <= 0 || futBid <= 0) continue;
+    // Bono cotiza por 100 VN (precio en pesos por 100 USD-equiv) => normalizar
+    const bondAskPerUsd = bondAskRaw / 100;
 
     // Fixing del bono = 3 dias habiles antes del vencimiento del bono
     const fixingIso = _prevBusinessDays(matIso, 3);
@@ -1390,16 +1461,16 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
       }
     }
 
-    // 4) Tasa sintetica colocadora = ((futuro_descontado / bono_offer) - 1) * 365 / dias * 100
-    const synthTna = ((discountedFut / bondAsk) - 1) * 365 / daysSettleToFixing * 100;
+    // 4) Tasa sintetica colocadora = ((futuro_descontado / (bono_offer/100)) - 1) * 365 / dias_settlement_a_fixing * 100
+    const synthTna = ((discountedFut / bondAskPerUsd) - 1) * 365 / daysSettleToFixing * 100;
     if (!isFinite(synthTna)) continue;
 
     synthPoints.push({
       x: daysSettleToFixing,
       y: synthTna,
       ticker, mat: matIso, fixingIso, futSym,
-      bondAsk, futBid, discountedFut, daysFixingToFutExp,
-      tna: synthTna, price: bondAsk,
+      bondAsk: bondAskRaw, bondAskPerUsd, futBid, discountedFut, daysFixingToFutExp,
+      tna: synthTna, price: bondAskRaw,
     });
   }
   synthPoints.sort((a, b) => a.x - b.x);
@@ -1560,7 +1631,7 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
               const raw = ctx.raw;
               if (raw && raw._p) {
                 return [
-                  `Bono offer: ${fmtNumAr(raw._p.bondAsk, 2)}`,
+                  `Bono offer: ${fmtNumAr(raw._p.bondAsk, 2)} (= ${fmtNumAr(raw._p.bondAskPerUsd, 2)} /USD)`,
                   `Futuro ${raw._p.futSym} bid: ${fmtNumAr(raw._p.futBid, 2)}`,
                   `Futuro descontado al fixing: ${fmtNumAr(raw._p.discountedFut, 2)}`,
                   `Fixing: ${formatDateDisplay(raw._p.fixingIso)} (3 dh antes vto)`,
