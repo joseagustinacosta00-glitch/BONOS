@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd57 cargado - Futuros DLR: columna Aj. + selector as_of_date para TNA");
+console.log("[Monitor] app.js v=hd60 cargado - Spot picker estricto rango [500,100000] + indicador de simbolo fuente");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -650,6 +650,225 @@ function renderFuturosDlk() {
     for (const q of futList) {
       const ref = futRowRefs.get(q.symbol);
       if (ref && ref.tr.parentNode === futBody) futBody.appendChild(ref.tr);
+    }
+  }
+
+  // Curva de TNAs
+  renderTnaCurve();
+}
+
+// ===== Curva de TNAs de futuros DLR =====
+const TNA_SERIES_DEFS = [
+  { id: "bid",        field: "tna_bid_percent",        color: "#16a34a", label: "Bid",     ctrl: "tnaShowBid" },
+  { id: "last",       field: "tna_last_percent",       color: "#0d6efd", label: "Last",    ctrl: "tnaShowLast" },
+  { id: "ask",        field: "tna_ask_percent",        color: "#dc2626", label: "Offer",   ctrl: "tnaShowAsk" },
+  { id: "settlement", field: "tna_settlement_percent", color: "#7c3aed", label: "Ajuste",  ctrl: "tnaShowSettlement" },
+];
+
+function _svgEl(name, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+  if (attrs) {
+    for (const k in attrs) {
+      if (attrs[k] != null) el.setAttribute(k, attrs[k]);
+    }
+  }
+  return el;
+}
+
+function renderTnaCurve() {
+  const svg = document.querySelector("#tnaCurveChart");
+  if (!svg) return;
+  const list = (futuresCache || []).filter(q => q && q.expiration && q.days_to_maturity != null && q.days_to_maturity > 0);
+  // Ordenar por dias al vencimiento ascendente
+  list.sort((a, b) => (a.days_to_maturity || 0) - (b.days_to_maturity || 0));
+
+  // Limpiar SVG
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  // Dimensiones (viewBox fijo, escalado por CSS)
+  const W = 600, H = 220;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  // Margenes: izquierda mas amplia para etiquetas, abajo para fechas
+  const M = { l: 40, r: 12, t: 14, b: 36 };
+  const plotW = W - M.l - M.r;
+  const plotH = H - M.t - M.b;
+
+  if (!list.length) {
+    svg.appendChild(_svgEl("text", {
+      x: W / 2, y: H / 2, "text-anchor": "middle", fill: "#94a3b8", "font-size": 13,
+    })).textContent = "Sin datos de futuros";
+    return;
+  }
+
+  // Filtro por volumen
+  const filterChk = document.querySelector("#tnaFilterByVolume");
+  const minInput = document.querySelector("#tnaMinVolume");
+  const filterOn = !!(filterChk && filterChk.checked);
+  const minVol = Math.max(0, Number(minInput && minInput.value) || 0);
+
+  // Series visibles
+  const visibleSeries = TNA_SERIES_DEFS.filter(s => {
+    const c = document.querySelector("#" + s.ctrl);
+    return c && c.checked;
+  });
+
+  // Datos por serie con flag "theoric" si no cumple volumen
+  const seriesData = visibleSeries.map(s => {
+    const points = list.map(q => {
+      const val = q[s.field];
+      if (val == null || !isFinite(val)) return null;
+      const vol = q.trade_volume != null ? q.trade_volume : (q.volume != null ? q.volume : 0);
+      const theoric = filterOn && vol < minVol;
+      return {
+        symbol: q.symbol,
+        days: q.days_to_maturity,
+        expiration: q.expiration,
+        tna: val,
+        volume: vol,
+        theoric,
+      };
+    }).filter(Boolean);
+    return { ...s, points };
+  });
+
+  // Rangos
+  let allTna = [];
+  let allDays = [];
+  for (const s of seriesData) for (const p of s.points) {
+    allTna.push(p.tna);
+    allDays.push(p.days);
+  }
+  if (!allTna.length) {
+    svg.appendChild(_svgEl("text", {
+      x: W / 2, y: H / 2, "text-anchor": "middle", fill: "#94a3b8", "font-size": 13,
+    })).textContent = "Sin TNAs en las series seleccionadas";
+    return;
+  }
+  let yMin = Math.min(...allTna);
+  let yMax = Math.max(...allTna);
+  if (yMin === yMax) { yMin -= 1; yMax += 1; }
+  // Margen vertical 8%
+  const ySpan = yMax - yMin;
+  yMin -= ySpan * 0.08;
+  yMax += ySpan * 0.12;
+
+  let xMin = Math.min(...allDays);
+  let xMax = Math.max(...allDays);
+  if (xMin === xMax) { xMin = Math.max(0, xMin - 1); xMax += 1; }
+  // Pequeno margen horizontal
+  const xSpan = xMax - xMin;
+  xMin = Math.max(0, xMin - xSpan * 0.03);
+  xMax += xSpan * 0.03;
+
+  const sx = d => M.l + ((d - xMin) / (xMax - xMin)) * plotW;
+  const sy = v => M.t + (1 - (v - yMin) / (yMax - yMin)) * plotH;
+
+  // Grid + eje Y (5 lineas)
+  const yTicks = 5;
+  for (let i = 0; i <= yTicks; i++) {
+    const v = yMin + (yMax - yMin) * (i / yTicks);
+    const y = sy(v);
+    svg.appendChild(_svgEl("line", {
+      class: "tna-grid", x1: M.l, x2: W - M.r, y1: y, y2: y,
+    }));
+    const t = _svgEl("text", {
+      class: "tna-axis-label",
+      x: M.l - 6, y: y + 3, "text-anchor": "end",
+    });
+    t.textContent = `${v.toFixed(1)}%`;
+    svg.appendChild(t);
+  }
+  // Eje Y
+  svg.appendChild(_svgEl("line", { class: "tna-axis", x1: M.l, x2: M.l, y1: M.t, y2: H - M.b }));
+  // Eje X
+  svg.appendChild(_svgEl("line", { class: "tna-axis", x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b }));
+
+  // Tomamos las x de la primera serie con puntos para etiquetas (todas comparten universo)
+  const xLabelSet = new Map();
+  for (const s of seriesData) for (const p of s.points) {
+    if (!xLabelSet.has(p.days)) xLabelSet.set(p.days, p);
+  }
+  const xLabels = [...xLabelSet.entries()].sort((a, b) => a[0] - b[0]);
+  // Si hay muchos vencimientos, mostrar maximo ~10 etiquetas
+  const maxLabels = 10;
+  const step = Math.max(1, Math.ceil(xLabels.length / maxLabels));
+  for (let i = 0; i < xLabels.length; i++) {
+    if (i % step !== 0 && i !== xLabels.length - 1) continue;
+    const [days, p] = xLabels[i];
+    const x = sx(days);
+    // Tick
+    svg.appendChild(_svgEl("line", { class: "tna-axis", x1: x, x2: x, y1: H - M.b, y2: H - M.b + 3 }));
+    // Etiqueta: dd/MM
+    let label = `${days}d`;
+    if (p.expiration) {
+      const parts = String(p.expiration).split("-");
+      if (parts.length === 3) label = `${parts[2]}/${parts[1]}`;
+    }
+    const t1 = _svgEl("text", {
+      class: "tna-axis-label", x: x, y: H - M.b + 13, "text-anchor": "middle",
+    });
+    t1.textContent = label;
+    svg.appendChild(t1);
+    const t2 = _svgEl("text", {
+      class: "tna-axis-label", x: x, y: H - M.b + 24, "text-anchor": "middle", "font-size": 8, fill: "#94a3b8",
+    });
+    t2.textContent = `${days}d`;
+    svg.appendChild(t2);
+  }
+
+  // Indicador del spot usado (verificacion visual)
+  const spotInfo = document.querySelector("#tnaSpotInfo");
+  if (spotInfo) {
+    const ref = list.find(q => q.spot_used != null);
+    if (ref) {
+      const src = ref.spot_source_symbol ? ` (${ref.spot_source_symbol})` : "";
+      spotInfo.textContent = `Spot usado: ${fmtNumAr(ref.spot_used, 2)}${src}`;
+    } else {
+      spotInfo.textContent = "Spot no disponible";
+    }
+  }
+
+  // Dibujar lineas: separar tramos consecutivos por estado theoric/real
+  for (const s of seriesData) {
+    if (!s.points.length) continue;
+    // Path real (continuo) y path theoric (discontinuo). Conectamos consecutivos del mismo tipo.
+    const pts = s.points.slice().sort((a, b) => a.days - b.days);
+    // Construir segmentos
+    const segments = [];
+    let cur = null;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (cur == null || cur.theoric !== p.theoric) {
+        // Si hay segmento previo, agregar este punto al cierre del anterior para conectar
+        if (cur != null) cur.pts.push(p);
+        cur = { theoric: p.theoric, pts: [p] };
+        segments.push(cur);
+      } else {
+        cur.pts.push(p);
+      }
+    }
+    for (const seg of segments) {
+      if (seg.pts.length < 2) continue;
+      const d = seg.pts.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.days).toFixed(2)},${sy(p.tna).toFixed(2)}`).join(" ");
+      svg.appendChild(_svgEl("path", {
+        class: "tna-line" + (seg.theoric ? " theoric" : ""),
+        d, stroke: s.color,
+      }));
+    }
+    // Puntos
+    for (const p of pts) {
+      const c = _svgEl("circle", {
+        class: "tna-point" + (p.theoric ? " theoric" : ""),
+        cx: sx(p.days), cy: sy(p.tna),
+        r: p.theoric ? 2.5 : 3.2,
+        fill: p.theoric ? "#ffffff" : s.color,
+        stroke: s.color,
+      });
+      const title = _svgEl("title");
+      const volTxt = p.volume != null ? ` · vol ${Math.round(p.volume).toLocaleString("es-AR")}` : "";
+      title.textContent = `${p.symbol} (${s.label}) · ${p.tna.toFixed(2)}% · ${p.days}d${volTxt}${p.theoric ? " · teorico" : ""}`;
+      c.appendChild(title);
+      svg.appendChild(c);
     }
   }
 }
@@ -3262,6 +3481,20 @@ fetchSnapshot()
   el.addEventListener("change", () => {
     pollFutures().catch(() => {});
   });
+})();
+
+// Listeners de la curva de TNAs: re-render inmediato al togglear series o filtros
+(function initTnaCurveControls() {
+  const ids = ["tnaShowBid", "tnaShowLast", "tnaShowAsk", "tnaShowSettlement", "tnaFilterByVolume"];
+  for (const id of ids) {
+    const el = document.querySelector("#" + id);
+    if (el) el.addEventListener("change", () => renderTnaCurve());
+  }
+  const minVol = document.querySelector("#tnaMinVolume");
+  if (minVol) {
+    minVol.addEventListener("input", () => renderTnaCurve());
+    minVol.addEventListener("change", () => renderTnaCurve());
+  }
 })();
 
 // Pollers de FX, Futuros y Spot: independientes del WebSocket para no parpadear.

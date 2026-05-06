@@ -37,7 +37,7 @@ BCRA_SERIES: dict[str, BcraSeriesDefinition] = {
     ),
     "usd_mayorista_a3500": BcraSeriesDefinition(
         key="usd_mayorista_a3500",
-        variable_id=4,
+        variable_id=5,
         label="Tipo de Cambio Mayorista (Comunicacion A 3500) - Referencia BCRA",
         unit="ARS por USD",
     ),

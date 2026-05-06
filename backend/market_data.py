@@ -275,11 +275,42 @@ class MarketDataService:
         feriado, se ajusta al ultimo dia habil anterior."""
         with self._lock:
             quotes = [dict(q) for q in self._futures_quotes.values()]
+            # Spot: SOLO valores plausibles del USD mayorista (rango 500..100000).
+            # Descarta basura tipo A3500 fractional, ratios, indices, etc.
+            # Prioridad: DLR/SPOT > A3500 > primero con last en rango.
+            def _plausible(v: Any) -> float | None:
+                if v is None:
+                    return None
+                try:
+                    f = float(v)
+                except (TypeError, ValueError):
+                    return None
+                if 500.0 <= f <= 100000.0:
+                    return f
+                return None
+
             spot_last = None
-            for q in self._spot_quotes_dict.values():
-                if q.get("last") is not None:
-                    spot_last = float(q["last"])
-                    break
+            spot_source_sym = None
+            for key in ("DLR/SPOT", "DDF_BCRA_A3500"):
+                cand = self._spot_quotes_dict.get(key)
+                if cand:
+                    v = _plausible(cand.get("last"))
+                    if v is not None:
+                        spot_last = v
+                        spot_source_sym = key
+                        break
+            if spot_last is None:
+                for sym, q in self._spot_quotes_dict.items():
+                    v = _plausible(q.get("last"))
+                    if v is not None:
+                        spot_last = v
+                        spot_source_sym = sym
+                        break
+            if spot_last is None:
+                logger.warning(
+                    "futures_quotes: sin spot plausible. _spot_quotes_dict=%s",
+                    {k: q.get("last") for k, q in self._spot_quotes_dict.items()},
+                )
 
         # Determinar fecha "as of" efectiva
         from backend.market_calendar import market_calendar
@@ -289,6 +320,17 @@ class MarketDataService:
         # spot tenga sentido (no hay spot para sabado/domingo a futuro)
         if not market_calendar.is_business_day(as_of_date):
             as_of_date = market_calendar.previous_business_day(as_of_date, include_current=False)
+
+        def _calc_tna(price: Any, days: int | None, spot: float | None) -> float | None:
+            try:
+                if price is None or spot is None or not days or days <= 0:
+                    return None
+                p = float(price)
+                if p <= 0:
+                    return None
+                return ((p / float(spot)) - 1) * 365.0 / days * 100.0
+            except (TypeError, ValueError):
+                return None
 
         for q in quotes:
             last = q.get("last")
@@ -300,20 +342,26 @@ class MarketDataService:
                     q["change_abs"] = None
             except (TypeError, ValueError):
                 q["change_abs"] = None
-            # TNA = (futuro/spot - 1) * 365 / dias_a_vencimiento * 100
-            tna = None
+            # Dias al vencimiento (corridos)
             days = None
-            try:
-                exp_str = q.get("expiration")
-                if last is not None and spot_last and spot_last > 0 and exp_str:
+            exp_str = q.get("expiration")
+            if exp_str:
+                try:
                     exp_date = date.fromisoformat(str(exp_str))
                     days = (exp_date - as_of_date).days
-                    if days > 0:
-                        tna = ((float(last) / spot_last) - 1) * 365.0 / days * 100.0
-            except (TypeError, ValueError):
-                tna = None
-            q["tna_percent"] = tna
+                except (TypeError, ValueError):
+                    days = None
+            # TNA por componente: bid, ask, last, ajuste
+            q["tna_bid_percent"] = _calc_tna(q.get("bid"), days, spot_last)
+            q["tna_ask_percent"] = _calc_tna(q.get("ask"), days, spot_last)
+            q["tna_last_percent"] = _calc_tna(last, days, spot_last)
+            q["tna_settlement_percent"] = _calc_tna(
+                q.get("settlement_price") or q.get("previous_close"), days, spot_last,
+            )
+            # Backward-compat
+            q["tna_percent"] = q["tna_last_percent"]
             q["spot_used"] = spot_last
+            q["spot_source_symbol"] = spot_source_sym
             q["days_to_maturity"] = days
             q["as_of_date_used"] = as_of_date.isoformat()
         # Orden segun whitelist

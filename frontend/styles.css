@@ -1095,3 +1095,24 @@ tbody td {
 .fut-asof-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: #475569; margin: 0; }
 .fut-asof-label input { padding: 0.25rem 0.4rem; border: 1px solid #cbd5e1; border-radius: 0.3rem; font-size: 0.82rem; }
 .fut-asof-label input:focus { outline: none; border-color: #0d6efd; box-shadow: 0 0 0 2px rgba(13,110,253,0.15); }
+
+/* Panel de la curva de TNAs */
+.tna-curve-panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 0.6rem; padding: 0.75rem 0.85rem; margin-bottom: 0.85rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.tna-curve-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.85rem; margin-bottom: 0.5rem; font-size: 0.78rem; color: #475569; }
+.tna-curve-title { font-weight: 700; text-transform: uppercase; font-size: 0.78rem; letter-spacing: 0.04em; color: #0f172a; margin-right: 0.5rem; }
+.tna-ctrl { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; margin: 0; }
+.tna-ctrl input[type="checkbox"] { margin: 0; }
+.tna-ctrl input[type="number"] { width: 70px; padding: 0.2rem 0.4rem; border: 1px solid #cbd5e1; border-radius: 0.25rem; font-size: 0.8rem; }
+.tna-sep { display: inline-block; width: 1px; height: 18px; background: #cbd5e1; margin: 0 0.4rem; }
+.tna-curve-svg { width: 100%; height: 220px; display: block; }
+.tna-curve-svg .tna-axis { stroke: #cbd5e1; stroke-width: 1; }
+.tna-curve-svg .tna-grid { stroke: #f1f5f9; stroke-width: 1; }
+.tna-curve-svg .tna-axis-label { fill: #64748b; font-size: 10px; }
+.tna-curve-svg .tna-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.tna-curve-svg .tna-line.theoric { opacity: 0.35; stroke-dasharray: 4 3; }
+.tna-curve-svg .tna-point { stroke-width: 1.5; }
+.tna-curve-svg .tna-point.theoric { opacity: 0.4; }
+.tna-curve-svg .tna-point-label { fill: #334155; font-size: 9px; pointer-events: none; }
+.tna-curve-svg .tna-tip-bg { fill: #1e293b; }
+.tna-curve-svg .tna-tip-text { fill: #f8fafc; font-size: 11px; }
+.tna-curve-legend { font-size: 0.7rem; color: #94a3b8; margin-top: 0.35rem; }

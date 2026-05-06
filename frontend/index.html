@@ -8,7 +8,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd57">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd60">
   </head>
   <body>
     <main class="app-shell">
@@ -207,6 +207,7 @@
                   <input id="futAsOfDate" type="date">
                 </label>
               </div>
+
               <div class="table-wrap">
                 <table class="table table-hover align-middle mb-0 fut-dlr-table">
                   <thead>
@@ -231,6 +232,28 @@
               </div>
             </div>
           </div>
+
+          <!-- Curva de TNAs (debajo de las tablas) -->
+          <section class="tna-curve-panel">
+            <div class="tna-curve-controls">
+              <span class="tna-curve-title">Curva de TNAs</span>
+              <label class="tna-ctrl"><input type="checkbox" id="tnaShowBid" checked> <span style="color:#16a34a;">● Bid</span></label>
+              <label class="tna-ctrl"><input type="checkbox" id="tnaShowLast" checked> <span style="color:#0d6efd;">● Last</span></label>
+              <label class="tna-ctrl"><input type="checkbox" id="tnaShowAsk" checked> <span style="color:#dc2626;">● Offer</span></label>
+              <label class="tna-ctrl"><input type="checkbox" id="tnaShowSettlement"> <span style="color:#7c3aed;">● Ajuste</span></label>
+              <span class="tna-sep"></span>
+              <label class="tna-ctrl"><input type="checkbox" id="tnaFilterByVolume" checked> Filtrar por volumen min</label>
+              <label class="tna-ctrl"><span>Min contratos</span><input type="number" id="tnaMinVolume" value="1000" min="0" step="100"></label>
+              <span class="tna-sep"></span>
+              <span class="tna-ctrl" id="tnaSpotInfo" style="color:#64748b;"></span>
+            </div>
+            <svg id="tnaCurveChart" class="tna-curve-svg" viewBox="0 0 600 220" preserveAspectRatio="none">
+              <text x="300" y="110" text-anchor="middle" fill="#94a3b8" font-size="14">Cargando curva…</text>
+            </svg>
+            <div class="tna-curve-legend">
+              <small>Trazos suaves = TNA con volumen suficiente. Trazos atenuados = teoricos (sin volumen).</small>
+            </div>
+          </section>
         </section>
       </section>
 
@@ -1214,6 +1237,6 @@
       </div>
     </div>
 
-    <script src="/app-bundle.js?v=hd57"></script>
+    <script src="/app-bundle.js?v=hd60"></script>
   </body>
 </html>
