@@ -97,6 +97,35 @@
   cursor: pointer;
 }
 
+/* Toggle groups multi-select (Bid/Last/Offer/Ajuste y Minorista/Mayorista) */
+.fc-toggle-group {
+  display: inline-flex;
+  gap: 2px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.35rem;
+  padding: 2px;
+}
+.fc-toggle-group button {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.22rem 0.55rem;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  letter-spacing: 0.02em;
+  font-family: inherit;
+}
+.fc-toggle-group button:hover { color: #e2e8f0; background: rgba(148, 163, 184, 0.08); }
+.fc-toggle-group button.active {
+  color: #fff;
+  background: var(--fc-color, #5eead4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
 /* ---- KPIs ---- */
 .futures-curve-kpis {
   display: grid;

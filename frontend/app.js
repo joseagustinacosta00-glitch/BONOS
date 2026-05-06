@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd64 cargado - Card de Brecha (MEP/CCL × Spread/Relativo) en menus FX y Futuros");
+console.log("[Monitor] app.js v=hd65 cargado - Curva: multi-select Bid/Last/Offer/Ajuste + filtro Minorista/Mayorista + tooltip simplificado");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");

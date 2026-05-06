@@ -9,7 +9,29 @@
     chart: null,
     initialized: false,
     lastUpdate: null,
+    priceFields: new Set(_loadSet("fcPriceFields", ["last"])),
+    contractTypes: new Set(_loadSet("fcContractTypes", ["minorista", "mayorista"])),
   };
+
+  function _loadSet(key, def) {
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      if (Array.isArray(v) && v.length) return v;
+    } catch (_) {}
+    return def;
+  }
+  function _saveSet(key, set) {
+    try { localStorage.setItem(key, JSON.stringify([...set])); } catch (_) {}
+  }
+
+  // Configuracion visual por price field
+  const PRICE_FIELD_DEFS = [
+    { id: "bid",        label: "Bid",    stroke: "#16a34a", fill: "rgba(22,163,74,0.06)" },
+    { id: "last",       label: "Last",   stroke: "#0d6efd", fill: "rgba(13,110,253,0.06)" },
+    { id: "offer",      label: "Offer",  stroke: "#dc2626", fill: "rgba(220,38,38,0.06)" },
+    { id: "settlement", label: "Ajuste", stroke: "#7c3aed", fill: "rgba(124,58,237,0.06)" },
+  ];
+  const PRICE_FIELD_BY_ID = Object.fromEntries(PRICE_FIELD_DEFS.map(d => [d.id, d]));
 
   // ====================== Helpers numericos ======================
   const fmtPct = (v, dec = 2) =>
@@ -45,8 +67,9 @@
   // ====================== Normalizacion / TNA ======================
   function normalizeContract(raw) {
     if (!raw || !raw.symbol) return null;
+    const sym = String(raw.symbol);
     return {
-      ticker: raw.symbol,
+      ticker: sym,
       maturityDate: raw.expiration || null,
       daysToMaturity: raw.days_to_maturity != null ? Number(raw.days_to_maturity) : null,
       bid: raw.bid != null ? Number(raw.bid) : null,
@@ -61,6 +84,7 @@
       openInterest: raw.open_interest != null ? Number(raw.open_interest) : 0,
       spotLast: raw.spot_used != null ? Number(raw.spot_used) : null,
       spotSource: raw.spot_source_symbol || null,
+      isMayorista: raw.is_mayorista === true || /M$/.test(sym),
     };
   }
 
@@ -466,15 +490,19 @@
       </div>
 
       <div class="futures-curve-controls">
-        <label class="fc-ctrl">
+        <div class="fc-ctrl">
           <span>Precio</span>
-          <select id="futuresCurvePriceField">
-            <option value="last" selected>Last</option>
-            <option value="bid">Bid</option>
-            <option value="offer">Offer</option>
-            <option value="settlement">Ajuste</option>
-          </select>
-        </label>
+          <div class="fc-toggle-group" data-group="priceField">
+            ${PRICE_FIELD_DEFS.map(d => `<button type="button" data-val="${d.id}" style="--fc-color:${d.stroke}">${d.label}</button>`).join("")}
+          </div>
+        </div>
+        <div class="fc-ctrl">
+          <span>Contrato</span>
+          <div class="fc-toggle-group" data-group="contractType">
+            <button type="button" data-val="minorista">Minorista</button>
+            <button type="button" data-val="mayorista">Mayorista</button>
+          </div>
+        </div>
         <label class="fc-ctrl">
           <span>Modelo</span>
           <select id="futuresCurveModel">
@@ -520,9 +548,8 @@
       </div>
     `;
 
-    // Listeners
+    // Listeners de inputs/selects
     const ids = [
-      "futuresCurvePriceField",
       "futuresCurveModel",
       "futuresCurveApplyVolumeFilter",
       "futuresCurveMinVolume",
@@ -535,12 +562,29 @@
       const evt = el.tagName === "INPUT" && el.type === "number" ? "input" : "change";
       el.addEventListener(evt, () => render());
     }
+    // Listeners de toggle-groups multi-select (priceField, contractType)
+    container.querySelectorAll(".fc-toggle-group button[data-val]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const group = btn.parentElement.dataset.group;
+        const val = btn.dataset.val;
+        const set = group === "priceField" ? STATE.priceFields : STATE.contractTypes;
+        const storageKey = group === "priceField" ? "fcPriceFields" : "fcContractTypes";
+        if (set.has(val)) {
+          if (set.size > 1) set.delete(val);
+        } else {
+          set.add(val);
+        }
+        _saveSet(storageKey, set);
+        render();
+      });
+    });
     STATE.initialized = true;
   }
 
   function getControls() {
     return {
-      priceField: document.getElementById("futuresCurvePriceField")?.value || "last",
+      priceFields: [...STATE.priceFields].filter(f => PRICE_FIELD_BY_ID[f]),
+      contractTypes: [...STATE.contractTypes],
       modelName: document.getElementById("futuresCurveModel")?.value || "linear",
       applyVolumeFilter: !!document.getElementById("futuresCurveApplyVolumeFilter")?.checked,
       minVolume: Math.max(0, Number(document.getElementById("futuresCurveMinVolume")?.value) || 0),
@@ -549,13 +593,63 @@
     };
   }
 
+  // Sincroniza el estado activo de los toggle buttons con STATE
+  function syncToggleButtons() {
+    document.querySelectorAll(".fc-toggle-group button[data-val]").forEach(btn => {
+      const group = btn.parentElement.dataset.group;
+      const val = btn.dataset.val;
+      const set = group === "priceField" ? STATE.priceFields : STATE.contractTypes;
+      btn.classList.toggle("active", set.has(val));
+    });
+  }
+
+  function _filterByContractType(contracts, types) {
+    const wantMin = types.includes("minorista");
+    const wantMay = types.includes("mayorista");
+    return contracts.filter(c => (c.isMayorista ? wantMay : wantMin));
+  }
+
+  // Calcula precio teorico a partir de una TNA teorica (en %).
+  function _theoreticalPrice(tnaPct, spot, days) {
+    if (tnaPct == null || spot == null || days == null || days <= 0) return null;
+    return spot * (1 + (tnaPct / 100) * days / 365);
+  }
+
   function render() {
     if (!STATE.initialized) return;
+    syncToggleButtons();
     const ctrl = getControls();
-    const contracts = STATE.items.map(normalizeContract).filter(Boolean);
-    const { points, spotLast, spotSource } = buildPoints(
-      contracts, ctrl.priceField, ctrl.applyVolumeFilter, ctrl.minVolume,
-    );
+    const allContracts = STATE.items.map(normalizeContract).filter(Boolean);
+    const contracts = _filterByContractType(allContracts, ctrl.contractTypes);
+
+    // Construir puntos + modelo por price field activo
+    const seriesByField = [];
+    let spotLast = null;
+    let spotSource = null;
+    for (const fieldId of ctrl.priceFields) {
+      const def = PRICE_FIELD_BY_ID[fieldId];
+      if (!def) continue;
+      const built = buildPoints(contracts, fieldId, ctrl.applyVolumeFilter, ctrl.minVolume);
+      if (spotLast == null) { spotLast = built.spotLast; spotSource = built.spotSource; }
+      const model = fitModel(built.points, ctrl.modelName);
+      if (model) {
+        for (const p of built.points) {
+          if (p.daysToMaturity == null) continue;
+          const yhat = model.predict(p.daysToMaturity);
+          if (yhat != null && isFinite(yhat)) {
+            p.theoreticalTnaPct = yhat;
+            p.theoreticalTna = yhat / 100;
+            if (p.tnaPct != null) p.residual = p.tnaPct - yhat;
+            const thPrice = _theoreticalPrice(yhat, p.spotLast, p.daysToMaturity);
+            p.theoreticalPrice = thPrice;
+            if (thPrice != null && p.selectedPrice != null) {
+              p.spreadPrice = p.selectedPrice - thPrice;
+            }
+          }
+        }
+      }
+      seriesByField.push({ def, points: built.points, model });
+    }
 
     // Subtitulo
     const sub = document.getElementById("fcSubtitle");
@@ -564,10 +658,14 @@
         ? STATE.lastUpdate.toLocaleTimeString("es-AR", { hour12: false })
         : "—";
       const spotTxt = spotLast != null ? `${fmtNum(spotLast, 2)}${spotSource ? " (" + spotSource + ")" : ""}` : "—";
-      sub.innerHTML = `<span>Spot: <b>${spotTxt}</b></span> · <span>Precio: <b>${ctrl.priceField.toUpperCase()}</b></span> · <span>Modelo: <b>${ctrl.modelName}</b></span> · <span>Filtro vol: <b>${ctrl.applyVolumeFilter ? "ON (≥" + ctrl.minVolume + ")" : "OFF"}</b></span> · <span>Actualizado: <b>${upd}</b></span>`;
+      const fieldsTxt = ctrl.priceFields.map(f => PRICE_FIELD_BY_ID[f]?.label || f).join(" · ");
+      const ctTxt = ctrl.contractTypes.map(t => t === "mayorista" ? "Mayor." : "Minor.").join(" + ");
+      sub.innerHTML = `<span>Spot: <b>${spotTxt}</b></span> · <span>Precio: <b>${fieldsTxt}</b></span> · <span>Contrato: <b>${ctTxt}</b></span> · <span>Modelo: <b>${ctrl.modelName}</b></span> · <span>Filtro vol: <b>${ctrl.applyVolumeFilter ? "ON (≥" + ctrl.minVolume + ")" : "OFF"}</b></span> · <span>Act: <b>${upd}</b></span>`;
     }
 
     // Warnings
+    const totalIncluded = seriesByField.reduce(
+      (n, s) => n + s.points.filter(p => p.isIncludedInCurve).length, 0);
     const warn = document.getElementById("fcWarning");
     if (warn) {
       warn.hidden = true;
@@ -575,37 +673,28 @@
       if (spotLast == null) {
         warn.hidden = false;
         warn.textContent = "Spot last no disponible — no se puede calcular la curva.";
-      } else if (points.filter(p => p.isIncludedInCurve).length < 2) {
+      } else if (!seriesByField.length) {
         warn.hidden = false;
-        warn.textContent = "No hay suficientes contratos validos para construir la curva principal.";
+        warn.textContent = "Activá al menos un precio (Bid/Last/Offer/Ajuste).";
+      } else if (totalIncluded < 2) {
+        warn.hidden = false;
+        warn.textContent = "No hay suficientes contratos validos para construir la curva.";
       }
     }
 
-    // Modelo + valores teoricos
-    const model = fitModel(points, ctrl.modelName);
-    if (model) {
-      for (const p of points) {
-        if (p.daysToMaturity == null) continue;
-        const yhat = model.predict(p.daysToMaturity);
-        if (yhat != null && isFinite(yhat)) {
-          p.theoreticalTnaPct = yhat;
-          p.theoreticalTna = yhat / 100;
-          if (p.tnaPct != null) p.residual = p.tnaPct - yhat;
-        }
-      }
-    }
-
-    // KPIs
-    const kpis = computeKpis(points, model ? model.label : ctrl.modelName);
+    // KPIs (uso la primera serie como referencia para corta/larga)
+    const refSeries = seriesByField[0] || { points: [], model: null };
+    const kpis = computeKpis(refSeries.points, refSeries.model ? refSeries.model.label : ctrl.modelName);
     renderKpis(kpis, spotLast, ctrl);
 
     // Chart
-    renderChart(points, model, ctrl);
+    renderChart(seriesByField, ctrl);
   }
 
   function renderKpis(kpis, spotLast, ctrl) {
     const el = document.getElementById("fcKpis");
     if (!el) return;
+    const fieldsTxt = ctrl.priceFields.map(f => PRICE_FIELD_BY_ID[f]?.label || f).join(" + ");
     const items = [
       { label: "Spot Last", value: fmtNum(spotLast, 2) },
       { label: "Contratos", value: `${kpis.includedCount} / ${kpis.total}` },
@@ -618,103 +707,106 @@
         klass: kpis.slope == null ? "" : kpis.slope >= 0 ? "pos" : "neg",
       },
       { label: "Modelo", value: kpis.model || "-" },
-      { label: "Precio", value: ctrl.priceField.toUpperCase() },
+      { label: "Precio(s)", value: fieldsTxt || "-" },
     ];
     el.innerHTML = items
       .map(i => `<div class="fc-kpi"><span class="fc-kpi-label">${i.label}</span><span class="fc-kpi-value ${i.klass || ""}">${i.value}</span></div>`)
       .join("");
   }
 
-  function renderChart(points, model, ctrl) {
+  function renderChart(seriesByField, ctrl) {
     const canvas = document.getElementById("futuresCurveChart");
     if (!canvas || typeof Chart === "undefined") return;
 
-    const sorted = points
+    // Universo combinado de puntos (para callback de eje X y rango teorico)
+    const allPoints = seriesByField.flatMap(s => s.points)
       .filter(p => p.daysToMaturity != null)
       .sort((a, b) => a.daysToMaturity - b.daysToMaturity);
 
-    const includedPts = sorted.filter(p => p.isIncludedInCurve && p.tnaPct != null);
-    const excludedPts = sorted.filter(p => !p.isIncludedInCurve && p.tnaPct != null);
+    const datasets = [];
 
-    const observedLine = includedPts.map(p => ({ x: p.daysToMaturity, y: p.tnaPct, _p: p }));
-    const observedScatter = includedPts.map(p => ({ x: p.daysToMaturity, y: p.tnaPct, _p: p }));
-    const excludedScatter = excludedPts.map(p => ({ x: p.daysToMaturity, y: p.tnaPct, _p: p }));
+    // Por cada price field activo: linea observada + scatter incluidos + scatter excluidos + curva teorica
+    for (const s of seriesByField) {
+      const sorted = s.points
+        .filter(p => p.daysToMaturity != null)
+        .sort((a, b) => a.daysToMaturity - b.daysToMaturity);
+      const incl = sorted.filter(p => p.isIncludedInCurve && p.tnaPct != null);
+      const excl = sorted.filter(p => !p.isIncludedInCurve && p.tnaPct != null);
+      const c = s.def;
 
-    // Curva teorica densa (50 puntos entre min y max)
-    let theoreticalLine = [];
-    if (ctrl.showTheoretical && model && includedPts.length >= 2) {
-      const minX = sorted[0].daysToMaturity;
-      const maxX = sorted[sorted.length - 1].daysToMaturity;
-      const N = 60;
-      for (let i = 0; i <= N; i++) {
-        const x = minX + (maxX - minX) * (i / N);
-        const y = model.predict(x);
-        if (y != null && isFinite(y)) theoreticalLine.push({ x, y });
-      }
-    }
-
-    let forwardLine = [];
-    if (ctrl.showForward) {
-      const contracts = STATE.items.map(normalizeContract).filter(Boolean);
-      const fwd = calculateForwardCurve(contracts, ctrl.priceField);
-      forwardLine = fwd.map(f => ({ x: f.x, y: f.y, _fwd: f }));
-    }
-
-    const datasets = [
-      // Linea principal observada (uniendo solo incluidos)
-      {
+      // Linea observada
+      datasets.push({
         type: "line",
-        label: "Observado",
-        data: observedLine,
-        borderColor: "#5eead4",
-        backgroundColor: "rgba(94, 234, 212, 0.08)",
+        label: `${c.label} — observado`,
+        data: incl.map(p => ({ x: p.daysToMaturity, y: p.tnaPct, _p: p })),
+        borderColor: c.stroke,
+        backgroundColor: c.fill,
         borderWidth: 2,
         pointRadius: 0,
         tension: 0.25,
         order: 2,
         spanGaps: true,
-      },
-      // Puntos incluidos
-      {
+      });
+      // Scatter incluidos
+      datasets.push({
         type: "scatter",
-        label: "Contratos incluidos",
-        data: observedScatter,
-        backgroundColor: "#5eead4",
-        borderColor: "#0f766e",
-        pointRadius: 5,
-        pointHoverRadius: 7,
+        label: `${c.label} — puntos`,
+        data: incl.map(p => ({ x: p.daysToMaturity, y: p.tnaPct, _p: p })),
+        backgroundColor: c.stroke,
+        borderColor: c.stroke,
+        pointRadius: 4.5,
+        pointHoverRadius: 6.5,
         order: 1,
-      },
-      // Puntos excluidos
-      {
-        type: "scatter",
-        label: "Excluidos / sin volumen",
-        data: excludedScatter,
-        backgroundColor: "rgba(148, 163, 184, 0.5)",
-        borderColor: "#64748b",
-        pointStyle: "rectRot",
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        order: 1,
-      },
-      // Curva teorica
-      {
-        type: "line",
-        label: "Teorica (modelo)",
-        data: theoreticalLine,
-        borderColor: "rgba(148, 163, 184, 0.7)",
-        borderDash: [4, 4],
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.0,
-        order: 3,
-        spanGaps: true,
-      },
-      // Forward implicita
-      {
+      });
+      // Scatter excluidos
+      if (excl.length) {
+        datasets.push({
+          type: "scatter",
+          label: `${c.label} — excluidos`,
+          data: excl.map(p => ({ x: p.daysToMaturity, y: p.tnaPct, _p: p })),
+          backgroundColor: "rgba(148, 163, 184, 0.45)",
+          borderColor: "#64748b",
+          pointStyle: "rectRot",
+          pointRadius: 3.5,
+          pointHoverRadius: 5,
+          order: 1,
+        });
+      }
+      // Curva teorica densa
+      if (ctrl.showTheoretical && s.model && incl.length >= 2) {
+        const minX = sorted[0].daysToMaturity;
+        const maxX = sorted[sorted.length - 1].daysToMaturity;
+        const N = 60;
+        const theoLine = [];
+        for (let i = 0; i <= N; i++) {
+          const x = minX + (maxX - minX) * (i / N);
+          const y = s.model.predict(x);
+          if (y != null && isFinite(y)) theoLine.push({ x, y });
+        }
+        datasets.push({
+          type: "line",
+          label: `${c.label} — teorica`,
+          data: theoLine,
+          borderColor: c.stroke,
+          borderDash: [4, 4],
+          borderWidth: 1.2,
+          pointRadius: 0,
+          tension: 0.0,
+          order: 3,
+          spanGaps: true,
+        });
+      }
+    }
+
+    // Forward implicita (1 sola, usa el primer price field activo como referencia)
+    if (ctrl.showForward && ctrl.priceFields.length) {
+      const allContracts = STATE.items.map(normalizeContract).filter(Boolean);
+      const filtered = _filterByContractType(allContracts, ctrl.contractTypes);
+      const fwd = calculateForwardCurve(filtered, ctrl.priceFields[0]);
+      datasets.push({
         type: "line",
         label: "Forward implicita",
-        data: forwardLine,
+        data: fwd.map(f => ({ x: f.x, y: f.y, _fwd: f })),
         borderColor: "#fbbf24",
         backgroundColor: "rgba(251, 191, 36, 0.1)",
         borderDash: [2, 3],
@@ -724,8 +816,10 @@
         pointHoverRadius: 5,
         order: 4,
         spanGaps: true,
-      },
-    ];
+      });
+    }
+
+    const sorted = allPoints; // alias para callback de ticks
 
     const cfg = {
       type: "scatter",
@@ -779,7 +873,11 @@
               title(ctx) {
                 const it = ctx[0];
                 const raw = it.raw;
-                if (raw && raw._p) return `${raw._p.ticker} · ${formatMonthYear(raw._p.maturityDate)}`;
+                if (raw && raw._p) {
+                  const p = raw._p;
+                  const fLabel = PRICE_FIELD_BY_ID[p.priceField]?.label || p.priceField;
+                  return `${p.ticker} · ${fLabel}`;
+                }
                 if (raw && raw._fwd) return `Forward ${raw._fwd.from} → ${raw._fwd.to}`;
                 return it.dataset.label || "";
               },
@@ -788,31 +886,21 @@
                 if (raw && raw._p) {
                   const p = raw._p;
                   const lines = [
-                    `Vencimiento: ${formatDateLong(p.maturityDate)}`,
-                    `Dias al vto: ${p.daysToMaturity}`,
-                    `Precio (${p.priceField.toUpperCase()}): ${fmtNum(p.selectedPrice, 2)}`,
-                    `Spot: ${fmtNum(p.spotLast, 2)}${p.spotSource ? " (" + p.spotSource + ")" : ""}`,
-                    `TNA observada: ${fmtPct(p.tnaPct)}`,
-                    `Volumen: ${fmtInt(p.volume)} contratos`,
-                    `OI: ${fmtInt(p.openInterest)}`,
-                    p.isIncludedInCurve ? "Estado: Incluido en curva" : `Estado: ${p.exclusionReason || "Excluido"}`,
+                    `Precio: ${fmtNum(p.selectedPrice, 2)}`,
+                    `Tasa: ${fmtPct(p.tnaPct)}`,
                   ];
-                  if (p.theoreticalTnaPct != null) {
-                    lines.push(`TNA teorica: ${fmtPct(p.theoreticalTnaPct)}`);
-                    if (p.residual != null) lines.push(`Residual: ${(p.residual >= 0 ? "+" : "") + p.residual.toFixed(2)} pp`);
+                  if (p.spreadPrice != null) {
+                    const sign = p.spreadPrice >= 0 ? "+" : "";
+                    lines.push(`Spread vs teorico: ${sign}${fmtNum(p.spreadPrice, 2)}`);
                   }
                   return lines;
                 }
                 if (raw && raw._fwd) {
                   const f = raw._fwd;
                   return [
-                    `${f.from} (${f.fromDays}d) → ${f.to} (${f.toDays}d)`,
-                    `Span: ${f.spanDays} dias`,
+                    `${f.from} → ${f.to}`,
                     `Forward TNA: ${fmtPct(f.fwdPct)}`,
                   ];
-                }
-                if (ctx.dataset.label === "Teorica (modelo)") {
-                  return [`Dias: ${Math.round(raw.x)}`, `TNA modelo: ${fmtPct(raw.y)}`];
                 }
                 return `${ctx.dataset.label}: ${fmtPct(raw.y)}`;
               },
