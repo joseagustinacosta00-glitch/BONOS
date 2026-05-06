@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[login] v=hd79 loaded");
+  console.log("[login] v=hd80 loaded");
 
   const form = document.getElementById("loginForm");
   const userInput = document.getElementById("loginUsername");

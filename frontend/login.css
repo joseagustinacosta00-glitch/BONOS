@@ -1,6 +1,7 @@
 /* ============================================================
    Marketerminal — Login
    Paleta: verde inglés / crema marfil / dorado apagado
+   Layout: full-viewport, sin margenes. Responsive mobile.
    ============================================================ */
 
 :root {
@@ -26,65 +27,41 @@
 html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
   background: var(--mt-cream);
   color: var(--mt-green-text);
   font-family: var(--mt-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 /* ------------------------------------------------------------
-   Shell — dos paneles centrados en la pantalla
+   Shell — full viewport, sin padding ni gap.
+   Los dos paneles tocan los bordes del monitor.
    ------------------------------------------------------------ */
 .login-shell {
+  width: 100%;
   min-height: 100vh;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--mt-cream);
-}
-
-.login-shell > section {
-  display: flex;
   flex-direction: column;
-}
-
-.login-editorial,
-.login-panel {
-  flex: 1 1 0;
-  min-height: 600px;
-}
-
-.login-shell {
-  /* contenedor visual de los dos paneles */
-}
-
-.login-shell::before { content: none; }
-
-/* Wrapper de los dos paneles */
-.login-shell > main,
-.login-shell {
-  /* nada extra */
-}
-
-/* Reescribimos: usamos un wrapper interno */
-.login-editorial,
-.login-panel {
-  max-width: 520px;
+  background: var(--mt-cream);
+  margin: 0;
+  padding: 0;
 }
 
 /* ------------------------------------------------------------
-   Panel izquierdo (verde)
+   Panel izquierdo (verde) — editorial
    ------------------------------------------------------------ */
 .login-editorial {
   background: var(--mt-green);
   color: var(--mt-cream-light);
   padding: 48px 40px;
+  display: flex;
+  flex-direction: column;
   justify-content: space-between;
-  flex: 1.1 1 0;
-  border-radius: 2px 0 0 2px;
+  border-radius: 0;
 }
 
 .brand-mark {
@@ -100,9 +77,7 @@ html, body {
   color: var(--mt-gold);
 }
 
-.editorial-body {
-  margin: 24px 0;
-}
+.editorial-body { margin: 24px 0; }
 
 .wordmark {
   font-family: var(--mt-serif);
@@ -134,7 +109,7 @@ html, body {
   font-style: italic;
   color: var(--mt-cream-light);
   margin: 0 0 12px;
-  max-width: 320px;
+  max-width: 420px;
 }
 
 .quote-attr {
@@ -144,10 +119,6 @@ html, body {
   text-transform: uppercase;
   color: var(--mt-muted);
   margin: 0;
-}
-
-.editorial-foot {
-  /* sumario + dominio al pie */
 }
 
 .sections {
@@ -177,12 +148,27 @@ html, body {
 .login-panel {
   background: var(--mt-cream);
   padding: 48px 56px;
+  display: flex;
+  flex-direction: column;
   justify-content: center;
-  border-radius: 0 2px 2px 0;
+  border-radius: 0;
+}
+
+/* El form no debe ocupar todo el ancho del panel: lo centramos
+   con un ancho razonable para que se lea bien aun en pantallas
+   ultra-anchas. */
+.login-form-wrap {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
 }
 
 .login-header {
   margin-bottom: 36px;
+  max-width: 360px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .overline {
@@ -203,19 +189,16 @@ html, body {
   margin: 0;
 }
 
-/* Form */
 .login-form {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
 }
 
-.field {
-  margin-bottom: 22px;
-}
-
-.field:last-of-type {
-  margin-bottom: 28px;
-}
+.field { margin-bottom: 22px; }
+.field:last-of-type { margin-bottom: 28px; }
 
 .field label {
   display: block;
@@ -247,15 +230,9 @@ html, body {
   font-style: italic;
 }
 
-.field input:focus {
-  border-bottom-color: var(--mt-green);
-}
+.field input:focus { border-bottom-color: var(--mt-green); }
+.field input[type="password"] { letter-spacing: 3px; }
 
-.field input[type="password"] {
-  letter-spacing: 3px;
-}
-
-/* Error message */
 .login-error {
   font-family: var(--mt-serif);
   font-size: 12px;
@@ -268,11 +245,8 @@ html, body {
   transition: opacity 0.2s ease;
 }
 
-.login-error.is-visible {
-  opacity: 1;
-}
+.login-error.is-visible { opacity: 1; }
 
-/* Submit */
 .login-submit {
   width: 100%;
   background: var(--mt-green);
@@ -289,66 +263,78 @@ html, body {
   margin-top: 8px;
 }
 
-.login-submit:hover:not(:disabled) {
-  background: var(--mt-green-hover);
+.login-submit:hover:not(:disabled) { background: var(--mt-green-hover); }
+.login-submit:disabled { opacity: 0.6; cursor: progress; }
+
+/* ------------------------------------------------------------
+   Desktop / tablet horizontal: dos paneles full-height
+   ------------------------------------------------------------ */
+@media (min-width: 768px) {
+  .login-shell {
+    flex-direction: row;
+    align-items: stretch;
+    height: 100vh;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  .login-editorial {
+    flex: 1.1 1 0;
+    min-height: 100vh;
+    padding: 64px 56px;
+  }
+
+  .login-panel {
+    flex: 1 1 0;
+    min-height: 100vh;
+    padding: 64px 56px;
+  }
 }
 
-.login-submit:disabled {
-  opacity: 0.6;
-  cursor: progress;
+/* Pantallas grandes: damos un poco mas de respiracion al editorial */
+@media (min-width: 1280px) {
+  .login-editorial { padding: 80px 80px; }
+  .login-panel { padding: 80px 80px; }
+  .wordmark { font-size: 44px; }
+  .quote { font-size: 19px; max-width: 460px; }
 }
 
 /* ------------------------------------------------------------
-   Layout — apila el shell para que los dos paneles convivan
+   Mobile / tablet vertical: stack vertical, full-bleed
    ------------------------------------------------------------ */
-.login-shell {
-  /* ya definido arriba — solo agregamos comportamiento de wrapper */
-}
-
-@media (min-width: 768px) {
-  .login-shell {
-    display: flex;
-    flex-direction: row;
-    gap: 0;
-    align-items: stretch;
-    padding: 24px;
-  }
-
-  .login-editorial,
-  .login-panel {
-    flex: 0 1 auto;
-    width: 480px;
-  }
-
-  .login-editorial {
-    width: 520px;
-  }
-}
-
 @media (max-width: 767px) {
   .login-shell {
     flex-direction: column;
-    padding: 0;
-  }
-
-  .login-editorial,
-  .login-panel {
-    width: 100%;
-    max-width: 100%;
-    min-height: auto;
-    border-radius: 0;
+    min-height: 100vh;
   }
 
   .login-editorial {
-    padding: 36px 28px;
+    padding: 32px 24px 28px;
+    min-height: auto;
   }
+
+  /* En mobile el editorial es mas compacto: sacamos el quote
+     y el listado de secciones para no robar espacio al form. */
+  .editorial-body { margin: 16px 0 0; }
+  .wordmark { font-size: 26px; margin: 0 0 12px; }
+  .rule { margin: 0 0 12px; }
+  .quote { display: none; }
+  .quote-attr { display: none; }
+  .editorial-foot { display: none; }
 
   .login-panel {
+    flex: 1 0 auto;
     padding: 36px 28px 48px;
+    justify-content: flex-start;
   }
 
-  .wordmark { font-size: 32px; }
-  .quote { font-size: 16px; }
-  .editorial-body { margin: 24px 0; }
-  .editorial-foot { margin-top: 24px; }
+  .login-header { margin-bottom: 24px; }
+  .login-header h2 { font-size: 22px; }
+  .field { margin-bottom: 18px; }
+}
+
+/* Pantallas chicas extremas */
+@media (max-width: 360px) {
+  .login-editorial { padding: 24px 18px 20px; }
+  .login-panel { padding: 28px 22px 40px; }
 }
