@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd70 cargado - DLK tabla: columna TNA + Vto editable + settlement T+0/T+1 aware");
+console.log("[Monitor] app.js v=hd71 cargado - DLK: cashflow con TC aplicable + curva TNA bonos + buscar guardados por familia");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -753,6 +753,131 @@ function renderFuturosDlk() {
 
   // Curva de Futuros (modulo institucional)
   if (window.FuturesCurve) window.FuturesCurve.update(futList);
+  // Curva TNA DLK (reducida, mismo settlement T+0/T+1)
+  renderDlkCurve(dlkBySymbol, settleIso, spotForTna);
+}
+
+let _dlkCurveChart = null;
+function renderDlkCurve(dlkBySymbol, settleIso, spot) {
+  const canvas = document.querySelector("#dlkCurveChart");
+  const meta = document.querySelector("#dlkCurveMeta");
+  if (!canvas || typeof Chart === "undefined") return;
+
+  // Construir puntos: ticker -> (days, tna)
+  const points = [];
+  for (const symbol of DLK_ORDER) {
+    const matIso = DLK_MATURITIES[symbol];
+    const q = dlkBySymbol[symbol];
+    if (!matIso || !q || q.last == null) continue;
+    const days = _daysBetweenIso(settleIso, matIso);
+    const tna = calcDlkTna(Number(q.last), spot, days);
+    if (tna == null || !isFinite(tna)) continue;
+    points.push({ x: days, y: tna, ticker: symbol, mat: matIso, price: Number(q.last) });
+  }
+  points.sort((a, b) => a.x - b.x);
+
+  if (meta) {
+    if (spot == null) meta.textContent = "Esperando SPOT…";
+    else if (!points.length) meta.textContent = "Sin datos suficientes";
+    else meta.textContent = `Spot: ${fmtNumAr(spot, 2)} · ${currentMarketSettlement.toUpperCase()} · ${points.length} bonos`;
+  }
+
+  const datasets = [
+    {
+      type: "line",
+      label: "TNA DLK",
+      data: points.map(p => ({ x: p.x, y: p.y, _p: p })),
+      borderColor: "#60a5fa",
+      backgroundColor: "rgba(96, 165, 250, 0.1)",
+      borderWidth: 2,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBackgroundColor: "#60a5fa",
+      pointBorderColor: "#1e40af",
+      tension: 0.2,
+      spanGaps: true,
+    },
+  ];
+
+  const cfg = {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      layout: { padding: { top: 6, right: 12, bottom: 4, left: 4 } },
+      scales: {
+        x: {
+          type: "linear",
+          title: { display: false },
+          grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
+          ticks: {
+            color: "#94a3b8", font: { size: 9 }, maxRotation: 0,
+            callback(v) {
+              const p = points.find(pp => pp.x === v);
+              if (p && p.mat) {
+                const parts = p.mat.split("-");
+                if (parts.length === 3) {
+                  const m = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][Number(parts[1])-1];
+                  return `${m}-${parts[0].slice(-2)}`;
+                }
+              }
+              return `${Math.round(v)}d`;
+            },
+          },
+          border: { color: "rgba(148,163,184,0.2)" },
+        },
+        y: {
+          title: { display: false },
+          grid: { color: "rgba(148,163,184,0.08)", drawTicks: false },
+          ticks: {
+            color: "#94a3b8", font: { size: 9 },
+            callback: v => `${Number(v).toFixed(0)}%`,
+          },
+          border: { color: "rgba(148,163,184,0.2)" },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "rgba(15,23,42,0.95)",
+          borderColor: "rgba(148,163,184,0.25)",
+          borderWidth: 1,
+          padding: 8,
+          titleColor: "#f8fafc",
+          titleFont: { size: 11, weight: "600" },
+          bodyColor: "#cbd5e1",
+          bodyFont: { size: 10 },
+          displayColors: false,
+          callbacks: {
+            title(ctx) {
+              const raw = ctx[0].raw;
+              return raw && raw._p ? raw._p.ticker : "";
+            },
+            label(ctx) {
+              const raw = ctx.raw;
+              if (!raw || !raw._p) return "";
+              return [
+                `Precio: ${fmtNumAr(raw._p.price, 2)}`,
+                `Tasa: ${raw._p.y.toFixed(2)}%`,
+                `Vto: ${formatDateDisplay(raw._p.mat)} (${Math.round(raw._p.x)}d)`,
+              ];
+            },
+          },
+        },
+      },
+    },
+  };
+
+  if (_dlkCurveChart) {
+    _dlkCurveChart.data = cfg.data;
+    _dlkCurveChart.options = cfg.options;
+    _dlkCurveChart.resize();
+    _dlkCurveChart.update("none");
+  } else {
+    _dlkCurveChart = new Chart(canvas.getContext("2d"), cfg);
+  }
 }
 
 // (Curva de TNAs movida a frontend/futures_curve.js — modulo encapsulado)
@@ -2108,17 +2233,40 @@ function setHdMode(mode) {
   if (isSearch) fetchHdSavedList().catch(() => {});
 }
 
+// Cache de bonos guardados para evitar re-fetch en cada keystroke del filtro.
+let _hdSavedCache = null;
 async function fetchHdSavedList() {
   if (!hdSavedList) return;
   try {
     const response = await fetch("/api/calculators/bond-hd/saved");
     if (!response.ok) throw new Error("No se pudo leer la lista");
     const payload = await response.json();
-    renderHdSavedList(payload.items || []);
+    _hdSavedCache = payload.items || [];
+    renderHdSavedList(_hdSavedCache);
   } catch (error) {
     hdSavedList.innerHTML = '<span class="empty-cell">No se pudo leer la lista de bonos guardados</span>';
     console.error("[Bono HD] lista guardados", error);
   }
+}
+
+// Detecta la "familia" de un ticker: AL30D -> AL30, GD35C -> GD35, etc.
+// Quita sufijos D (USD), C (Cable), V/N (variantes) y M (mayorista) finales.
+function _hdFamilyOf(ticker) {
+  const t = String(ticker || "").toUpperCase().trim();
+  if (!t) return "";
+  return t.replace(/[DCVNM]+$/, "") || t;
+}
+
+function _hdSavedItemHtml(item) {
+  return `
+    <div class="hd-saved-row">
+      <button type="button" class="hd-saved-item" data-hd-saved-ticker="${item.ticker}">
+        <strong>${item.ticker}</strong>
+        <small>${formatDateDisplay(item.issue_date)} → ${formatDateDisplay(item.maturity_date)} · ${item.bond_type} · ${item.frequency}</small>
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-danger hd-saved-delete" data-hd-saved-delete="${item.ticker}" title="Eliminar">x</button>
+    </div>
+  `;
 }
 
 function renderHdSavedList(items) {
@@ -2128,22 +2276,46 @@ function renderHdSavedList(items) {
     return;
   }
   const filter = (hdSearchTicker?.value || "").trim().toUpperCase();
-  const filtered = filter
-    ? items.filter((item) => String(item.ticker || "").toUpperCase().includes(filter))
-    : items;
-  if (!filtered.length) {
-    hdSavedList.innerHTML = '<span class="empty-cell">Sin resultados para ese ticker.</span>';
-    return;
+
+  // Match destacado arriba: tickers que empiezan con el filtro
+  let highlightHtml = "";
+  if (filter) {
+    const matches = items.filter(it => String(it.ticker || "").toUpperCase().startsWith(filter));
+    if (matches.length) {
+      highlightHtml = `
+        <div class="hd-saved-highlight">
+          <div class="hd-saved-highlight-label">Coincidencia${matches.length > 1 ? "s" : ""} para "${filter}"</div>
+          ${matches.map(_hdSavedItemHtml).join("")}
+        </div>
+      `;
+    } else {
+      highlightHtml = `<div class="hd-saved-empty">Sin coincidencias para "${filter}".</div>`;
+    }
   }
-  hdSavedList.innerHTML = filtered.map((item) => `
-    <div class="hd-saved-row">
-      <button type="button" class="hd-saved-item" data-hd-saved-ticker="${item.ticker}">
-        <strong>${item.ticker}</strong>
-        <small>${formatDateDisplay(item.issue_date)} → ${formatDateDisplay(item.maturity_date)} · ${item.bond_type} · ${item.frequency}</small>
-      </button>
-      <button type="button" class="btn btn-sm btn-outline-danger hd-saved-delete" data-hd-saved-delete="${item.ticker}" title="Eliminar">x</button>
-    </div>
-  `).join("");
+
+  // Agrupar por familia
+  const byFamily = new Map();
+  for (const it of items) {
+    const fam = _hdFamilyOf(it.ticker);
+    if (!byFamily.has(fam)) byFamily.set(fam, []);
+    byFamily.get(fam).push(it);
+  }
+  // Familias con >1 bono van como <details>; con 1 bono se renderizan al inline.
+  const families = [...byFamily.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const famHtml = families.map(([fam, list]) => {
+    const sorted = list.slice().sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
+    const open = filter && sorted.some(it => String(it.ticker || "").toUpperCase().startsWith(filter));
+    return `
+      <details class="hd-saved-family" ${open ? "open" : ""}>
+        <summary><strong>${fam}</strong> <small>(${sorted.length})</small></summary>
+        <div class="hd-saved-family-body">
+          ${sorted.map(_hdSavedItemHtml).join("")}
+        </div>
+      </details>
+    `;
+  }).join("");
+
+  hdSavedList.innerHTML = highlightHtml + famHtml;
   hdSavedList.querySelectorAll("[data-hd-saved-ticker]").forEach((button) => {
     button.addEventListener("click", () => loadHdSaved(button.dataset.hdSavedTicker));
   });
@@ -2646,12 +2818,12 @@ function renderDlkArsCashflow() {
   if (!body) return;
   const cashflows = (hdLastCalculation && hdLastCalculation.cashflows) || [];
   if (!cashflows.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Calcula el cashflow para ver los flujos no cobrados</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="empty-state">Calcula el cashflow para ver los flujos ajustados</td></tr>';
     return;
   }
   const fx = DLK_STATE.fxValue;
   if (fx == null || !isFinite(fx) || fx <= 0) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">FX no disponible — sin A3500 publicado ni SPOT live</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="empty-state">FX no disponible — sin A3500 publicado ni SPOT live</td></tr>';
     return;
   }
   // Filtrar solo flujos no cobrados (fecha de pago > fecha de valuacion)
@@ -2661,22 +2833,33 @@ function renderDlkArsCashflow() {
     return payDate && payDate > refDate;
   });
   if (!unpaid.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Todos los flujos ya estan cobrados a esta fecha</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="empty-state">Todos los flujos ya estan cobrados a esta fecha</td></tr>';
     return;
   }
+  // Para todos los flujos no cobrados aplicamos el mismo TC (el de la fecha
+  // de valuacion). En la columna "Fecha" del Tipo de cambio mostramos refDate.
   body.innerHTML = unpaid.map((row) => {
-    const amort = Number(row.amortization_per_100) || 0;
-    const interest = Number(row.interest_per_100) || 0;
-    const total = Number(row.total_per_100) || 0;
-    const totalAdj = total * fx;
+    const amortNominalVn = Number(row.amortization_per_100) || 0;
+    const interestNominalVn = Number(row.interest_per_100) || 0;
+    const amortPct = Number(row.amortization_vn_percent) || 0;
+    const residualPct = Number(row.residual_vn_percent) || 0;
+    const annualPct = Number(row.annual_rate_percent) || 0;
+    const periodPct = Number(row.period_rate_percent) || 0;
+    const amortAdj = amortNominalVn * fx;
+    const interestAdj = interestNominalVn * fx;
+    const totalAdj = amortAdj + interestAdj;
     return `
       <tr>
         <td>${row.number}</td>
         <td>${formatDate(row.effective_payment_date || row.payment_date)}</td>
-        <td class="text-end">${formatNumber(amort, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(interest, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(total, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(amortPct, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</td>
+        <td class="text-end">${formatNumber(residualPct, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</td>
+        <td>${formatDate(refDate)}</td>
         <td class="text-end">${formatNumber(fx, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+        <td class="text-end">${formatNumber(annualPct, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+        <td class="text-end">${formatNumber(periodPct, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
+        <td class="text-end">${formatNumber(amortAdj, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td class="text-end">${formatNumber(interestAdj, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td class="text-end"><b>${formatNumber(totalAdj, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
       </tr>
     `;
@@ -3083,7 +3266,9 @@ hdSearchSubmit?.addEventListener("click", () => {
   fetchHdSavedList().catch(() => setHdSaveStatus("error", "No se pudo buscar"));
 });
 hdSearchTicker?.addEventListener("input", () => {
-  fetchHdSavedList().catch(() => {});
+  // Filtra desde cache local sin re-fetch
+  if (_hdSavedCache) renderHdSavedList(_hdSavedCache);
+  else fetchHdSavedList().catch(() => {});
 });
 hdSaveCashflow?.addEventListener("click", () => {
   saveHdCashflow().catch((err) => {

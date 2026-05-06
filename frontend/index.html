@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Monitor de Bonos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/styles-bundle.css?v=hd70">
-    <link rel="stylesheet" href="/static/futures_curve.css?v=hd70">
+    <link rel="stylesheet" href="/styles-bundle.css?v=hd71">
+    <link rel="stylesheet" href="/static/futures_curve.css?v=hd71">
   </head>
   <body>
     <main class="app-shell">
@@ -220,6 +220,16 @@
                   <tbody id="dlkBody"></tbody>
                 </table>
               </div>
+              <!-- Curva TNA de bonos DLK (reducida, debajo de la tabla) -->
+              <section class="dlk-curve-panel">
+                <div class="dlk-curve-header">
+                  <span class="dlk-curve-title">Curva TNA · Bonos DLK</span>
+                  <span class="dlk-curve-meta" id="dlkCurveMeta">—</span>
+                </div>
+                <div class="dlk-curve-wrap">
+                  <canvas id="dlkCurveChart"></canvas>
+                </div>
+              </section>
             </div>
             <div class="fut-split-col">
               <div class="fut-header-bar">
@@ -716,23 +726,33 @@
                 </p>
               </section>
 
-              <section id="dlkArsCashflowSection" class="cashflow-preview d-none" aria-label="Flujos no cobrados ajustados por FX (DLK)">
-                <h3>Flujos no cobrados — ajustados por FX</h3>
+              <section id="dlkArsCashflowSection" class="cashflow-preview d-none" aria-label="Cash flow DLK (ajustado por TC aplicable)">
+                <h3>Cash flow</h3>
                 <div class="table-wrap inner-table">
                   <table class="table table-sm align-middle mb-0 hd-cashflow-table">
                     <thead>
                       <tr>
-                        <th>#</th>
-                        <th>Fecha de pago</th>
-                        <th class="text-end">Amort. nominal</th>
-                        <th class="text-end">Interes nominal</th>
-                        <th class="text-end">Total nominal</th>
-                        <th class="text-end">Multiplicador (FX)</th>
-                        <th class="text-end">Total ajustado</th>
+                        <th rowspan="2">Cupon<br>#</th>
+                        <th rowspan="2">Fecha de pago<br>Efectiva</th>
+                        <th colspan="2" class="text-center">Amortizacion</th>
+                        <th colspan="2" class="text-center">Tipo de cambio</th>
+                        <th colspan="2" class="text-center">Interes</th>
+                        <th colspan="3" class="text-center">Flujo de fondos c/100 vn</th>
+                      </tr>
+                      <tr>
+                        <th class="text-end">Amortizacion (vn)</th>
+                        <th class="text-end">Valor residual</th>
+                        <th>Fecha</th>
+                        <th class="text-end">TC aplicable</th>
+                        <th class="text-end">Tasa de interes</th>
+                        <th class="text-end">Interes (vn)</th>
+                        <th class="text-end">Amortizacion</th>
+                        <th class="text-end">Interes</th>
+                        <th class="text-end">Total</th>
                       </tr>
                     </thead>
                     <tbody id="dlkArsCashflowBody">
-                      <tr><td colspan="7" class="empty-state">Calcula el cashflow para ver los flujos no cobrados</td></tr>
+                      <tr><td colspan="11" class="empty-state">Calcula el cashflow para ver los flujos ajustados</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1285,7 +1305,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="/static/futures_curve.js?v=hd70"></script>
-    <script src="/app-bundle.js?v=hd70"></script>
+    <script src="/static/futures_curve.js?v=hd71"></script>
+    <script src="/app-bundle.js?v=hd71"></script>
   </body>
 </html>
