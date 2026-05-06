@@ -1,4 +1,223 @@
-console.log("[Monitor] app.js v=hd77 cargado - TAMAR: input Fecha de valuacion + recalculo VPV automatico al cambiar (futuro o pasado)");
+console.log("[Monitor] app.js v=hd78 cargado - Auth con login/logout + panel admin de usuarios y sesiones");
+
+// ====== AUTH bootstrap (primer cosa al cargar) ======
+// Si una request /api/* devuelve 401, redirigimos al login. Para evitar loops
+// no interceptamos los propios endpoints /api/auth/login y /me.
+(function _installAuth401Interceptor() {
+  const origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    return origFetch.call(this, input, init).then(response => {
+      try {
+        const url = typeof input === "string" ? input : (input && input.url) || "";
+        if (response.status === 401 &&
+            !url.includes("/api/auth/login") &&
+            !url.includes("/api/auth/me")) {
+          // Sesion expirada: redirigimos
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.href = `/login?next=${next}`;
+        }
+      } catch (_) {}
+      return response;
+    });
+  };
+})();
+
+// ====== Render del usuario logueado en el header ======
+async function _initAuthHeader() {
+  try {
+    const r = await fetch("/api/auth/me", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const j = await r.json();
+    const user = j.user;
+    const userEl = document.getElementById("authUser");
+    if (userEl) {
+      if (user) {
+        const role = user.role === "admin" ? "admin" : "user";
+        userEl.innerHTML = `${user.username}<span class="auth-role ${role}">${role}</span>`;
+      } else {
+        userEl.textContent = "Sin sesion";
+      }
+    }
+    // Mostrar tab Usuarios solo si admin
+    if (user && user.role === "admin") {
+      const adminBtn = document.getElementById("adminTabBtn");
+      if (adminBtn) adminBtn.classList.remove("d-none");
+    }
+    window.__currentUser = user || null;
+  } catch (err) {
+    console.error("[Auth] me fallo", err);
+  }
+  // Logout button
+  const btn = document.getElementById("authLogout");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      } catch (_) {}
+      window.location.href = "/login";
+    });
+  }
+}
+_initAuthHeader();
+
+// ====== Admin panel: usuarios + sesiones ======
+async function _adminLoadUsers() {
+  const body = document.getElementById("adminUsersBody");
+  if (!body) return;
+  try {
+    const r = await fetch("/api/auth/users", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("http " + r.status);
+    const j = await r.json();
+    const users = j.users || [];
+    const me = window.__currentUser;
+    if (!users.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty-state">Sin usuarios</td></tr>';
+      return;
+    }
+    body.innerHTML = users.map(u => {
+      const isMe = me && me.id === u.id;
+      const created = u.created_at ? u.created_at.slice(0, 10) : "-";
+      return `
+        <tr data-uid="${u.id}">
+          <td><strong>${u.username}</strong>${isMe ? ' <small style="color:#6b7280">(vos)</small>' : ""}</td>
+          <td><span class="admin-role-pill ${u.role}">${u.role}</span></td>
+          <td><span class="admin-status-pill ${u.is_active ? "active" : "inactive"}">${u.is_active ? "activo" : "inactivo"}</span></td>
+          <td><small style="color:#6b7280">${created}</small></td>
+          <td class="text-end">
+            <button class="admin-action" data-act="rename">Renombrar</button>
+            <button class="admin-action" data-act="passwd">Cambiar pass</button>
+            <button class="admin-action" data-act="role">Toggle rol</button>
+            ${isMe ? "" : `<button class="admin-action" data-act="active">${u.is_active ? "Desactivar" : "Activar"}</button>`}
+            ${isMe ? "" : `<button class="admin-action danger" data-act="delete">Borrar</button>`}
+          </td>
+        </tr>
+      `;
+    }).join("");
+    body.querySelectorAll("button[data-act]").forEach(btn => {
+      btn.addEventListener("click", () => _adminUserAction(btn));
+    });
+  } catch (err) {
+    console.error("[Admin] users", err);
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Error al cargar usuarios</td></tr>';
+  }
+}
+
+async function _adminUserAction(btn) {
+  const tr = btn.closest("tr");
+  const uid = tr && tr.dataset.uid;
+  if (!uid) return;
+  const act = btn.dataset.act;
+  let body = null;
+  if (act === "passwd") {
+    const v = window.prompt("Nueva contraseña (min 4):");
+    if (v == null) return;
+    body = { password: v };
+  } else if (act === "rename") {
+    const v = window.prompt("Nuevo nombre de usuario:");
+    if (v == null) return;
+    body = { username: v };
+  } else if (act === "role") {
+    const cur = tr.querySelector(".admin-role-pill")?.textContent.trim();
+    body = { role: cur === "admin" ? "user" : "admin" };
+  } else if (act === "active") {
+    const isActive = tr.querySelector(".admin-status-pill")?.classList.contains("active");
+    body = { is_active: !isActive };
+  } else if (act === "delete") {
+    if (!confirm("¿Borrar este usuario? Tambien se cierran sus sesiones activas.")) return;
+    try {
+      const r = await fetch(`/api/auth/users/${uid}`, { method: "DELETE", credentials: "same-origin" });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        alert("Error: " + (j.detail || r.status));
+        return;
+      }
+      _adminLoadUsers();
+      _adminLoadSessions();
+    } catch (e) { alert("Error de red"); }
+    return;
+  }
+  if (!body) return;
+  try {
+    const r = await fetch(`/api/auth/users/${uid}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      credentials: "same-origin",
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      alert("Error: " + (j.detail || r.status));
+      return;
+    }
+    _adminLoadUsers();
+  } catch (e) { alert("Error de red"); }
+}
+
+async function _adminLoadSessions() {
+  const body = document.getElementById("adminSessionsBody");
+  if (!body) return;
+  try {
+    const r = await fetch("/api/auth/sessions", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("http " + r.status);
+    const j = await r.json();
+    const sessions = j.sessions || [];
+    if (!sessions.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty-state">Sin sesiones activas</td></tr>';
+      return;
+    }
+    body.innerHTML = sessions.map(s => {
+      const created = s.created_at ? new Date(s.created_at).toLocaleString("es-AR", { hour12: false }) : "-";
+      const last = s.last_seen_at ? new Date(s.last_seen_at).toLocaleString("es-AR", { hour12: false }) : "-";
+      const ua = (s.user_agent || "").slice(0, 60);
+      return `
+        <tr>
+          <td><strong>${s.username}</strong></td>
+          <td><span class="admin-role-pill ${s.role}">${s.role}</span></td>
+          <td><small>${s.ip || "-"}</small></td>
+          <td><small style="color:#6b7280">${ua}</small></td>
+          <td><small>${created}</small></td>
+          <td><small>${last}</small></td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    console.error("[Admin] sessions", err);
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">Error al cargar sesiones</td></tr>';
+  }
+}
+
+(function _initAdminPanel() {
+  const form = document.getElementById("adminCreateForm");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = document.getElementById("adminNewUser").value.trim();
+    const password = document.getElementById("adminNewPass").value;
+    const role = document.getElementById("adminNewRole").value;
+    if (!username || !password) return;
+    try {
+      const r = await fetch("/api/auth/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, role }),
+        credentials: "same-origin",
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        alert("Error: " + (j.detail || r.status));
+        return;
+      }
+      document.getElementById("adminNewUser").value = "";
+      document.getElementById("adminNewPass").value = "";
+      _adminLoadUsers();
+    } catch (err) { alert("Error de red"); }
+  });
+  // Carga al entrar al tab
+  document.getElementById("adminTabBtn")?.addEventListener("click", () => {
+    _adminLoadUsers();
+    _adminLoadSessions();
+  });
+})();
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");
@@ -2068,6 +2287,7 @@ function setView(view) {
   calculatorsView.classList.toggle("active", view === "calculators");
   historicalView.classList.toggle("active", view === "historical");
   tplusView.classList.toggle("active", view === "tplus");
+  document.getElementById("adminView")?.classList.toggle("active", view === "admin");
   document.querySelectorAll("[data-view]").forEach((button) => {
     const active = button.dataset.view === view;
     button.classList.toggle("active", active);

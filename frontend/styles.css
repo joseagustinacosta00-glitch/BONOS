@@ -673,6 +673,77 @@ tbody td {
 
 .hd-saved-unclassified > summary { background: #fef3c7; color: #92400e; }
 
+/* ===== Auth strip en topbar ===== */
+.auth-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid rgba(148, 163, 184, 0.25);
+  font-size: 0.78rem;
+}
+.auth-user {
+  font-weight: 600;
+  color: #1f2937;
+  letter-spacing: 0.02em;
+}
+.auth-user .auth-role {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #6b7280;
+  background: #f3f4f6;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  margin-left: 0.3rem;
+  letter-spacing: 0.05em;
+}
+.auth-user .auth-role.admin { color: #14532d; background: #dcfce7; }
+#authLogout { padding: 0.18rem 0.55rem; font-size: 0.7rem; }
+
+/* ===== Admin panel ===== */
+.admin-panel { padding: 1rem; }
+.admin-panel .calculator-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem;
+  align-items: end;
+}
+.admin-action {
+  font-size: 0.7rem;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: 0.25rem;
+  transition: all 0.12s ease;
+}
+.admin-action:hover { background: #f3f4f6; border-color: #9ca3af; }
+.admin-action.danger { color: #b91c1c; border-color: #fecaca; }
+.admin-action.danger:hover { background: #fef2f2; }
+.admin-role-pill {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.12rem 0.45rem;
+  border-radius: 0.25rem;
+}
+.admin-role-pill.admin { color: #14532d; background: #dcfce7; }
+.admin-role-pill.user { color: #1f2937; background: #f3f4f6; }
+.admin-status-pill {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+}
+.admin-status-pill.active { color: #166534; background: #dcfce7; }
+.admin-status-pill.inactive { color: #b91c1c; background: #fee2e2; }
+
 .hd-save-controls {
   display: flex;
   gap: 12px;

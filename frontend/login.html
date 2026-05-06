@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es-AR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Monitor de Bonos · Acceso</title>
+    <link rel="stylesheet" href="/static/login.css?v=hd78">
+  </head>
+  <body>
+    <main class="login-shell">
+      <section class="login-card" aria-labelledby="loginTitle">
+        <header class="login-header">
+          <div class="login-mark" aria-hidden="true">M</div>
+          <h1 id="loginTitle">Monitor de Bonos</h1>
+          <p class="login-subtitle">Acceso restringido</p>
+        </header>
+
+        <form id="loginForm" class="login-form" autocomplete="on" novalidate>
+          <label class="login-field">
+            <span>Usuario</span>
+            <input id="loginUsername" type="text" name="username" required autocomplete="username" autofocus>
+          </label>
+          <label class="login-field">
+            <span>Contraseña</span>
+            <input id="loginPassword" type="password" name="password" required autocomplete="current-password">
+          </label>
+          <button id="loginSubmit" type="submit" class="login-btn">Ingresar</button>
+          <p id="loginError" class="login-error" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <footer class="login-foot">
+        <small>Las credenciales las administra el responsable del sistema.</small>
+      </footer>
+    </main>
+
+    <script src="/static/login.js?v=hd78"></script>
+  </body>
+</html>

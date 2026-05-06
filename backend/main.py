@@ -10,12 +10,20 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.ai_assistant import answer_ai_question
+from backend.auth import (
+    ADMIN_USERNAME,
+    AuthStore,
+    SESSION_COOKIE,
+    SESSION_TTL,
+    User as AuthUser,
+)
 from backend.ai_tools import (
     build_basic_study_summary,
     calculate_ratio_points,
@@ -61,6 +69,8 @@ settings = get_settings()
 market = MarketDataService(settings)
 bcra = BcraClient(settings)
 storage = CalculatorStorage(ROOT_DIR / settings.app_db_path)
+auth_store = AuthStore(ROOT_DIR / settings.app_db_path)
+auth_store.initialize()
 
 # Backup auto rate-limited: minimo 5 min entre backups despues de un write
 import time as _time_module
@@ -91,6 +101,209 @@ market_scheduler = MarketHistoryScheduler(
 
 app = FastAPI(title="Monitor de Bonos", version="0.1.0")
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+
+# ====================== AUTH middleware + endpoints ======================
+# Rutas que NO requieren autenticacion (login + assets de la pantalla de login)
+_AUTH_PUBLIC_PATHS = {
+    "/login",
+    "/api/auth/login",
+    "/api/auth/me",       # devuelve null si no esta logueado, no error
+    "/static/login.css",
+    "/static/login.js",
+    "/favicon.ico",
+}
+# Prefijos publicos (assets de Bootstrap, fuentes, etc. siguen via CDN, asi que no aplica)
+
+
+def _client_ip(request: Request) -> str | None:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        # WebSocket: lo dejamos pasar (asi no rompemos el WS de quotes; en el futuro
+        # se puede gateaer chequeando query param ?token=).
+        if request.scope.get("type") == "websocket":
+            return await call_next(request)
+        # Rutas publicas (login, assets login)
+        if path in _AUTH_PUBLIC_PATHS:
+            return await call_next(request)
+        # Static mount: todo lo de /static/ esta permitido (login.html requiere login.css/login.js)
+        if path.startswith("/static/"):
+            return await call_next(request)
+        # Verificar sesion
+        token = request.cookies.get(SESSION_COOKIE)
+        user = auth_store.get_session_user(
+            token,
+            user_agent=request.headers.get("user-agent"),
+            ip=_client_ip(request),
+        )
+        if user is None:
+            # API: 401 JSON
+            if path.startswith("/api/") or path.startswith("/ws"):
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": "No autenticado"}, status_code=401)
+            # HTML: redirige al login conservando el destino
+            return RedirectResponse(url=f"/login?next={path}", status_code=302)
+        # Stash user en request.state para handlers
+        request.state.user = user
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
+
+
+def _require_user(request: Request) -> AuthUser:
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    return user
+
+
+def _require_admin(request: Request) -> AuthUser:
+    user = _require_user(request)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin")
+    return user
+
+
+# ---- Endpoints auth ----
+class LoginPayload(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: LoginPayload, request: Request, response: Response) -> dict:
+    user = auth_store.authenticate(payload.username, payload.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña invalidos")
+    token = auth_store.create_session(
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+        ip=_client_ip(request),
+    )
+    max_age = int(SESSION_TTL.total_seconds())
+    # secure=False para que funcione en HTTP local. En Render con HTTPS el browser
+    # igual lo va a enviar via SameSite=Lax (no requerimos secure para enviar).
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        max_age=max_age, httponly=True, samesite="lax", path="/",
+    )
+    return {"user": user.to_dict()}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response) -> dict:
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        auth_store.delete_session(token)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request) -> dict:
+    token = request.cookies.get(SESSION_COOKIE)
+    user = auth_store.get_session_user(token, touch=False)
+    return {"user": user.to_dict() if user else None}
+
+
+# ---- Admin: users CRUD + sessions ----
+class CreateUserPayload(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=4, max_length=200)
+    role: str = Field(default="user", pattern="^(admin|user)$")
+
+
+class UpdateUserPayload(BaseModel):
+    username: str | None = None
+    password: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+
+
+@app.get("/api/auth/users")
+async def auth_list_users(request: Request) -> dict:
+    _require_admin(request)
+    return {"users": [u.to_dict() for u in auth_store.list_users()]}
+
+
+@app.post("/api/auth/users")
+async def auth_create_user(payload: CreateUserPayload, request: Request) -> dict:
+    _require_admin(request)
+    try:
+        user = auth_store.create_user(payload.username, payload.password, payload.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"user": user.to_dict()}
+
+
+@app.patch("/api/auth/users/{user_id}")
+async def auth_update_user(user_id: int, payload: UpdateUserPayload, request: Request) -> dict:
+    me = _require_admin(request)
+    # Prevenir auto-desactivar admin
+    if user_id == me.id and payload.is_active is False:
+        raise HTTPException(status_code=422, detail="No podes desactivarte a vos mismo")
+    if user_id == me.id and payload.role == "user":
+        raise HTTPException(status_code=422, detail="No podes degradarte a vos mismo")
+    try:
+        user = auth_store.update_user(
+            user_id,
+            password=payload.password,
+            role=payload.role,
+            is_active=payload.is_active,
+            new_username=payload.username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {"user": user.to_dict()}
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def auth_delete_user(user_id: int, request: Request) -> dict:
+    me = _require_admin(request)
+    if user_id == me.id:
+        raise HTTPException(status_code=422, detail="No podes borrar tu propio usuario")
+    ok = auth_store.delete_user(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {"ok": True}
+
+
+@app.get("/api/auth/sessions")
+async def auth_list_sessions(request: Request) -> dict:
+    _require_admin(request)
+    sessions = auth_store.list_sessions()
+    return {
+        "sessions": [
+            {
+                "user_id": s.user_id,
+                "username": s.username,
+                "role": s.role,
+                "created_at": s.created_at,
+                "last_seen_at": s.last_seen_at,
+                "expires_at": s.expires_at,
+                "user_agent": s.user_agent,
+                "ip": s.ip,
+                # No exponemos el token completo, solo un prefijo para identificar
+                "token_prefix": s.token[:8] + "...",
+            } for s in sessions
+        ],
+    }
+
+
+@app.get("/login")
+async def login_page() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "login.html", headers=_NO_CACHE_HEADERS)
+# ====================== /AUTH ======================
 
 
 class BondDraftRequest(BaseModel):
