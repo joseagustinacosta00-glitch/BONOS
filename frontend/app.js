@@ -1,4 +1,4 @@
-console.log("[Monitor] app.js v=hd62 cargado - Fix layout curva: wrapper con dimensiones explicitas + resize");
+console.log("[Monitor] app.js v=hd63 cargado - SPOT lee IV (index value) intraday: LA -> IV -> CL");
 const quotesBody = document.querySelector("#quotesBody");
 const marketTableHead = document.querySelector("#marketTableHead");
 const fxBody = document.querySelector("#fxBody");

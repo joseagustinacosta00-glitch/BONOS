@@ -826,6 +826,7 @@ class MarketDataService:
         ask_size = self._entry_size(market_data.get("OF"))
         last = self._entry_price(market_data.get("LA"))
         last_volume = self._entry_size(market_data.get("LA"))
+        index_value = self._entry_price(market_data.get("IV"))
         # Volumen de contratos operados (TV) y nominal (NV)
         trade_volume = self._entry_value(market_data.get("TV"))
         nominal_volume = self._entry_value(market_data.get("NV"))
@@ -849,13 +850,28 @@ class MarketDataService:
                 current = self._spot_quotes_dict[local_symbol]
             else:
                 current = self._quotes[local_symbol]
-            # Para spot en VETA/sandbox: si LA es null pero CL tiene valor,
-            # usar CL como last efectivo (es el cierre del dia previo, mismo
-            # numero que aparece en otras webapps).
-            if category == "spot" and last is None and previous_close is not None:
-                effective_last = previous_close
+            # Spot priority: LA -> IV (index value, p.ej. DLR/SPOT en LIVE) -> CL.
+            # LA: trade real (cuando hay).
+            # IV: index value intraday — clave para DLR/SPOT que es indice de
+            #     referencia y no se opera, pero publica IV con la cotizacion
+            #     intraday del dolar mayorista.
+            # CL: cierre del dia previo (ultimo recurso).
+            if category == "spot":
+                if last is not None:
+                    effective_last = last
+                    new_last_source = "LA"
+                elif index_value is not None:
+                    effective_last = index_value
+                    new_last_source = "IV"
+                elif previous_close is not None:
+                    effective_last = previous_close
+                    new_last_source = "CL"
+                else:
+                    effective_last = None
+                    new_last_source = current.get("last_source")
             else:
                 effective_last = last
+                new_last_source = current.get("last_source")
             updates = {
                 "bid": bid if bid is not None else current.get("bid"),
                 "ask": ask if ask is not None else current.get("ask"),
@@ -871,6 +887,8 @@ class MarketDataService:
                 "settlement_price": settlement_price if settlement_price is not None else current.get("settlement_price"),
                 "previous_close": previous_close if previous_close is not None else current.get("previous_close"),
                 "opening_price": opening_price if opening_price is not None else current.get("opening_price"),
+                "index_value": index_value if index_value is not None else current.get("index_value"),
+                "last_source": new_last_source,
                 "updated_at": now,
                 "raw": self._json_safe(message),
             }
@@ -1549,14 +1567,26 @@ class MarketDataService:
                 md = (response or {}).get("marketData") or (response or {}).get("market_data")
                 if md:
                     last = self._entry_price(md.get("LA"))
+                    iv = self._entry_price(md.get("IV"))  # Index value (DLR/SPOT)
                     cl = self._entry_price(md.get("CL"))
                     bid = self._entry_price(md.get("BI"))
                     ask = self._entry_price(md.get("OF"))
-                    # FALLBACK: si LA es null pero CL existe, usar CL como
-                    # "last efectivo" (caso pyRofex VETA / sandbox: solo
-                    # devuelve cierre del dia previo, no trades en vivo).
-                    effective_last = last if last is not None else cl
-                    last_source = "LA" if last is not None else ("CL" if cl is not None else None)
+                    # FALLBACK: LA -> IV -> CL.
+                    # LA: trade real (cuando hay).
+                    # IV: index value intraday (DLR/SPOT en LIVE).
+                    # CL: cierre del dia previo (ultimo recurso).
+                    if last is not None:
+                        effective_last = last
+                        last_source = "LA"
+                    elif iv is not None:
+                        effective_last = iv
+                        last_source = "IV"
+                    elif cl is not None:
+                        effective_last = cl
+                        last_source = "CL"
+                    else:
+                        effective_last = None
+                        last_source = None
                     sym_results.append({
                         "market": mkt_name,
                         "last": last,
@@ -1872,9 +1902,11 @@ class MarketDataService:
             pyRofex.MarketDataEntry.TRADE_VOLUME,
         ]
         # Entries opcionales que pyRofex puede no exponer en todas las versiones.
-        for attr in ("NOMINAL_VOLUME", "EFFECTIVE_VOLUME", "OPENING_PRICE",
-                     "CLOSING_PRICE", "OPEN_INTEREST", "TRADE_EFFECTIVE_VOLUME",
-                     "SETTLEMENT_PRICE"):
+        # INDEX_VALUE es CLAVE para indices de referencia tipo DLR/SPOT que no
+        # tienen trades pero si publican un IV intraday.
+        for attr in ("INDEX_VALUE", "NOMINAL_VOLUME", "EFFECTIVE_VOLUME",
+                     "OPENING_PRICE", "CLOSING_PRICE", "OPEN_INTEREST",
+                     "TRADE_EFFECTIVE_VOLUME", "SETTLEMENT_PRICE"):
             value = getattr(pyRofex.MarketDataEntry, attr, None)
             if value is not None:
                 entries.append(value)
