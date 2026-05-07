@@ -11,8 +11,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" />
   -->
 
-  <link rel="stylesheet" href="/static/components/nav.css?v=hd85" />
-  <link rel="stylesheet" href="/static/fx.css?v=hd85" />
+  <link rel="stylesheet" href="/static/components/nav.css?v=hd86" />
+  <link rel="stylesheet" href="/static/fx.css?v=hd86" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
@@ -152,7 +152,12 @@
               <span class="fx-tab" data-period="6M">6M</span>
               <span class="fx-tab" data-period="YTD">YTD</span>
               <span class="fx-tab" data-period="1A">1A</span>
+              <span class="fx-tab" data-period="FULL">FULL</span>
             </div>
+          </div>
+          <div class="fx-chart-scale" data-chart="tc">
+            <span class="fx-scale-chip is-active" data-scale="linear">Lineal</span>
+            <span class="fx-scale-chip" data-scale="log">Log</span>
           </div>
           <div class="fx-chart-canvas-wrap"><canvas id="fxChartTc"></canvas></div>
           <div class="fx-chart-foot">
@@ -186,7 +191,12 @@
               <span class="fx-tab" data-period="6M">6M</span>
               <span class="fx-tab" data-period="YTD">YTD</span>
               <span class="fx-tab" data-period="1A">1A</span>
+              <span class="fx-tab" data-period="FULL">FULL</span>
             </div>
+          </div>
+          <div class="fx-chart-scale" data-chart="br">
+            <span class="fx-scale-chip is-active" data-scale="linear">Lineal</span>
+            <span class="fx-scale-chip" data-scale="log">Log</span>
           </div>
           <div class="fx-chart-canvas-wrap"><canvas id="fxChartBr"></canvas></div>
           <div class="fx-chart-foot">
@@ -284,11 +294,11 @@
       .then((html) => {
         document.getElementById("navHost").innerHTML = html;
         const s = document.createElement("script");
-        s.src = "/static/components/nav.js?v=hd85";
+        s.src = "/static/components/nav.js?v=hd86";
         document.body.appendChild(s);
       });
   </script>
 
-  <script src="/static/fx.js?v=hd85"></script>
+  <script src="/static/fx.js?v=hd86"></script>
 </body>
 </html>

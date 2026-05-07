@@ -1088,14 +1088,15 @@ async def fx_history_endpoint(
 
 
 @app.post("/api/fx/backfill")
-async def fx_backfill(request: Request) -> dict:
+async def fx_backfill(request: Request, settlement: str = "t1") -> dict:
     """Triggera el backfill: lee historical_data (AL30/AL30D/AL30C, dirty_price)
     y deriva MEP/CCL en fx_snapshots para cada fecha disponible. Idempotente
     (INSERT OR REPLACE por ts), se puede correr cuantas veces sea necesario.
-    Solo admin para evitar abuso (la operacion lee toda la tabla)."""
+    Solo admin para evitar abuso (la operacion lee toda la tabla).
+    Param settlement: 't0' o 't1' (default t1)."""
     _require_admin(request)
-    stats = fx_history.backfill_from_historical()
-    return {"ok": True, **stats}
+    stats = fx_history.backfill_from_historical(settlement=settlement)
+    return {"ok": True, "settlement": settlement, **stats}
 
 
 @app.get("/api/fx/value-at")

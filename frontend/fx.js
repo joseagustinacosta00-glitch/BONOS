@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[fx] v=hd85 loaded");
+  console.log("[fx] v=hd86 loaded");
 
   // ============================================================
   // Estado global del módulo
@@ -14,8 +14,8 @@
       num: ["MEP"],
       den: ["Spot"],
     }),
-    chartTc: loadPref("mt:fx:chart_tc", { instr: "MEP", field: "last", period: "1M" }),
-    chartBr: loadPref("mt:fx:chart_br", { op: "relativo", num: "CCL", den: "Spot", period: "1M" }),
+    chartTc: loadPref("mt:fx:chart_tc", { instr: "MEP", field: "last", period: "1M", scale: "linear" }),
+    chartBr: loadPref("mt:fx:chart_br", { op: "relativo", num: "CCL", den: "Spot", period: "1M", scale: "linear" }),
     snapshot: null,
     averages: { 5: null, 60: null },
     // Tracking local para deltas (los endpoints actuales no devuelven prev close)
@@ -693,12 +693,22 @@
     });
   }
 
-  function updateChart(chart, series, color) {
+  function updateChart(chart, series, color, scale) {
     if (!chart) return;
     chart.data.labels = (series || []).map((p) => p.label);
-    chart.data.datasets[0].data = (series || []).map((p) => p.value);
+    // Para escala log, los valores <= 0 los pasamos a null (Chart.js los salta).
+    const useLog = scale === "log";
+    chart.data.datasets[0].data = (series || []).map((p) => {
+      if (p.value == null) return null;
+      if (useLog && p.value <= 0) return null;
+      return p.value;
+    });
     chart.data.datasets[0].borderColor = color;
     chart.data.datasets[0].backgroundColor = hexToRgba(color, 0.06);
+    // Cambiar tipo de eje Y segun escala
+    if (chart.options.scales && chart.options.scales.y) {
+      chart.options.scales.y.type = useLog ? "logarithmic" : "linear";
+    }
     chart.update();
   }
 
@@ -813,11 +823,12 @@
       const d = await r.json();
       const color = "#1F3D2E";
 
-      updateChart(chartTc, d.series, color);
+      updateChart(chartTc, d.series, color, c.scale);
 
       const titleEl = document.getElementById("fxChartTcTitle");
       if (titleEl) {
-        titleEl.innerHTML = `${c.instr} <span class="fx-muted-italic-sm">${c.field} · ${c.period}</span>`;
+        const scaleLbl = c.scale === "log" ? " · log" : "";
+        titleEl.innerHTML = `${c.instr} <span class="fx-muted-italic-sm">${c.field} · ${c.period}${scaleLbl}</span>`;
       }
 
       const mm = document.getElementById("fxChartTcMinmax");
@@ -847,13 +858,14 @@
       const d = await r.json();
       const color = "#8A7A4F";
 
-      updateChart(chartBr, d.series, color);
+      updateChart(chartBr, d.series, color, c.scale);
 
       const opLbl  = c.op === "spread" ? "Spread" : "Relativo";
       const denLbl = c.den === "DLK_LF" ? "DLK L+F" : c.den;
       const titleEl = document.getElementById("fxChartBrTitle");
       if (titleEl) {
-        titleEl.innerHTML = `${opLbl} ${c.num} / ${denLbl} <span class="fx-muted-italic-sm">· ${c.period}</span>`;
+        const scaleLbl = c.scale === "log" ? " · log" : "";
+        titleEl.innerHTML = `${opLbl} ${c.num} / ${denLbl} <span class="fx-muted-italic-sm">· ${c.period}${scaleLbl}</span>`;
       }
 
       const mm = document.getElementById("fxChartBrMinmax");
@@ -926,6 +938,31 @@
             fetchChartTc();
           } else {
             state.chartBr.period = period;
+            savePref("mt:fx:chart_br", state.chartBr);
+            fetchChartBr();
+          }
+        });
+      });
+    });
+
+    // Scale chips (Lineal / Log)
+    document.querySelectorAll(".fx-chart-scale").forEach((bar) => {
+      const which = bar.getAttribute("data-chart");
+      const savedScale = which === "tc" ? (state.chartTc.scale || "linear") : (state.chartBr.scale || "linear");
+      bar.querySelectorAll(".fx-scale-chip").forEach((c) => {
+        c.classList.toggle("is-active", c.getAttribute("data-scale") === savedScale);
+      });
+      bar.querySelectorAll(".fx-scale-chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          bar.querySelectorAll(".fx-scale-chip").forEach((c) => c.classList.remove("is-active"));
+          chip.classList.add("is-active");
+          const scale = chip.getAttribute("data-scale");
+          if (which === "tc") {
+            state.chartTc.scale = scale;
+            savePref("mt:fx:chart_tc", state.chartTc);
+            fetchChartTc();
+          } else {
+            state.chartBr.scale = scale;
             savePref("mt:fx:chart_br", state.chartBr);
             fetchChartBr();
           }

@@ -243,25 +243,29 @@ class FxHistoryStore:
             "requested": at_iso,
         }
 
-    def backfill_from_historical(self) -> dict[str, int]:
+    def backfill_from_historical(self, settlement: str = "t1") -> dict[str, int]:
         """Lee historical_data y deriva MEP/CCL para cada fecha disponible
-        cuando hay AL30 (pesos), AL30/AL30D (usd) y/o AL30C (cable).
+        cuando hay AL30 (pesos), AL30/AL30D (usd/mep) y/o AL30C (cable).
         Inserta los puntos derivados en fx_snapshots con ts = mediodia local.
         Soporta dos esquemas de upload comunes:
-        - ticker=AL30 + price_market en (pesos|usd|cable)
+        - ticker=AL30 + price_market en (pesos|usd|mep|cable)
         - tickers separados AL30 / AL30D / AL30C con price_market='unspecified'
+        Filtra por settlement (t0 o t1) para evitar mezclar plazos en el mismo
+        snapshot. Default 't1' (estandar para historico).
         Devuelve estadisticas: { dates_seen, inserted, skipped }.
         """
+        settlement = settlement if settlement in ("t0", "t1") else "t1"
         with closing(self._connect()) as conn:
-            # Pull todas las filas relevantes en una query
             rows = conn.execute(
                 """
-                SELECT ticker, price_market, value_date, value
+                SELECT ticker, price_market, value_date, value, settlement_type
                 FROM historical_data
                 WHERE metric_type = 'dirty_price'
                   AND ticker IN ('AL30', 'AL30D', 'AL30C')
+                  AND settlement_type = ?
                 ORDER BY value_date
-                """
+                """,
+                (settlement,),
             ).fetchall()
 
         # Indexar por fecha: { date: { 'pesos': v, 'usd': v, 'cable': v } }
@@ -285,10 +289,10 @@ class FxHistoryStore:
             elif ticker == "AL30":
                 if pm in ("pesos", "ars", "unspecified", ""):
                     bucket["pesos"] = v
-                elif pm in ("usd", "dolar"):
-                    bucket.setdefault("usd", v)
+                elif pm in ("usd", "dolar", "mep"):
+                    bucket["usd"] = v
                 elif pm == "cable":
-                    bucket.setdefault("cable", v)
+                    bucket["cable"] = v
 
         inserted = 0
         skipped = 0
@@ -353,6 +357,7 @@ class FxHistoryStore:
         if period == "HOY":
             midnight = datetime(now.year, now.month, now.day)
             return midnight.isoformat()
+        if period == "FULL": return "1900-01-01T00:00:00"
         if period == "5D":  return (now - timedelta(days=5)).isoformat()
         if period == "1M":  return (now - timedelta(days=30)).isoformat()
         if period == "3M":  return (now - timedelta(days=90)).isoformat()
@@ -366,7 +371,7 @@ class FxHistoryStore:
 
     @staticmethod
     def _bucket_seconds(period: str) -> int:
-        # Downsampling target: ~120-200 puntos por chart
+        # Downsampling target: ~120-300 puntos por chart
         if period == "HOY": return 60              # 1 min (detalle intraday fino)
         if period == "5D":  return 60 * 30        # 30 min
         if period == "1M":  return 60 * 60 * 4    # 4 hs
@@ -374,6 +379,7 @@ class FxHistoryStore:
         if period == "6M":  return 60 * 60 * 24   # 1 dia
         if period == "YTD": return 60 * 60 * 24
         if period == "1A":  return 60 * 60 * 24 * 2  # 2 dias
+        if period == "FULL": return 60 * 60 * 24 * 7  # 1 semana (~290 puntos en ~5.5 anios)
         return 60 * 60 * 4
 
     def _query_bucketed(
