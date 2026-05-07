@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[fx] v=hd84 loaded");
+  console.log("[fx] v=hd85 loaded");
 
   // ============================================================
   // Estado global del módulo

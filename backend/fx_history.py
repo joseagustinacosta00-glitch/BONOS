@@ -350,6 +350,9 @@ class FxHistoryStore:
     @staticmethod
     def _period_cutoff(period: str) -> str:
         now = _now()
+        if period == "HOY":
+            midnight = datetime(now.year, now.month, now.day)
+            return midnight.isoformat()
         if period == "5D":  return (now - timedelta(days=5)).isoformat()
         if period == "1M":  return (now - timedelta(days=30)).isoformat()
         if period == "3M":  return (now - timedelta(days=90)).isoformat()
@@ -364,6 +367,7 @@ class FxHistoryStore:
     @staticmethod
     def _bucket_seconds(period: str) -> int:
         # Downsampling target: ~120-200 puntos por chart
+        if period == "HOY": return 60              # 1 min (detalle intraday fino)
         if period == "5D":  return 60 * 30        # 30 min
         if period == "1M":  return 60 * 60 * 4    # 4 hs
         if period == "3M":  return 60 * 60 * 12   # 12 hs
@@ -401,7 +405,13 @@ class FxHistoryStore:
             v = r["val"]
             if v is None: continue
             ts = datetime.fromtimestamp(int(r["bucket_ts"]))
-            label = ts.strftime("%d/%m %H:%M") if bucket_seconds < 86400 else ts.strftime("%d/%m/%y")
+            if bucket_seconds < 3600:
+                # Buckets sub-hora (HOY): solo HH:MM, todos los puntos son del dia
+                label = ts.strftime("%H:%M")
+            elif bucket_seconds < 86400:
+                label = ts.strftime("%d/%m %H:%M")
+            else:
+                label = ts.strftime("%d/%m/%y")
             series.append({"label": label, "value": float(v), "ts": ts.isoformat()})
             vals.append(float(v))
         if not vals:

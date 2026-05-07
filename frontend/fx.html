@@ -11,8 +11,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" />
   -->
 
-  <link rel="stylesheet" href="/static/components/nav.css?v=hd84" />
-  <link rel="stylesheet" href="/static/fx.css?v=hd84" />
+  <link rel="stylesheet" href="/static/components/nav.css?v=hd85" />
+  <link rel="stylesheet" href="/static/fx.css?v=hd85" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
@@ -145,6 +145,7 @@
           <div class="fx-chart-sub">
             <p class="fx-num fx-chart-title" id="fxChartTcTitle">MEP <span class="fx-muted-italic-sm">last · 1M</span></p>
             <div class="fx-period-tabs" data-chart="tc">
+              <span class="fx-tab" data-period="HOY">HOY</span>
               <span class="fx-tab" data-period="5D">5D</span>
               <span class="fx-tab is-active" data-period="1M">1M</span>
               <span class="fx-tab" data-period="3M">3M</span>
@@ -178,6 +179,7 @@
           <div class="fx-chart-sub">
             <p class="fx-num fx-chart-title" id="fxChartBrTitle">Relativo CCL / Spot <span class="fx-muted-italic-sm">· 1M</span></p>
             <div class="fx-period-tabs" data-chart="br">
+              <span class="fx-tab" data-period="HOY">HOY</span>
               <span class="fx-tab" data-period="5D">5D</span>
               <span class="fx-tab is-active" data-period="1M">1M</span>
               <span class="fx-tab" data-period="3M">3M</span>
@@ -282,11 +284,11 @@
       .then((html) => {
         document.getElementById("navHost").innerHTML = html;
         const s = document.createElement("script");
-        s.src = "/static/components/nav.js?v=hd84";
+        s.src = "/static/components/nav.js?v=hd85";
         document.body.appendChild(s);
       });
   </script>
 
-  <script src="/static/fx.js?v=hd84"></script>
+  <script src="/static/fx.js?v=hd85"></script>
 </body>
 </html>
