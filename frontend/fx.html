@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketerminal · FX</title>
+
+  <!-- Opcional: descomentá para usar Cormorant Garamond
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" />
+  -->
+
+  <link rel="stylesheet" href="/static/components/nav.css?v=hd80" />
+  <link rel="stylesheet" href="/static/fx.css?v=hd80" />
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- NAV (cargado vía fetch) -->
+  <div id="navHost"></div>
+
+  <main class="fx-page">
+
+    <!-- HEADER -->
+    <header class="fx-header">
+      <div class="fx-header-title">
+        <h1>FX</h1>
+        <span class="fx-muted-italic">Tipos de cambio · Brechas · Evolución</span>
+      </div>
+      <div class="fx-header-meta">
+        <span id="fxDate">—</span>
+        <span class="fx-dot-gold">·</span>
+        <span id="fxClock" class="fx-num">—</span>
+        <span class="fx-live"><span class="dot"></span><span>en vivo</span></span>
+      </div>
+    </header>
+    <hr class="fx-rule" />
+
+    <!-- FILA 1: Spot · A3500 · Brechas -->
+    <section class="fx-row-1">
+
+      <!-- SPOT -->
+      <article class="fx-card-dark">
+        <div class="fx-spot-head">
+          <p class="fx-spot-label">Spot</p>
+          <span id="fxSpotTs" class="fx-num fx-spot-ts">—</span>
+        </div>
+        <p id="fxSpotValue" class="fx-num fx-spot-value">—</p>
+        <div class="fx-spot-delta">
+          <span id="fxSpotDeltaAbs" class="fx-num"></span>
+          <span id="fxSpotDeltaPct" class="fx-num fx-spot-deltapct"></span>
+        </div>
+      </article>
+
+      <!-- A3500 -->
+      <article class="fx-card">
+        <p class="fx-overline">Comunic. A3500</p>
+        <p id="fxA3500Value" class="fx-num fx-a3500-value">—</p>
+        <p id="fxA3500Meta" class="fx-num fx-muted-italic-sm">—</p>
+      </article>
+
+      <!-- BRECHAS -->
+      <article class="fx-card fx-brechas">
+        <div class="fx-brechas-head">
+          <p class="fx-overline">Brechas</p>
+          <div class="fx-chip-bar" id="fxBrechaChips" data-chip-group="brecha">
+            <span class="fx-chip is-active" data-dim="op" data-val="spread">Spread</span>
+            <span class="fx-chip" data-dim="op" data-val="relativo">Relativo</span>
+            <span class="fx-chip-divider"></span>
+            <span class="fx-chip is-active" data-dim="num" data-val="MEP">MEP</span>
+            <span class="fx-chip" data-dim="num" data-val="CCL">CCL</span>
+            <span class="fx-chip-divider"></span>
+            <span class="fx-chip is-active" data-dim="den" data-val="Spot">Spot</span>
+            <span class="fx-chip" data-dim="den" data-val="DLK">DLK</span>
+            <span class="fx-chip" data-dim="den" data-val="DLK_LF">DLK L+F</span>
+          </div>
+        </div>
+        <div class="fx-brechas-grid" id="fxBrechasGrid">
+          <!-- Llenado por JS -->
+        </div>
+      </article>
+
+    </section>
+
+    <!-- FILA 2: Tabla · Charts -->
+    <section class="fx-row-2">
+
+      <!-- TABLA TC -->
+      <article class="fx-card fx-table-card">
+        <header class="fx-table-head">
+          <p class="fx-overline">Tipos de cambio</p>
+          <div class="fx-table-controls">
+            <span class="fx-prom-toggle" id="fxPromToggle">
+              <span class="dot"></span>
+              <span>Promedios</span>
+            </span>
+            <span class="fx-prom-inputs" id="fxPromInputs" hidden>
+              <span><input class="fx-input-mins" id="fxPromA" value="5" />m</span>
+              <span class="fx-prom-sep">·</span>
+              <span><input class="fx-input-mins" id="fxPromB" value="60" />m</span>
+            </span>
+          </div>
+        </header>
+
+        <hr class="fx-rule-soft" />
+
+        <div class="fx-tag-row">
+          <span class="fx-tag">T + 0</span>
+          <span class="fx-muted-italic-sm">contado inmediato</span>
+        </div>
+        <table class="fx-table" id="fxTableT0">
+          <thead><tr id="fxT0Head"></tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <div class="fx-tag-row fx-tag-row--t1">
+          <span class="fx-tag">T + 1</span>
+          <span class="fx-muted-italic-sm">contado 24 hs</span>
+        </div>
+        <table class="fx-table fx-table--t1" id="fxTableT1">
+          <thead><tr id="fxT1Head"></tr></thead>
+          <tbody></tbody>
+        </table>
+      </article>
+
+      <!-- CHARTS -->
+      <div class="fx-charts">
+
+        <!-- Chart 1: TC -->
+        <article class="fx-card fx-chart-card">
+          <div class="fx-chart-head">
+            <p class="fx-overline">Evolución · TC</p>
+            <div class="fx-chip-bar" id="fxChartTcChips">
+              <span class="fx-chip is-active" data-dim="instr" data-val="MEP">MEP</span>
+              <span class="fx-chip" data-dim="instr" data-val="CCL">CCL</span>
+              <span class="fx-chip" data-dim="instr" data-val="Canje">Canje</span>
+              <span class="fx-chip-divider"></span>
+              <span class="fx-chip is-active" data-dim="field" data-val="last">Last</span>
+              <span class="fx-chip" data-dim="field" data-val="bid">Bid</span>
+              <span class="fx-chip" data-dim="field" data-val="offer">Offer</span>
+            </div>
+          </div>
+          <div class="fx-chart-sub">
+            <p class="fx-num fx-chart-title" id="fxChartTcTitle">MEP <span class="fx-muted-italic-sm">last · 1M</span></p>
+            <div class="fx-period-tabs" data-chart="tc">
+              <span class="fx-tab" data-period="5D">5D</span>
+              <span class="fx-tab is-active" data-period="1M">1M</span>
+              <span class="fx-tab" data-period="3M">3M</span>
+              <span class="fx-tab" data-period="6M">6M</span>
+              <span class="fx-tab" data-period="YTD">YTD</span>
+              <span class="fx-tab" data-period="1A">1A</span>
+            </div>
+          </div>
+          <div class="fx-chart-canvas-wrap"><canvas id="fxChartTc"></canvas></div>
+          <div class="fx-chart-foot">
+            <span class="fx-muted-italic-sm" id="fxChartTcMinmax">—</span>
+            <span class="fx-num fx-up fx-muted-italic-sm" id="fxChartTcVar">—</span>
+          </div>
+        </article>
+
+        <!-- Chart 2: Brecha -->
+        <article class="fx-card fx-chart-card">
+          <div class="fx-chart-head">
+            <p class="fx-overline">Evolución · Brecha</p>
+            <div class="fx-chip-bar" id="fxChartBrChips">
+              <span class="fx-chip" data-dim="op" data-val="spread">Spread</span>
+              <span class="fx-chip is-active" data-dim="op" data-val="relativo">Relativo</span>
+              <span class="fx-chip-divider"></span>
+              <span class="fx-chip is-active" data-dim="num" data-val="CCL">CCL</span>
+              <span class="fx-chip" data-dim="num" data-val="MEP">MEP</span>
+              <span class="fx-chip-divider"></span>
+              <span class="fx-chip is-active" data-dim="den" data-val="Spot">Spot</span>
+              <span class="fx-chip" data-dim="den" data-val="DLK">DLK</span>
+            </div>
+          </div>
+          <div class="fx-chart-sub">
+            <p class="fx-num fx-chart-title" id="fxChartBrTitle">Relativo CCL / Spot <span class="fx-muted-italic-sm">· 1M</span></p>
+            <div class="fx-period-tabs" data-chart="br">
+              <span class="fx-tab" data-period="5D">5D</span>
+              <span class="fx-tab is-active" data-period="1M">1M</span>
+              <span class="fx-tab" data-period="3M">3M</span>
+              <span class="fx-tab" data-period="6M">6M</span>
+              <span class="fx-tab" data-period="YTD">YTD</span>
+              <span class="fx-tab" data-period="1A">1A</span>
+            </div>
+          </div>
+          <div class="fx-chart-canvas-wrap"><canvas id="fxChartBr"></canvas></div>
+          <div class="fx-chart-foot">
+            <span class="fx-muted-italic-sm" id="fxChartBrMinmax">—</span>
+            <span class="fx-num fx-up fx-muted-italic-sm" id="fxChartBrVar">—</span>
+          </div>
+        </article>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Carga del nav -->
+  <script>
+    fetch("/static/components/nav.html")
+      .then((r) => r.text())
+      .then((html) => {
+        document.getElementById("navHost").innerHTML = html;
+        const s = document.createElement("script");
+        s.src = "/static/components/nav.js?v=hd80";
+        document.body.appendChild(s);
+      });
+  </script>
+
+  <script src="/static/fx.js?v=hd80"></script>
+</body>
+</html>

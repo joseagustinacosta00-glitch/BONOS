@@ -514,6 +514,12 @@ async def charts_demo() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "charts-demo.html", headers=_NO_CACHE_HEADERS)
 
 
+# ====== Marketerminal v2 — modulo FX (rediseño por modulos) ======
+@app.get("/mercado/fx")
+async def mercado_fx() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "fx.html", headers=_NO_CACHE_HEADERS)
+
+
 @app.get("/ai-demo")
 async def ai_demo() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "ai-demo.html", headers=_NO_CACHE_HEADERS)

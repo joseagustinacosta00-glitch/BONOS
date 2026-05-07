@@ -1,0 +1,98 @@
+<!--
+  Marketerminal — Navegación principal compartida
+  Insertar en cada página del módulo Mercado mediante fetch + innerHTML,
+  o renderizar server-side desde FastAPI con Jinja include.
+-->
+<nav class="mt-nav-main" id="mtNavMain">
+
+  <div class="mt-nav-brand">
+    <svg width="18" height="18" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="11" cy="11" r="10" fill="none" stroke="#C9A961" stroke-width="0.8"/>
+      <path d="M11 2 L11 20 M2 11 L20 11" stroke="#C9A961" stroke-width="0.5" opacity="0.5"/>
+      <circle cx="11" cy="11" r="3.5" fill="none" stroke="#C9A961" stroke-width="0.8"/>
+    </svg>
+    <span class="mt-nav-brand-name">Marketerminal</span>
+  </div>
+
+  <div class="mt-nav-item" data-menu="mercado">
+    Mercado<span class="mt-nav-caret">▾</span>
+    <div class="mt-nav-dropdown" data-dropdown="mercado">
+      <a class="mt-nav-dd-item" data-route="/mercado/general">General</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/fx">FX</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/futuros-dlk">Futuros y DLK</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/hard-dollar">Hard-Dollar</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/tasa-fija">Tasa Fija</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/cer">CER</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/tamar">TAMAR</a>
+      <a class="mt-nav-dd-item" data-route="/mercado/duales">Duales</a>
+    </div>
+  </div>
+
+  <div class="mt-nav-item" data-menu="tasas">
+    Tasas<span class="mt-nav-caret">▾</span>
+    <div class="mt-nav-dropdown" data-dropdown="tasas">
+      <a class="mt-nav-dd-item" data-route="/tasas/curva">Curva</a>
+      <a class="mt-nav-dd-item" data-route="/tasas/cauciones">Cauciones</a>
+      <a class="mt-nav-dd-item" data-route="/tasas/badlar">BADLAR</a>
+    </div>
+  </div>
+
+  <div class="mt-nav-item" data-menu="bcra">
+    BCRA<span class="mt-nav-caret">▾</span>
+    <div class="mt-nav-dropdown" data-dropdown="bcra">
+      <a class="mt-nav-dd-item" data-route="/bcra/reservas">Reservas</a>
+      <a class="mt-nav-dd-item" data-route="/bcra/base-monetaria">Base monetaria</a>
+      <a class="mt-nav-dd-item" data-route="/bcra/comunicados">Comunicados</a>
+    </div>
+  </div>
+
+  <div class="mt-nav-item" data-menu="calc">
+    Calc<span class="mt-nav-caret">▾</span>
+    <div class="mt-nav-dropdown" data-dropdown="calc">
+      <a class="mt-nav-dd-item" data-route="/calc/letras">Letras del Tesoro</a>
+      <a class="mt-nav-dd-item" data-route="/calc/vwap">VWAP</a>
+      <a class="mt-nav-dd-item" data-route="/calc/duration">Duration / Convexity</a>
+    </div>
+  </div>
+
+  <div class="mt-nav-item" data-menu="hist">
+    Histór.<span class="mt-nav-caret">▾</span>
+    <div class="mt-nav-dropdown" data-dropdown="hist">
+      <a class="mt-nav-dd-item" data-route="/historicos/series">Series</a>
+      <a class="mt-nav-dd-item" data-route="/historicos/archivo">Archivo de mercado</a>
+    </div>
+  </div>
+
+  <a class="mt-nav-item mt-nav-item--simple" data-route="/ia">IA</a>
+
+  <div class="mt-nav-spacer"></div>
+
+  <div class="mt-nav-quick">
+    <button class="mt-nav-quick-btn" data-quick="t01">T+0/T+1</button>
+    <button class="mt-nav-quick-btn" data-quick="charts">Gráficos</button>
+    <button class="mt-nav-quick-btn" data-quick="tradingview">TradingView</button>
+  </div>
+
+  <div class="mt-nav-user">
+    <span id="mtNavUser" class="mt-nav-user-name">—</span>
+    <span class="mt-nav-user-dot" title="Sesión activa"></span>
+  </div>
+
+</nav>
+
+<!-- Subnav: solo se renderiza si la sección actual tiene subsecciones -->
+<div class="mt-nav-sub" id="mtNavSub">
+  <span class="mt-nav-sub-crumb" id="mtNavSubCrumb">Mercado</span>
+  <!-- items inyectados por nav.js según la ruta -->
+</div>
+
+<!-- Modales globales (vacíos al inicio, llenados por nav.js) -->
+<div class="mt-modal-overlay" id="mtModalOverlay" hidden>
+  <div class="mt-modal" id="mtModal" role="dialog" aria-modal="true">
+    <div class="mt-modal-header">
+      <p class="mt-modal-title" id="mtModalTitle">—</p>
+      <button class="mt-modal-close" id="mtModalClose" aria-label="Cerrar">×</button>
+    </div>
+    <div class="mt-modal-body" id="mtModalBody"></div>
+  </div>
+</div>
