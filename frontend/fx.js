@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[fx] v=hd82 loaded");
+  console.log("[fx] v=hd83 loaded");
 
   // ============================================================
   // Estado global del módulo
@@ -693,15 +693,61 @@
     }
   }
 
+  // Fetcheamos los ratios T+0 y T+1 en paralelo y los componemos en un
+  // unico payload con t0 y t1 distintos. Si alguno falla, ese settlement
+  // queda vacio y la fila correspondiente muestra "—".
   async function fetchRatios() {
     try {
-      const r = await fetch("/api/fx/ratios", { credentials: "same-origin" });
-      if (!r.ok) return null;
-      return adaptRatiosResponse(await r.json());
+      const [r0, r1] = await Promise.all([
+        fetch("/api/fx/ratios?settlement=t0", { credentials: "same-origin" }),
+        fetch("/api/fx/ratios?settlement=t1", { credentials: "same-origin" }),
+      ]);
+      const j0 = r0.ok ? await r0.json() : null;
+      const j1 = r1.ok ? await r1.json() : null;
+      const t0 = adaptRatiosSingle(j0);
+      const t1 = adaptRatiosSingle(j1);
+      // El bloque "MEP/CCL" visible (usado en brechas) sale del settlement
+      // que tenga datos, priorizando T+1 (mas liquido).
+      const primary = (t1.mep && Object.keys(t1.mep).length) ? t1 : t0;
+      return {
+        mep: primary.mep,
+        ccl: primary.ccl,
+        t0: { mep: t0.mep, ccl: t0.ccl, canje: t0.canje },
+        t1: { mep: t1.mep, ccl: t1.ccl, canje: t1.canje },
+      };
     } catch (e) {
       console.error("[fx] ratios error", e);
       return null;
     }
+  }
+
+  // Convierte una respuesta de /api/fx/ratios?settlement=X (un solo settlement)
+  // a {mep, ccl, canje} con bid/last/offer.
+  function adaptRatiosSingle(json) {
+    if (!json || !Array.isArray(json.items)) return { mep: {}, ccl: {}, canje: {} };
+    const findByLabel = (lbl) => json.items.find(it => String(it.label || "").toUpperCase() === lbl);
+    const mepIt = findByLabel("MEP");
+    const cclIt = findByLabel("CCL");
+    const num = (v) => v != null && isFinite(v) ? Number(v) : null;
+    const mepLast  = mepIt ? num(mepIt.ratio)       : null;
+    const mepBid   = mepIt ? num(mepIt.ratio_bid)   : null;
+    const mepOffer = mepIt ? num(mepIt.ratio_offer) : null;
+    const cclLast  = cclIt ? num(cclIt.ratio)       : null;
+    const cclBid   = cclIt ? num(cclIt.ratio_bid)   : null;
+    const cclOffer = cclIt ? num(cclIt.ratio_offer) : null;
+    const canjeLast  = (mepLast != null && cclLast != null && mepLast !== 0)
+      ? ((cclLast / mepLast) - 1) * 100 : null;
+    const canjeBid   = (mepOffer != null && cclBid != null && mepOffer !== 0)
+      ? ((cclBid / mepOffer) - 1) * 100 : null;
+    const canjeOffer = (mepBid != null && cclOffer != null && mepBid !== 0)
+      ? ((cclOffer / mepBid) - 1) * 100 : null;
+    const mepBlock = (mepLast != null || mepBid != null || mepOffer != null)
+      ? { bid: mepBid, last: mepLast, offer: mepOffer } : {};
+    const cclBlock = (cclLast != null || cclBid != null || cclOffer != null)
+      ? { bid: cclBid, last: cclLast, offer: cclOffer } : {};
+    const canjeBlock = (canjeLast != null || canjeBid != null || canjeOffer != null)
+      ? { bid: canjeBid, last: canjeLast, offer: canjeOffer } : {};
+    return { mep: mepBlock, ccl: cclBlock, canje: canjeBlock };
   }
 
   async function fetchSnapshot() {
@@ -870,9 +916,10 @@
     fetchChartBr();
     refreshAverages();
 
-    // Polling: snapshot cada 1s, promedios cada 30s
+    // Polling: snapshot cada 1s, promedios cada 30s, charts cada 30s
     setInterval(fetchSnapshot, 1000);
     setInterval(refreshAverages, 30000);
+    setInterval(() => { fetchChartTc(); fetchChartBr(); }, 30000);
   }
 
   if (document.readyState === "loading") {

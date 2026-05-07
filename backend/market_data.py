@@ -37,6 +37,11 @@ class MarketDataService:
         self._futures_provider_to_symbol: dict[str, str] = {}
         self._spot_provider_to_symbol: dict[str, str] = {}
         self._spot_quotes_dict: dict[str, dict[str, Any]] = {}
+        # Cotizaciones T+0 dedicadas para bonos FX (AL30, AL30D, AL30C). El
+        # default _quotes guarda la version T+1 (por la subscripcion default
+        # con rofex_settlement). Para diferenciar T+0/T+1 en la tabla del modulo
+        # FX necesitamos esta segunda fuente.
+        self._fx_bonds_t0: dict[str, dict[str, Any]] = {}
         self._last_tick_ts: float | None = None
         self._build_provider_symbol_map()
 
@@ -368,6 +373,16 @@ class MarketDataService:
         order_index = {sym: i for i, sym in enumerate(self.ALLOWED_DLR_SYMBOLS)}
         quotes.sort(key=lambda q: order_index.get(str(q.get("symbol") or ""), 9999))
         return quotes
+
+    def fx_bond_quote(self, symbol: str, settlement: str = "t1") -> dict[str, Any] | None:
+        """Devuelve la cotizacion del bono FX (AL30/AL30D/AL30C) para el
+        settlement pedido. T+1 cae al _quotes default. T+0 usa _fx_bonds_t0."""
+        with self._lock:
+            if settlement == "t0":
+                q = self._fx_bonds_t0.get(symbol)
+                return dict(q) if q else None
+            q = self._quotes.get(symbol)
+            return dict(q) if q else None
 
     def caucion_quotes(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -848,6 +863,14 @@ class MarketDataService:
                 current = self._futures_quotes[local_symbol]
             elif category == "spot":
                 current = self._spot_quotes_dict[local_symbol]
+            elif category == "fx_bond_t0":
+                # Cotizacion T+0 dedicada para bonos FX (AL30/AL30D/AL30C)
+                current = self._fx_bonds_t0.setdefault(local_symbol, {
+                    "symbol": local_symbol,
+                    "settlement": "t0",
+                    "category": "fx_bond_t0",
+                    "currency": "ARS",
+                })
             else:
                 current = self._quotes[local_symbol]
             # Spot priority: LA -> IV (index value, p.ej. DLR/SPOT en LIVE) -> CL.
@@ -950,9 +973,19 @@ class MarketDataService:
             settlement=settlement or self.settings.rofex_settlement,
         )
 
+    # Bonos usados para sintetizar MEP/CCL en el modulo FX. Se subscriben
+    # tanto en T+1 (default, via _quotes) como en T+0 (via _fx_bonds_t0).
+    FX_BOND_SYMBOLS: tuple[str, ...] = ("AL30", "AL30D", "AL30C")
+
     def _build_provider_symbol_map(self) -> None:
         for symbol in TICKER_SYMBOLS:
             self._rofex_to_quote[self._rofex_symbol(symbol)] = ("bond", symbol, None)
+        # T+0 dedicado para los bonos FX (subscripcion adicional al default T+1)
+        for symbol in self.FX_BOND_SYMBOLS:
+            t0_provider = self._rofex_symbol(symbol, self.settings.rofex_settlement_t0)
+            t1_provider = self._rofex_symbol(symbol)
+            if t0_provider != t1_provider:
+                self._rofex_to_quote[t0_provider] = ("fx_bond_t0", symbol, "t0")
         for settlement_key, settlement_label in self._lecap_settlements().items():
             for ticker in LECAP_TICKERS:
                 self._rofex_to_quote[self._rofex_symbol(ticker, settlement_label)] = (

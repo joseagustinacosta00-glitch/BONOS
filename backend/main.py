@@ -983,13 +983,11 @@ async def market_futures(as_of_date: date | None = None) -> dict:
     }
 
 
-def _compute_fx_ratios_payload() -> dict:
+def _compute_fx_ratios_payload(settlement: str = "t1") -> dict:
     """Logica compartida entre /api/fx/ratios y la captura intraday.
-    Devuelve { source, status, updated_at, items: [...] }.
+    Devuelve { source, status, updated_at, settlement, items: [...] }.
+    settlement: 't1' (default) o 't0'. Determina que cotizacion del bono usar.
     """
-    snapshot = market.snapshot()
-    by_symbol = {q.get("symbol"): q for q in snapshot.get("quotes", [])}
-
     pairs = [
         ("AL30", "AL30D", "MEP"),
         ("AL30", "AL30C", "CCL"),
@@ -1006,8 +1004,8 @@ def _compute_fx_ratios_payload() -> dict:
 
     items = []
     for ars_symbol, fx_symbol, label in pairs:
-        ars_quote = by_symbol.get(ars_symbol)
-        fx_quote = by_symbol.get(fx_symbol)
+        ars_quote = market.fx_bond_quote(ars_symbol, settlement)
+        fx_quote  = market.fx_bond_quote(fx_symbol,  settlement)
         if not ars_quote or not fx_quote:
             continue
         ars_last  = ars_quote.get("last")
@@ -1042,14 +1040,19 @@ def _compute_fx_ratios_payload() -> dict:
         "source": market.settings.market_source,
         "status": market.status,
         "updated_at": now_argentina_iso(),
+        "settlement": settlement,
         "items": items,
     }
 
 
 @app.get("/api/fx/ratios")
-async def fx_ratios() -> dict:
-    """Calcula ratios MEP/CCL desde el snapshot actual."""
-    return _compute_fx_ratios_payload()
+async def fx_ratios(settlement: str = "t1") -> dict:
+    """Calcula ratios MEP/CCL desde el snapshot actual.
+    settlement: 't1' (default, contado 24hs) o 't0' (contado inmediato).
+    """
+    if settlement not in ("t0", "t1"):
+        raise HTTPException(status_code=422, detail="settlement debe ser t0 o t1")
+    return _compute_fx_ratios_payload(settlement=settlement)
 
 
 @app.get("/api/fx/averages")
