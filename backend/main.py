@@ -481,8 +481,9 @@ async def startup() -> None:
     # Auto-backfill desde historical_data al arrancar. Idempotente (INSERT OR REPLACE),
     # corre rapido (una sola query y un loop por fecha). Asegura que los datos historicos
     # de AL30 esten reflejados en fx_snapshots aun si el usuario no dispara /api/fx/backfill.
+    # Tambien jala A3500 historico desde BCRA para tener denominador en brechas pasadas.
     try:
-        stats = fx_history.backfill_from_historical(settlement="t1")
+        stats = fx_history.backfill_from_historical(settlement="t1", bcra_client=bcra)
         log.info("fx_history: auto-backfill startup (t1) = %s", stats)
     except Exception as exc:
         log.exception("fx_history: auto-backfill startup fallo: %s", exc)
@@ -1104,7 +1105,7 @@ async def fx_backfill(request: Request, settlement: str = "t1") -> dict:
     Solo admin para evitar abuso (la operacion lee toda la tabla).
     Param settlement: 't0' o 't1' (default t1)."""
     _require_admin(request)
-    stats = fx_history.backfill_from_historical(settlement=settlement)
+    stats = fx_history.backfill_from_historical(settlement=settlement, bcra_client=bcra)
     return {"ok": True, "settlement": settlement, **stats}
 
 
@@ -2577,7 +2578,7 @@ async def upload_historical_data(
         try:
             base_ticker = _normalize_base_ticker(ticker).upper()
             if normalized_metric == "dirty_price" and base_ticker in ("AL30", "AL30D", "AL30C"):
-                stats = fx_history.backfill_from_historical()
+                stats = fx_history.backfill_from_historical(bcra_client=bcra)
                 import logging
                 logging.getLogger(__name__).info(
                     "[fx_history] backfill auto-disparado tras upload %s: %s", base_ticker, stats

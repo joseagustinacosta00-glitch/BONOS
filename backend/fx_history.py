@@ -159,14 +159,27 @@ class FxHistoryStore:
         """Devuelve serie de brecha para Chart.
         op: 'spread' | 'relativo'
         num/den: 'MEP' | 'CCL' | 'Spot'
-        Devuelve serie computada en SQL: spread = num - den, relativo = num/den.
+        Cuando den='Spot':
+          - Para fechas pasadas (DATE(ts) < hoy): usa a3500 como denominador
+          - Para hoy: usa spot live
+        Esto evita que el historial quede vacio (la captura intraday recien
+        empezo, los snapshots viejos del backfill solo tienen a3500/AL30).
+        Relativo se devuelve YA en porcentaje: ((num/den) - 1) * 100.
         """
         col_num = self._tc_column(num, "last") or self._spot_column(num)
-        col_den = self._tc_column(den, "last") or self._spot_column(den)
-        if not col_num or not col_den:
+        if not col_num:
             return {"series": [], "min": None, "max": None, "variation": None}
-        # Expresion de calculo
-        # Relativo se devuelve YA en porcentaje: ((num/den) - 1) * 100
+
+        # Construir denominador con switch a3500/spot segun fecha
+        den_l = (den or "").lower()
+        if den_l == "spot":
+            today_str = _now().strftime("%Y-%m-%d")
+            col_den = f"(CASE WHEN substr(ts, 1, 10) = '{today_str}' THEN spot ELSE a3500 END)"
+        else:
+            col_den = self._tc_column(den, "last") or self._spot_column(den)
+            if not col_den:
+                return {"series": [], "min": None, "max": None, "variation": None}
+
         if op == "spread":
             expr = f"({col_num} - {col_den})"
         elif op == "relativo":
@@ -175,7 +188,10 @@ class FxHistoryStore:
             return {"series": [], "min": None, "max": None, "variation": None}
         cutoff = self._period_cutoff(period)
         bucket_seconds = self._bucket_seconds(period)
-        return self._query_bucketed(expr, cutoff, bucket_seconds, where_extra=f"{col_num} IS NOT NULL AND {col_den} IS NOT NULL")
+        return self._query_bucketed(
+            expr, cutoff, bucket_seconds,
+            where_extra=f"{col_num} IS NOT NULL AND {col_den} IS NOT NULL",
+        )
 
     def get_value_at(
         self,
@@ -214,9 +230,17 @@ class FxHistoryStore:
                 return {"value": None, "ts": None, "requested": at_iso, "error": "campo no soportado"}
         elif kind == "brecha":
             col_num = self._tc_column(num or "", "last") or self._spot_column(num or "")
-            col_den = self._tc_column(den or "", "last") or self._spot_column(den or "")
-            if not col_num or not col_den:
+            if not col_num:
                 return {"value": None, "ts": None, "requested": at_iso, "error": "leg invalido"}
+            # Mismo switch que get_brecha_history: a3500 historico, spot hoy
+            den_l = (den or "").lower()
+            if den_l == "spot":
+                today_str = _now().strftime("%Y-%m-%d")
+                col_den = f"(CASE WHEN substr(ts, 1, 10) = '{today_str}' THEN spot ELSE a3500 END)"
+            else:
+                col_den = self._tc_column(den or "", "last") or self._spot_column(den or "")
+                if not col_den:
+                    return {"value": None, "ts": None, "requested": at_iso, "error": "leg invalido"}
             if op == "spread":
                 expr = f"({col_num} - {col_den})"
             elif op == "relativo":
@@ -243,7 +267,7 @@ class FxHistoryStore:
             "requested": at_iso,
         }
 
-    def backfill_from_historical(self, settlement: str = "t1") -> dict[str, int]:
+    def backfill_from_historical(self, settlement: str = "t1", bcra_client: Any = None) -> dict[str, int]:
         """Lee historical_data y deriva MEP/CCL para cada fecha disponible
         cuando hay AL30 (pesos), AL30/AL30D (usd/mep) y/o AL30C (cable).
         Inserta los puntos derivados en fx_snapshots con ts = mediodia local.
@@ -252,9 +276,26 @@ class FxHistoryStore:
         - tickers separados AL30 / AL30D / AL30C con price_market='unspecified'
         Filtra por settlement (t0 o t1) para evitar mezclar plazos en el mismo
         snapshot. Default 't1' (estandar para historico).
-        Devuelve estadisticas: { dates_seen, inserted, skipped }.
+        Si bcra_client se provee, ademas pobla a3500 por fecha desde la serie
+        usd_mayorista_a3500 (clave para el calculo de brechas historicas).
+        Devuelve estadisticas: { dates_seen, inserted, skipped, a3500_filled }.
         """
         settlement = settlement if settlement in ("t0", "t1") else "t1"
+
+        # Pull A3500 historico desde BCRA (si esta disponible) y armar map por fecha.
+        a3500_by_date: dict[str, float] = {}
+        if bcra_client is not None:
+            try:
+                payload = bcra_client.get_series("usd_mayorista_a3500")
+                for p in payload.get("data") or []:
+                    d = str(p.get("date") or "")
+                    v = p.get("value")
+                    if d and v is not None:
+                        try: a3500_by_date[d] = float(v)
+                        except (TypeError, ValueError): pass
+            except Exception:
+                logger.exception("[fx_history] backfill: no se pudo cargar A3500 de BCRA")
+
         with closing(self._connect()) as conn:
             rows = conn.execute(
                 """
@@ -296,8 +337,12 @@ class FxHistoryStore:
 
         inserted = 0
         skipped = 0
-        for date_str in sorted(by_date.keys()):
-            b = by_date[date_str]
+        a3500_filled = 0
+        # Tambien insertamos snapshots solo de A3500 para fechas donde hay BCRA pero no AL30,
+        # asi el grafico de A3500 historico tambien queda disponible.
+        all_dates = set(by_date.keys()) | set(a3500_by_date.keys())
+        for date_str in sorted(all_dates):
+            b = by_date.get(date_str, {})
             pesos = b.get("pesos")
             usd   = b.get("usd")
             cable = b.get("cable")
@@ -306,13 +351,14 @@ class FxHistoryStore:
             canje_last = None
             if mep_last is not None and ccl_last is not None and mep_last != 0:
                 canje_last = ((ccl_last / mep_last) - 1) * 100
-            if mep_last is None and ccl_last is None:
+            a3500_val = a3500_by_date.get(date_str)
+            if mep_last is None and ccl_last is None and a3500_val is None:
                 skipped += 1
                 continue
             # Timestamp = mediodia local del dia historico
             ts = f"{date_str}T12:00:00"
             snap = FxSnapshot(
-                ts=ts, spot=None, a3500=None,
+                ts=ts, spot=None, a3500=a3500_val,
                 mep_bid=None, mep_last=mep_last, mep_offer=None,
                 ccl_bid=None, ccl_last=ccl_last, ccl_offer=None,
                 canje_last=canje_last,
@@ -320,9 +366,15 @@ class FxHistoryStore:
             try:
                 self.insert(snap)
                 inserted += 1
+                if a3500_val is not None: a3500_filled += 1
             except Exception:
                 skipped += 1
-        return {"dates_seen": len(by_date), "inserted": inserted, "skipped": skipped}
+        return {
+            "dates_seen": len(all_dates),
+            "inserted": inserted,
+            "skipped": skipped,
+            "a3500_filled": a3500_filled,
+        }
 
     def cleanup(self) -> int:
         """Borra snapshots mas viejos que RETENTION_DAYS. Devuelve cantidad borrada."""
