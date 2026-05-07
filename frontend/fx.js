@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[fx] v=hd81 loaded");
+  console.log("[fx] v=hd82 loaded");
 
   // ============================================================
   // Estado global del módulo
@@ -153,20 +153,35 @@
       };
     }
 
-    // Caso D: Marketerminal v1 — items: [{ label: "MEP"|"CCL", ratio }]
+    // Caso D: Marketerminal v1 — items: [{ label: "MEP"|"CCL", ratio, ratio_bid, ratio_offer, ... }]
     if (Array.isArray(raw.items)) {
       const findByLabel = (lbl) => raw.items.find(it => String(it.label || "").toUpperCase() === lbl);
       const mepIt = findByLabel("MEP");
       const cclIt = findByLabel("CCL");
-      const mepRatio = mepIt && mepIt.ratio != null ? Number(mepIt.ratio) : null;
-      const cclRatio = cclIt && cclIt.ratio != null ? Number(cclIt.ratio) : null;
-      // Canje implicito = (CCL/MEP - 1) * 100, en pp
-      const canjePp = (mepRatio != null && cclRatio != null && mepRatio !== 0)
-        ? ((cclRatio / mepRatio) - 1) * 100
-        : null;
-      const mepBlock   = mepRatio != null ? { bid: null, last: mepRatio, offer: null } : {};
-      const cclBlock   = cclRatio != null ? { bid: null, last: cclRatio, offer: null } : {};
-      const canjeBlock = canjePp  != null ? { bid: null, last: canjePp,  offer: null } : {};
+      const num = (v) => v != null && isFinite(v) ? Number(v) : null;
+
+      const mepLast  = mepIt ? num(mepIt.ratio)       : null;
+      const mepBid   = mepIt ? num(mepIt.ratio_bid)   : null;  // BID AL30 / OFFER AL30D
+      const mepOffer = mepIt ? num(mepIt.ratio_offer) : null;  // OFFER AL30 / BID AL30D
+      const cclLast  = cclIt ? num(cclIt.ratio)       : null;
+      const cclBid   = cclIt ? num(cclIt.ratio_bid)   : null;  // BID AL30 / OFFER AL30C
+      const cclOffer = cclIt ? num(cclIt.ratio_offer) : null;  // OFFER AL30 / BID AL30C
+
+      // Canje implicito = (CCL/MEP - 1) * 100, en pp. Lo armamos para last/bid/offer si hay data.
+      const canje = (n, d) => (n != null && d != null && d !== 0) ? ((n / d) - 1) * 100 : null;
+
+      const mepBlock = (mepLast != null || mepBid != null || mepOffer != null)
+        ? { bid: mepBid, last: mepLast, offer: mepOffer } : {};
+      const cclBlock = (cclLast != null || cclBid != null || cclOffer != null)
+        ? { bid: cclBid, last: cclLast, offer: cclOffer } : {};
+      const canjeBlock = (mepLast != null && cclLast != null)
+        ? {
+            bid:   canje(cclBid,   mepOffer),  // CCL bid / MEP offer (peor caso comprador)
+            last:  canje(cclLast,  mepLast),
+            offer: canje(cclOffer, mepBid),    // CCL offer / MEP bid (mejor caso vendedor)
+          }
+        : {};
+
       // Nota: el endpoint actual no diferencia T+0 de T+1 — usamos los mismos
       // valores en ambas filas hasta que tengamos data settlement-specific.
       return {

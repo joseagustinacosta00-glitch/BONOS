@@ -934,28 +934,47 @@ async def fx_ratios() -> dict:
         ("AL30", "AL30C", "CCL"),
     ]
 
+    def _safe_div(a: object, b: object) -> float | None:
+        try:
+            an, bn = float(a), float(b)
+            if bn == 0:
+                return None
+            return an / bn
+        except (TypeError, ValueError):
+            return None
+
     items = []
     for ars_symbol, fx_symbol, label in pairs:
         ars_quote = by_symbol.get(ars_symbol)
         fx_quote = by_symbol.get(fx_symbol)
         if not ars_quote or not fx_quote:
             continue
-        ars_last = ars_quote.get("last")
-        fx_last = fx_quote.get("last")
-        ratio = None
-        if ars_last is not None and fx_last not in (None, 0):
-            try:
-                ratio = float(ars_last) / float(fx_last)
-            except (TypeError, ValueError, ZeroDivisionError):
-                ratio = None
+        ars_last  = ars_quote.get("last")
+        ars_bid   = ars_quote.get("bid")
+        ars_offer = ars_quote.get("ask")
+        fx_last   = fx_quote.get("last")
+        fx_bid    = fx_quote.get("bid")
+        fx_offer  = fx_quote.get("ask")
+        # Para sintetizar el ratio MEP/CCL al BID (lado comprador de USD) se
+        # vende AL30 (al bid) y se compra AL30D/C (al offer). Para el OFFER
+        # (lado vendedor de USD) viceversa.
+        ratio       = _safe_div(ars_last,  fx_last)
+        ratio_bid   = _safe_div(ars_bid,   fx_offer)
+        ratio_offer = _safe_div(ars_offer, fx_bid)
         items.append({
             "name": f"{ars_symbol}/{fx_symbol}",
             "label": label,
             "ars_symbol": ars_symbol,
             "ars_last": ars_last,
+            "ars_bid": ars_bid,
+            "ars_offer": ars_offer,
             "fx_symbol": fx_symbol,
             "fx_last": fx_last,
+            "fx_bid": fx_bid,
+            "fx_offer": fx_offer,
             "ratio": ratio,
+            "ratio_bid": ratio_bid,
+            "ratio_offer": ratio_offer,
             "updated_at": ars_quote.get("updated_at") or fx_quote.get("updated_at"),
         })
     return {

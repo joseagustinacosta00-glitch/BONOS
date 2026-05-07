@@ -5,6 +5,13 @@
 
 * { box-sizing: border-box; }
 
+/* Stack sans-serif para numeros: legible, tabular, neutro.
+   Las labels editoriales siguen en serif (Georgia / Cormorant).
+   Esto hace que los precios se lean mucho mejor a 100% sin necesidad de zoom. */
+:root {
+  --mt-numeric: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -14,10 +21,15 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-.fx-num { font-variant-numeric: tabular-nums; }
+/* TODOS los valores numericos usan sans-serif tabular para legibilidad */
+.fx-num {
+  font-family: var(--mt-numeric);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
 
 .fx-page {
-  padding: 14px 18px 22px;
+  padding: 10px 14px 18px;
   width: 100%;
   margin: 0 auto;
 }
@@ -98,12 +110,12 @@ html, body {
 .fx-card {
   background: var(--mt-cream-card);
   border: 0.5px solid var(--mt-line-soft);
-  padding: 14px 16px;
+  padding: 12px 16px;
 }
 .fx-card-dark {
   background: var(--mt-green);
   color: var(--mt-cream-light);
-  padding: 16px 18px;
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -112,9 +124,9 @@ html, body {
 /* ---------- FILA 1 ---------- */
 .fx-row-1 {
   display: grid;
-  grid-template-columns: 1fr 0.78fr 1.95fr;
+  grid-template-columns: 1.1fr 0.85fr 2fr;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .fx-spot-head {
@@ -136,33 +148,32 @@ html, body {
   font-style: italic;
 }
 .fx-spot-value {
-  font-size: 28px;
-  font-weight: 400;
+  font-size: 38px;
+  font-weight: 600;
   margin: 8px 0 4px;
   color: var(--mt-cream);
-  letter-spacing: -1px;
+  letter-spacing: -0.8px;
   line-height: 1;
 }
 .fx-spot-delta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
+  gap: 8px;
+  font-size: 13px;
 }
-.fx-spot-delta span:first-child { font-style: italic; }
+.fx-spot-delta span:first-child { font-weight: 600; }
 .fx-spot-deltapct {
   color: var(--mt-muted-warm);
-  font-style: italic;
 }
 
 .fx-a3500-value {
-  font-size: 18px;
-  font-weight: 400;
+  font-size: 26px;
+  font-weight: 600;
   margin: 6px 0 4px;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.4px;
   line-height: 1;
 }
-.fx-a3500-value + .fx-num { font-size: 9px; margin: 3px 0 0; color: var(--mt-muted); }
+.fx-a3500-value + .fx-num { font-size: 11px; margin: 3px 0 0; color: var(--mt-muted); }
 
 /* ---------- BRECHAS ---------- */
 .fx-brechas { padding: 10px 14px; }
@@ -184,13 +195,14 @@ html, body {
   letter-spacing: 1.5px;
   text-transform: uppercase;
   color: var(--mt-overline);
-  margin: 0 0 3px;
+  margin: 0 0 4px;
 }
 .fx-brecha-cell-val {
-  font-size: 14px;
-  font-weight: 400;
+  font-size: 20px;
+  font-weight: 600;
   margin: 0;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.3px;
+  color: var(--mt-green-text);
 }
 .fx-brecha-cell-val.is-filtered {
   color: var(--mt-muted);
@@ -348,12 +360,12 @@ html, body {
 .fx-table--t1 { background: rgba(201, 169, 97, 0.04); }
 
 .fx-table th {
-  font-size: 8.5px;
+  font-size: 9px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
   color: var(--mt-overline);
-  font-weight: 400;
-  padding: 4px 6px;
+  font-weight: 600;
+  padding: 5px 8px;
   text-align: right;
 }
 .fx-table th.first { padding-left: 14px; text-align: left; }
@@ -365,29 +377,36 @@ html, body {
 }
 
 .fx-table td {
-  font-size: 11.5px;
-  padding: 7px 6px;
+  font-family: var(--mt-numeric);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 8px;
   border-top: 0.5px solid var(--mt-line-table);
   text-align: right;
   font-variant-numeric: tabular-nums;
+  color: var(--mt-green-text);
 }
 .fx-table td.first {
   padding-left: 14px;
+  font-family: var(--mt-serif);
+  font-size: 13px;
   font-style: italic;
+  font-weight: 400;
   text-align: left;
+  color: var(--mt-muted-darker);
 }
 .fx-table td.last { padding-right: 14px; }
 .fx-table td.prom {
   color: var(--mt-muted);
   border-left: 0.5px dashed var(--mt-line-soft);
 }
-.fx-table td.delta-up   { color: var(--mt-up); }
-.fx-table td.delta-down { color: var(--mt-down); }
+.fx-table td.delta-up   { color: var(--mt-up); font-weight: 600; }
+.fx-table td.delta-down { color: var(--mt-down); font-weight: 600; }
 .fx-table td .pct {
-  font-size: 10px;
-  font-style: italic;
-  opacity: 0.75;
-  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.65;
+  margin-left: 5px;
 }
 
 /* ---------- CHARTS ---------- */
