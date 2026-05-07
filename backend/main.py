@@ -24,6 +24,7 @@ from backend.auth import (
     SESSION_TTL,
     User as AuthUser,
 )
+from backend.fx_history import FxHistoryStore
 from backend.ai_tools import (
     build_basic_study_summary,
     calculate_ratio_points,
@@ -71,6 +72,8 @@ bcra = BcraClient(settings)
 storage = CalculatorStorage(ROOT_DIR / settings.app_db_path)
 auth_store = AuthStore(ROOT_DIR / settings.app_db_path)
 auth_store.initialize()
+fx_history = FxHistoryStore(ROOT_DIR / settings.app_db_path)
+fx_history.initialize()
 
 # Backup auto rate-limited: minimo 5 min entre backups despues de un write
 import time as _time_module
@@ -468,9 +471,20 @@ async def startup() -> None:
             import logging
             logging.getLogger(__name__).exception("market scheduler no arranco: %s", exc)
 
+    # Captura intraday de FX (Spot, A3500, MEP, CCL) cada 5s.
+    try:
+        fx_history.start_capture(market, bcra, _compute_fx_ratios_payload)
+        log.info("fx_history: captura intraday iniciada")
+    except Exception as exc:
+        log.exception("fx_history: capture no arranco: %s", exc)
+
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    try:
+        fx_history.stop()
+    except Exception:
+        pass
     if settings.market_history_enabled:
         try:
             await market_scheduler.stop()
@@ -969,9 +983,10 @@ async def market_futures(as_of_date: date | None = None) -> dict:
     }
 
 
-@app.get("/api/fx/ratios")
-async def fx_ratios() -> dict:
-    """Calcula ratios MEP/CCL desde el snapshot actual (precio ARS / precio USD o Cable)."""
+def _compute_fx_ratios_payload() -> dict:
+    """Logica compartida entre /api/fx/ratios y la captura intraday.
+    Devuelve { source, status, updated_at, items: [...] }.
+    """
     snapshot = market.snapshot()
     by_symbol = {q.get("symbol"): q for q in snapshot.get("quotes", [])}
 
@@ -1029,6 +1044,44 @@ async def fx_ratios() -> dict:
         "updated_at": now_argentina_iso(),
         "items": items,
     }
+
+
+@app.get("/api/fx/ratios")
+async def fx_ratios() -> dict:
+    """Calcula ratios MEP/CCL desde el snapshot actual."""
+    return _compute_fx_ratios_payload()
+
+
+@app.get("/api/fx/averages")
+async def fx_averages(window_minutes: int = 5) -> dict:
+    """Promedio simple de los snapshots intraday capturados en los ultimos N minutos.
+    Devuelve { t0: {mep, ccl, canje}, t1: {...} } (T+0 y T+1 con mismos valores
+    hasta que diferenciemos por settlement)."""
+    if window_minutes <= 0 or window_minutes > 24 * 60:
+        raise HTTPException(status_code=422, detail="window_minutes fuera de rango")
+    return fx_history.get_average(window_minutes)
+
+
+@app.get("/api/fx/history")
+async def fx_history_endpoint(
+    kind: str = "tc",
+    instr: str = "MEP",
+    field: str = "last",
+    op: str = "relativo",
+    num: str = "CCL",
+    den: str = "Spot",
+    period: str = "1M",
+) -> dict:
+    """Serie historica intraday + downsampling segun el periodo.
+    kind=tc:     usa instr (MEP|CCL|Canje) + field (bid|last|offer)
+    kind=brecha: usa op (spread|relativo) + num/den (MEP|CCL|Spot|A3500)
+    period: 5D | 1M | 3M | 6M | YTD | 1A
+    """
+    if kind == "tc":
+        return fx_history.get_tc_history(instr, field, period)
+    if kind == "brecha":
+        return fx_history.get_brecha_history(op, num, den, period)
+    raise HTTPException(status_code=422, detail="kind invalido")
 
 
 @app.get("/api/market/cauciones")
