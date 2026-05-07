@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketerminal · Cauciones</title>
+  <link rel="stylesheet" href="/static/components/nav.css?v=hd82" />
+  <link rel="stylesheet" href="/static/fx.css?v=hd82" />
+  <link rel="stylesheet" href="/static/tasas_cauciones.css?v=hd82" />
+</head>
+<body>
+
+  <div id="navHost"></div>
+
+  <main class="fx-page">
+
+    <header class="fx-header">
+      <div class="fx-header-title">
+        <h1>Cauciones</h1>
+        <span class="fx-muted-italic">Tasas por plazo · BYMA</span>
+      </div>
+      <div class="fx-header-meta">
+        <span id="cauDate">—</span>
+        <span class="fx-dot-gold">·</span>
+        <span id="cauClock" class="fx-num">—</span>
+        <span class="fx-live"><span class="dot"></span><span>en vivo</span></span>
+      </div>
+    </header>
+    <hr class="fx-rule" />
+
+    <section class="cau-row-1">
+      <article class="fx-card-dark">
+        <p class="fx-spot-label">Tasa más corta</p>
+        <p id="cauShortRate" class="fx-num fx-spot-value">—</p>
+        <p id="cauShortMeta" class="fx-num fx-spot-deltapct">—</p>
+      </article>
+
+      <article class="fx-card">
+        <p class="fx-overline">Plazos disponibles</p>
+        <p id="cauTermsCount" class="fx-num cau-big-num">—</p>
+        <p id="cauUpdatedAt" class="fx-num fx-muted-italic-sm">—</p>
+      </article>
+
+      <article class="fx-card cau-summary">
+        <p class="fx-overline">Curva resumen</p>
+        <div class="cau-summary-grid" id="cauSummaryGrid"></div>
+      </article>
+    </section>
+
+    <section class="cau-row-2">
+      <article class="fx-card fx-table-card">
+        <header class="fx-table-head">
+          <p class="fx-overline">Tabla completa</p>
+          <span class="fx-muted-italic-sm" id="cauTableMeta">—</span>
+        </header>
+        <hr class="fx-rule-soft" />
+        <div class="cau-table-wrap">
+          <table class="fx-table cau-table" id="cauTable">
+            <thead>
+              <tr>
+                <th class="first">Plazo</th>
+                <th>Bid</th>
+                <th>Last</th>
+                <th>Offer</th>
+                <th class="last">Hora</th>
+              </tr>
+            </thead>
+            <tbody id="cauTableBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+  </main>
+
+  <script>
+    fetch("/static/components/nav.html")
+      .then((r) => r.text())
+      .then((html) => {
+        document.getElementById("navHost").innerHTML = html;
+        const s = document.createElement("script");
+        s.src = "/static/components/nav.js?v=hd82";
+        document.body.appendChild(s);
+      });
+  </script>
+
+  <script src="/static/tasas_cauciones.js?v=hd82"></script>
+</body>
+</html>

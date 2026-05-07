@@ -4308,6 +4308,24 @@ document.querySelectorAll("[data-view]").forEach((button) => {
   button.addEventListener("click", () => setView(button.dataset.view));
 });
 
+// Lee query params del rediseño v2 (?legacy_view=...&legacy_tab=...&legacy_calc=...)
+// para que los redirects desde el nav nuevo abran la tab correcta.
+(function _applyLegacyQueryParams() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const view = p.get("legacy_view");
+    const tab = p.get("legacy_tab");
+    const calc = p.get("legacy_calc");
+    if (view) setView(view);
+    if (tab && typeof setMarketCategory === "function") {
+      try { setMarketCategory(tab); } catch (_) {}
+    }
+    if (calc && typeof setBondModel === "function") {
+      try { setBondModel(calc); } catch (_) {}
+    }
+  } catch (_) {}
+})();
+
 tplusForm.addEventListener("submit", (event) => event.preventDefault());
 tplusDirection.addEventListener("change", () => calculateTplus().catch(() => setTplusStatus("error", "Sin calculo")));
 tplusPrice.addEventListener("input", () => calculateTplus().catch(() => setTplusStatus("error", "Sin calculo")));

@@ -514,10 +514,56 @@ async def charts_demo() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "charts-demo.html", headers=_NO_CACHE_HEADERS)
 
 
-# ====== Marketerminal v2 — modulo FX (rediseño por modulos) ======
+# ====== Marketerminal v2 — rediseño por modulos ======
+# Las rutas que ya tienen pagina v2 sirven el HTML nuevo.
+# Las que todavia no, redirigen al / (app vieja) para no romper nada.
+
 @app.get("/mercado/fx")
 async def mercado_fx() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "fx.html", headers=_NO_CACHE_HEADERS)
+
+
+@app.get("/tasas/cauciones")
+async def tasas_cauciones_page() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "tasas_cauciones.html", headers=_NO_CACHE_HEADERS)
+
+
+@app.get("/bcra")
+async def bcra_page() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "bcra.html", headers=_NO_CACHE_HEADERS)
+
+
+# Redirects al / viejo para todo el resto del nav (no rompe funcionalidad).
+_LEGACY_REDIRECTS = {
+    "/mercado/general":       "/?legacy_view=market&legacy_tab=general",
+    "/mercado/futuros-dlk":   "/?legacy_view=market&legacy_tab=futuros_dlk",
+    "/mercado/hard-dollar":   "/?legacy_view=market&legacy_tab=general",
+    "/mercado/tasa-fija":     "/?legacy_view=market",
+    "/mercado/cer":           "/?legacy_view=bcra",
+    "/mercado/tamar":         "/?legacy_view=calculators&legacy_calc=tamar",
+    "/mercado/duales":        "/?legacy_view=calculators&legacy_calc=dual",
+    "/tasas/curva":           "/?legacy_view=rates",
+    "/tasas/badlar":          "/?legacy_view=rates",
+    "/bcra/reservas":         "/?legacy_view=bcra&legacy_bcra=reservas",
+    "/bcra/base-monetaria":   "/?legacy_view=bcra&legacy_bcra=base",
+    "/bcra/comunicados":      "/?legacy_view=bcra",
+    "/calc/letras":           "/?legacy_view=calculators&legacy_calc=lecap",
+    "/calc/vwap":             "/?legacy_view=calculators",
+    "/calc/duration":         "/?legacy_view=calculators",
+    "/historicos/series":     "/?legacy_view=historical",
+    "/historicos/archivo":    "/?legacy_view=historical",
+    "/ia":                    "/ai-demo",
+}
+
+
+def _make_legacy_redirect(target: str):
+    async def _handler() -> RedirectResponse:
+        return RedirectResponse(url=target, status_code=302)
+    return _handler
+
+
+for _path, _target in _LEGACY_REDIRECTS.items():
+    app.add_api_route(_path, _make_legacy_redirect(_target), methods=["GET"])
 
 
 @app.get("/ai-demo")

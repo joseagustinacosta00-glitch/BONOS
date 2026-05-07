@@ -1,0 +1,59 @@
+/* Cauciones — extiende fx.css con layout especifico */
+.cau-row-1 {
+  display: grid;
+  grid-template-columns: 1.1fr 0.85fr 2fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+@media (max-width: 1100px) {
+  .cau-row-1 { grid-template-columns: 1fr 1fr; }
+  .cau-row-1 > article:nth-child(3) { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .cau-row-1 { grid-template-columns: 1fr; }
+  .cau-row-1 > article:nth-child(3) { grid-column: auto; }
+}
+
+.cau-summary { padding: 12px 16px; }
+.cau-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 6px 14px;
+  margin-top: 4px;
+}
+.cau-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cau-summary-cell-term {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mt-overline);
+}
+.cau-summary-cell-rate {
+  font-family: var(--mt-numeric);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+  color: var(--mt-green-text);
+}
+
+.cau-big-num {
+  font-size: 26px;
+  font-weight: 600;
+  margin: 6px 0 4px;
+  letter-spacing: -0.4px;
+  line-height: 1;
+}
+
+.cau-row-2 { margin-bottom: 10px; }
+.cau-table-wrap {
+  max-height: 480px;
+  overflow-y: auto;
+}
+.cau-table tbody tr:hover {
+  background: var(--mt-gold-soft);
+}

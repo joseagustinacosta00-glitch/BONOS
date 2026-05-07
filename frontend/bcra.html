@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketerminal · Datos BCRA</title>
+  <link rel="stylesheet" href="/static/components/nav.css?v=hd82" />
+  <link rel="stylesheet" href="/static/fx.css?v=hd82" />
+  <link rel="stylesheet" href="/static/bcra.css?v=hd82" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <div id="navHost"></div>
+
+  <main class="fx-page">
+
+    <header class="fx-header">
+      <div class="fx-header-title">
+        <h1>Datos BCRA</h1>
+        <span class="fx-muted-italic">Series de Estadísticas Monetarias</span>
+      </div>
+      <div class="fx-header-meta">
+        <span id="bcraDate">—</span>
+        <span class="fx-dot-gold">·</span>
+        <span id="bcraClock" class="fx-num">—</span>
+      </div>
+    </header>
+    <hr class="fx-rule" />
+
+    <section class="bcra-controls">
+      <div class="fx-chip-bar" id="bcraSeriesChips">
+        <span class="fx-chip is-active" data-dim="series" data-val="cer">CER</span>
+        <span class="fx-chip" data-dim="series" data-val="tamar_private_banks_na">TAMAR</span>
+        <span class="fx-chip" data-dim="series" data-val="usd_mayorista_a3500">A3500</span>
+      </div>
+      <div class="fx-period-tabs" id="bcraPeriodTabs">
+        <span class="fx-tab" data-period="30">30D</span>
+        <span class="fx-tab is-active" data-period="90">3M</span>
+        <span class="fx-tab" data-period="180">6M</span>
+        <span class="fx-tab" data-period="365">1A</span>
+        <span class="fx-tab" data-period="730">2A</span>
+        <span class="fx-tab" data-period="0">Todo</span>
+      </div>
+    </section>
+
+    <section class="bcra-row-1">
+      <article class="fx-card-dark">
+        <p class="fx-spot-label" id="bcraCardLabel">Último</p>
+        <p id="bcraLastValue" class="fx-num fx-spot-value">—</p>
+        <p id="bcraLastMeta" class="fx-num fx-spot-deltapct">—</p>
+      </article>
+
+      <article class="fx-card">
+        <p class="fx-overline">Variación período</p>
+        <p id="bcraDelta" class="fx-num bcra-big-num">—</p>
+        <p id="bcraDeltaMeta" class="fx-num fx-muted-italic-sm">—</p>
+      </article>
+
+      <article class="fx-card">
+        <p class="fx-overline">Mín / Máx período</p>
+        <p id="bcraMinMax" class="fx-num bcra-big-num">— / —</p>
+        <p id="bcraSamplesCount" class="fx-num fx-muted-italic-sm">—</p>
+      </article>
+    </section>
+
+    <section class="bcra-row-2">
+      <article class="fx-card bcra-chart-card">
+        <header class="bcra-chart-head">
+          <p class="fx-overline" id="bcraChartTitle">Serie histórica</p>
+          <span class="fx-muted-italic-sm" id="bcraChartUnit">—</span>
+        </header>
+        <div class="bcra-chart-wrap">
+          <canvas id="bcraChart"></canvas>
+        </div>
+      </article>
+
+      <article class="fx-card bcra-table-card">
+        <header class="fx-table-head">
+          <p class="fx-overline">Últimos puntos</p>
+        </header>
+        <hr class="fx-rule-soft" />
+        <div class="bcra-table-wrap">
+          <table class="fx-table bcra-table" id="bcraTable">
+            <thead>
+              <tr>
+                <th class="first">Fecha</th>
+                <th class="last">Valor</th>
+              </tr>
+            </thead>
+            <tbody id="bcraTableBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+  </main>
+
+  <script>
+    fetch("/static/components/nav.html")
+      .then((r) => r.text())
+      .then((html) => {
+        document.getElementById("navHost").innerHTML = html;
+        const s = document.createElement("script");
+        s.src = "/static/components/nav.js?v=hd82";
+        document.body.appendChild(s);
+      });
+  </script>
+
+  <script src="/static/bcra.js?v=hd82"></script>
+</body>
+</html>
