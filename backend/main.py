@@ -478,6 +478,15 @@ async def startup() -> None:
     except Exception as exc:
         log.exception("fx_history: capture no arranco: %s", exc)
 
+    # Auto-backfill desde historical_data al arrancar. Idempotente (INSERT OR REPLACE),
+    # corre rapido (una sola query y un loop por fecha). Asegura que los datos historicos
+    # de AL30 esten reflejados en fx_snapshots aun si el usuario no dispara /api/fx/backfill.
+    try:
+        stats = fx_history.backfill_from_historical(settlement="t1")
+        log.info("fx_history: auto-backfill startup (t1) = %s", stats)
+    except Exception as exc:
+        log.exception("fx_history: auto-backfill startup fallo: %s", exc)
+
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
