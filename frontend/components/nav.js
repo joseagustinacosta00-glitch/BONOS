@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[nav] v=hd80 loaded");
+  console.log("[nav] v=hd81 loaded");
 
   // Map de subsecciones por menú principal
   const SUBSECTIONS = {
