@@ -3317,13 +3317,15 @@ def _pick_first_numeric_value(row: dict[str, object], selected_metric: str) -> o
         "settlement",
         "settlement type",
     }
+    is_volume_col = lambda nk: ("volume" in nk) or ("volumen" in nk) or nk.startswith("vol ")
+    candidates: list[tuple[int, object]] = []
     for key, value in row.items():
         normalized_key = _normalize_header(str(key))
         if normalized_key in ignored:
             continue
-        if normalized_key in {"volume", "volumen"} and selected_metric != "volume":
+        if is_volume_col(normalized_key) and selected_metric != "volume":
             continue
-        if selected_metric == "volume" and normalized_key not in {"volume", "volumen"}:
+        if selected_metric == "volume" and not is_volume_col(normalized_key):
             continue
         if value is None or str(value).strip() == "":
             continue
@@ -3331,8 +3333,20 @@ def _pick_first_numeric_value(row: dict[str, object], selected_metric: str) -> o
             _parse_float(value)
         except ValueError:
             continue
-        return value
-    return None
+        # Score: columnas con nombre de bono/precio puntean alto, el resto al final
+        score = 0
+        if any(t in normalized_key for t in ("al30", "gd30", "al29", "al35", "al38", "al41", "gd29", "gd35", "gd38", "gd41", "gd46")):
+            score = 100
+        elif "precio" in normalized_key or "price" in normalized_key:
+            score = 80
+        elif normalized_key in {"valor", "value"}:
+            score = 60
+        candidates.append((score, value))
+    if not candidates:
+        return None
+    # Mayor score primero; si empatan, gana el primero del archivo (orden estable)
+    candidates.sort(key=lambda c: -c[0])
+    return candidates[0][1]
 
 
 def _normalize_historical_metric(value: object | None) -> str | None:
