@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  console.log("[fx] v=hd83 loaded");
+  console.log("[fx] v=hd84 loaded");
 
   // ============================================================
   // Estado global del módulo
@@ -438,7 +438,8 @@
   function calcBrecha(numerador, denominador, op) {
     if (numerador == null || denominador == null) return null;
     if (op === "spread") return numerador - denominador;
-    if (op === "relativo") return denominador !== 0 ? numerador / denominador : null;
+    // Relativo: ((num/den) - 1) * 100 -> porcentaje listo para mostrar.
+    if (op === "relativo") return denominador !== 0 ? ((numerador / denominador) - 1) * 100 : null;
     return null;
   }
 
@@ -493,8 +494,10 @@
         </div>`;
       }
       const isPct = c.op === "relativo";
-      const sign  = c.op === "spread" ? (c.val >= 0 ? "+ " : "− ") : "";
-      const num   = isPct ? fmtAR(c.val, 4) : fmtAR(Math.abs(c.val), 2);
+      const sign  = c.val >= 0 ? "+ " : "− ";
+      const num   = isPct
+        ? `${fmtAR(Math.abs(c.val), 2)} %`
+        : fmtAR(Math.abs(c.val), 2);
       const unit  = isPct ? "" : `<span class="fx-brecha-unit">ARS</span>`;
       return `<div>
         <p class="fx-brecha-cell-label">${escapeHtml(c.label)}</p>
@@ -641,6 +644,8 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        // Hover en cualquier punto del eje X (no requiere apuntar al punto exacto)
+        interaction: { mode: "index", intersect: false },
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -649,10 +654,28 @@
             borderWidth: 0.5,
             titleColor: "#2A3528",
             bodyColor: "#6B6452",
-            titleFont: { family: "Georgia, serif", size: 11 },
-            bodyFont:  { family: "Georgia, serif", size: 11 },
-            padding: 8,
+            titleFont: { family: "Georgia, serif", size: 12, weight: "600" },
+            bodyFont:  { family: "-apple-system, BlinkMacSystemFont, sans-serif", size: 13, weight: "600" },
+            padding: 10,
             displayColors: false,
+            // Mostrar precio + hora en el tooltip
+            callbacks: {
+              title(ctx) {
+                if (!ctx.length) return "";
+                const idx = ctx[0].dataIndex;
+                const ds = ctx[0].chart.data.datasets[0];
+                const labels = ctx[0].chart.data.labels || [];
+                return labels[idx] || "";
+              },
+              label(ctx) {
+                const v = ctx.parsed.y;
+                if (v == null) return "—";
+                return Number(v).toLocaleString("es-AR", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 4,
+                });
+              },
+            },
           },
         },
         scales: {
@@ -920,6 +943,106 @@
     setInterval(fetchSnapshot, 1000);
     setInterval(refreshAverages, 30000);
     setInterval(() => { fetchChartTc(); fetchChartBr(); }, 30000);
+
+    initLookup();
+  }
+
+  // ============================================================
+  // Widget de busqueda de dato a un datetime
+  // ============================================================
+  function initLookup() {
+    const kind = document.getElementById("fxLookupKind");
+    const submit = document.getElementById("fxLookupSubmit");
+    if (!kind || !submit) return;
+
+    function syncFields() {
+      const k = kind.value;
+      document.querySelectorAll("[data-lookup-tc]").forEach((el) => el.hidden = k !== "tc");
+      document.querySelectorAll("[data-lookup-brecha]").forEach((el) => el.hidden = k !== "brecha");
+    }
+    kind.addEventListener("change", syncFields);
+    syncFields();
+
+    // Default fecha = hoy, hora = ahora
+    const dateEl = document.getElementById("fxLookupDate");
+    const timeEl = document.getElementById("fxLookupTime");
+    if (dateEl && !dateEl.value) {
+      const now = new Date();
+      dateEl.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+    }
+    if (timeEl && !timeEl.value) {
+      const now = new Date();
+      timeEl.value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    }
+
+    submit.addEventListener("click", performLookup);
+    // Enter en cualquier input dispara busqueda
+    document.querySelectorAll(".fx-lookup-form select, .fx-lookup-form input").forEach((el) => {
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter") performLookup(); });
+    });
+  }
+
+  async function performLookup() {
+    const kind = document.getElementById("fxLookupKind").value;
+    const date = document.getElementById("fxLookupDate").value;
+    const time = document.getElementById("fxLookupTime").value || "00:00";
+    const at = date ? `${date}T${time}:00` : null;
+
+    const params = new URLSearchParams({ kind });
+    if (at) params.set("at", at);
+    if (kind === "tc") {
+      params.set("instr", document.getElementById("fxLookupInstr").value);
+      params.set("field", document.getElementById("fxLookupField").value);
+    } else {
+      params.set("op",  document.getElementById("fxLookupOp").value);
+      params.set("num", document.getElementById("fxLookupNum").value);
+      params.set("den", document.getElementById("fxLookupDen").value);
+    }
+
+    const valEl  = document.getElementById("fxLookupValue");
+    const tsEl   = document.getElementById("fxLookupTs");
+    const metaEl = document.getElementById("fxLookupResultMeta");
+    valEl.textContent = "…";
+    tsEl.textContent = "";
+
+    try {
+      const r = await fetch(`/api/fx/value-at?${params.toString()}`, { credentials: "same-origin" });
+      const j = r.ok ? await r.json() : null;
+      if (!j || j.value == null) {
+        valEl.textContent = "—";
+        tsEl.textContent = "Sin datos para esa fecha/hora";
+        if (metaEl) metaEl.textContent = "";
+        return;
+      }
+      // Decidir formato (los relativos vienen ya como porcentaje)
+      const isPct = (kind === "brecha" && document.getElementById("fxLookupOp").value === "relativo")
+        || (kind === "tc" && document.getElementById("fxLookupInstr").value === "Canje");
+      const sign = j.value >= 0 ? "+ " : "− ";
+      const fmtVal = (v) => Number(Math.abs(v)).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+      if (kind === "brecha" || isPct) {
+        valEl.textContent = `${sign}${fmtVal(j.value)} ${isPct ? "%" : ""}`.trim();
+      } else {
+        valEl.textContent = fmtVal(j.value);
+      }
+      // Formatear ts ISO -> "DD/MM/YYYY HH:MM:SS"
+      let tsStr = "—";
+      if (j.ts) {
+        try {
+          const d = new Date(j.ts);
+          tsStr = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+        } catch { tsStr = j.ts; }
+      }
+      tsEl.textContent = `Snapshot @ ${tsStr}`;
+      if (metaEl) {
+        const reqDate = new Date(j.requested);
+        const reqStr = `${String(reqDate.getDate()).padStart(2,"0")}/${String(reqDate.getMonth()+1).padStart(2,"0")}/${reqDate.getFullYear()} ${String(reqDate.getHours()).padStart(2,"0")}:${String(reqDate.getMinutes()).padStart(2,"0")}`;
+        metaEl.textContent = `Solicitado: ${reqStr}`;
+      }
+    } catch (e) {
+      console.error("[fx] lookup error", e);
+      valEl.textContent = "—";
+      tsEl.textContent = "Error de red";
+    }
   }
 
   if (document.readyState === "loading") {

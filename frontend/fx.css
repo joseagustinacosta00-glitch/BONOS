@@ -472,6 +472,72 @@ html, body {
   border-top: 0.5px solid var(--mt-line-table);
 }
 
+/* ---------- BUSQUEDA DE DATO HISTORICO ---------- */
+.fx-lookup { margin-top: 10px; }
+.fx-lookup-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+  padding: 10px 0;
+}
+.fx-lookup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mt-overline);
+}
+.fx-lookup-field[hidden] { display: none; }
+.fx-lookup-field select,
+.fx-lookup-field input {
+  background: transparent;
+  border: none;
+  border-bottom: 0.5px solid var(--mt-line);
+  padding: 5px 4px;
+  font-family: var(--mt-numeric);
+  font-size: 13px;
+  color: var(--mt-green-text);
+  outline: none;
+  border-radius: 0;
+  min-width: 110px;
+}
+.fx-lookup-field select { font-family: var(--mt-serif); font-size: 13px; }
+.fx-lookup-field input:focus,
+.fx-lookup-field select:focus { border-bottom-color: var(--mt-green); }
+.fx-lookup-btn {
+  padding: 6px 18px;
+  font-family: var(--mt-serif);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--mt-cream);
+  background: var(--mt-green);
+  border: none;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.15s ease;
+  align-self: flex-end;
+}
+.fx-lookup-btn:hover { background: var(--mt-green-hover); }
+.fx-lookup-result {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 0 4px;
+  border-top: 0.5px solid var(--mt-line-soft);
+}
+.fx-lookup-result-value {
+  font-family: var(--mt-numeric);
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.4px;
+  color: var(--mt-green-text);
+}
+
 /* ---------- RESPONSIVE ---------- */
 @media (max-width: 1100px) {
   .fx-row-1 { grid-template-columns: 1fr 1fr; }

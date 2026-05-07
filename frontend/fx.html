@@ -11,8 +11,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" />
   -->
 
-  <link rel="stylesheet" href="/static/components/nav.css?v=hd83" />
-  <link rel="stylesheet" href="/static/fx.css?v=hd83" />
+  <link rel="stylesheet" href="/static/components/nav.css?v=hd84" />
+  <link rel="stylesheet" href="/static/fx.css?v=hd84" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
@@ -197,6 +197,82 @@
 
     </section>
 
+    <!-- BUSQUEDA DE DATO HISTORICO A UN DATETIME -->
+    <section class="fx-lookup">
+      <article class="fx-card">
+        <header class="fx-table-head" style="padding:0;">
+          <p class="fx-overline">Buscar dato a una fecha / hora</p>
+          <span class="fx-muted-italic-sm" id="fxLookupResultMeta">—</span>
+        </header>
+        <hr class="fx-rule-soft" />
+        <div class="fx-lookup-form">
+          <label class="fx-lookup-field">
+            <span>Tipo</span>
+            <select id="fxLookupKind">
+              <option value="tc" selected>Tipo de cambio</option>
+              <option value="brecha">Brecha</option>
+            </select>
+          </label>
+          <!-- Campos TC -->
+          <label class="fx-lookup-field" data-lookup-tc>
+            <span>Instrumento</span>
+            <select id="fxLookupInstr">
+              <option value="MEP" selected>MEP</option>
+              <option value="CCL">CCL</option>
+              <option value="Canje">Canje</option>
+              <option value="Spot">Spot</option>
+              <option value="A3500">A3500</option>
+            </select>
+          </label>
+          <label class="fx-lookup-field" data-lookup-tc>
+            <span>Field</span>
+            <select id="fxLookupField">
+              <option value="last" selected>Last</option>
+              <option value="bid">Bid</option>
+              <option value="offer">Offer</option>
+            </select>
+          </label>
+          <!-- Campos Brecha -->
+          <label class="fx-lookup-field" data-lookup-brecha hidden>
+            <span>Op</span>
+            <select id="fxLookupOp">
+              <option value="relativo" selected>Relativo</option>
+              <option value="spread">Spread</option>
+            </select>
+          </label>
+          <label class="fx-lookup-field" data-lookup-brecha hidden>
+            <span>Num</span>
+            <select id="fxLookupNum">
+              <option value="CCL" selected>CCL</option>
+              <option value="MEP">MEP</option>
+            </select>
+          </label>
+          <label class="fx-lookup-field" data-lookup-brecha hidden>
+            <span>Den</span>
+            <select id="fxLookupDen">
+              <option value="Spot" selected>Spot</option>
+              <option value="A3500">A3500</option>
+              <option value="MEP">MEP</option>
+              <option value="CCL">CCL</option>
+            </select>
+          </label>
+          <label class="fx-lookup-field">
+            <span>Fecha</span>
+            <input type="date" id="fxLookupDate" />
+          </label>
+          <label class="fx-lookup-field">
+            <span>Hora</span>
+            <input type="time" id="fxLookupTime" />
+          </label>
+          <button type="button" id="fxLookupSubmit" class="fx-lookup-btn">Buscar</button>
+        </div>
+        <div class="fx-lookup-result" id="fxLookupResult">
+          <span class="fx-lookup-result-value fx-num" id="fxLookupValue">—</span>
+          <span class="fx-lookup-result-meta fx-muted-italic-sm" id="fxLookupTs"></span>
+        </div>
+      </article>
+    </section>
+
   </main>
 
   <!-- Carga del nav -->
@@ -206,11 +282,11 @@
       .then((html) => {
         document.getElementById("navHost").innerHTML = html;
         const s = document.createElement("script");
-        s.src = "/static/components/nav.js?v=hd83";
+        s.src = "/static/components/nav.js?v=hd84";
         document.body.appendChild(s);
       });
   </script>
 
-  <script src="/static/fx.js?v=hd83"></script>
+  <script src="/static/fx.js?v=hd84"></script>
 </body>
 </html>

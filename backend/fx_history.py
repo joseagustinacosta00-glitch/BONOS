@@ -166,15 +166,159 @@ class FxHistoryStore:
         if not col_num or not col_den:
             return {"series": [], "min": None, "max": None, "variation": None}
         # Expresion de calculo
+        # Relativo se devuelve YA en porcentaje: ((num/den) - 1) * 100
         if op == "spread":
             expr = f"({col_num} - {col_den})"
         elif op == "relativo":
-            expr = f"CASE WHEN {col_den} != 0 THEN ({col_num} / {col_den}) ELSE NULL END"
+            expr = f"CASE WHEN {col_den} != 0 THEN (({col_num} / {col_den}) - 1) * 100 ELSE NULL END"
         else:
             return {"series": [], "min": None, "max": None, "variation": None}
         cutoff = self._period_cutoff(period)
         bucket_seconds = self._bucket_seconds(period)
         return self._query_bucketed(expr, cutoff, bucket_seconds, where_extra=f"{col_num} IS NOT NULL AND {col_den} IS NOT NULL")
+
+    def get_value_at(
+        self,
+        kind: str,
+        instr: str | None = None,
+        field: str | None = None,
+        op: str | None = None,
+        num: str | None = None,
+        den: str | None = None,
+        at_iso: str | None = None,
+    ) -> dict[str, Any]:
+        """Lookup de un valor a un datetime especifico.
+        kind=tc: usa instr (mep|ccl|canje|spot|a3500) + field (last|bid|offer)
+        kind=brecha: usa op (spread|relativo) + num + den
+        Devuelve el snapshot mas cercano <= at_iso (o el ultimo si no se pasa).
+        Output: { value, ts, requested }
+        """
+        if at_iso is None:
+            at_iso = _now().isoformat()
+        # Construir expresion segun kind
+        if kind == "tc":
+            instr_l = (instr or "").lower()
+            field_l = (field or "last").lower()
+            if instr_l in ("spot", "a3500"):
+                expr = self._spot_column(instr_l)
+            elif instr_l == "canje":
+                expr = "canje_last"
+            elif instr_l in ("mep", "ccl"):
+                if field_l in ("last", "bid", "offer"):
+                    expr = f"{instr_l}_{field_l}"
+                else:
+                    return {"value": None, "ts": None, "requested": at_iso, "error": "field invalido"}
+            else:
+                return {"value": None, "ts": None, "requested": at_iso, "error": "instr invalido"}
+            if not expr:
+                return {"value": None, "ts": None, "requested": at_iso, "error": "campo no soportado"}
+        elif kind == "brecha":
+            col_num = self._tc_column(num or "", "last") or self._spot_column(num or "")
+            col_den = self._tc_column(den or "", "last") or self._spot_column(den or "")
+            if not col_num or not col_den:
+                return {"value": None, "ts": None, "requested": at_iso, "error": "leg invalido"}
+            if op == "spread":
+                expr = f"({col_num} - {col_den})"
+            elif op == "relativo":
+                expr = f"CASE WHEN {col_den} != 0 THEN (({col_num} / {col_den}) - 1) * 100 ELSE NULL END"
+            else:
+                return {"value": None, "ts": None, "requested": at_iso, "error": "op invalido"}
+        else:
+            return {"value": None, "ts": None, "requested": at_iso, "error": "kind invalido"}
+
+        sql = f"""
+            SELECT ts, ({expr}) AS val
+            FROM fx_snapshots
+            WHERE ts <= ? AND ({expr}) IS NOT NULL
+            ORDER BY ts DESC
+            LIMIT 1
+        """
+        with closing(self._connect()) as conn:
+            row = conn.execute(sql, (at_iso,)).fetchone()
+        if not row:
+            return {"value": None, "ts": None, "requested": at_iso}
+        return {
+            "value": float(row["val"]) if row["val"] is not None else None,
+            "ts": row["ts"],
+            "requested": at_iso,
+        }
+
+    def backfill_from_historical(self) -> dict[str, int]:
+        """Lee historical_data y deriva MEP/CCL para cada fecha disponible
+        cuando hay AL30 (pesos), AL30/AL30D (usd) y/o AL30C (cable).
+        Inserta los puntos derivados en fx_snapshots con ts = mediodia local.
+        Soporta dos esquemas de upload comunes:
+        - ticker=AL30 + price_market en (pesos|usd|cable)
+        - tickers separados AL30 / AL30D / AL30C con price_market='unspecified'
+        Devuelve estadisticas: { dates_seen, inserted, skipped }.
+        """
+        with closing(self._connect()) as conn:
+            # Pull todas las filas relevantes en una query
+            rows = conn.execute(
+                """
+                SELECT ticker, price_market, value_date, value
+                FROM historical_data
+                WHERE metric_type = 'dirty_price'
+                  AND ticker IN ('AL30', 'AL30D', 'AL30C')
+                ORDER BY value_date
+                """
+            ).fetchall()
+
+        # Indexar por fecha: { date: { 'pesos': v, 'usd': v, 'cable': v } }
+        by_date: dict[str, dict[str, float]] = {}
+        for r in rows:
+            date_str = str(r["value_date"])
+            ticker = str(r["ticker"]).upper()
+            pm = str(r["price_market"] or "").lower()
+            try:
+                v = float(r["value"])
+            except (TypeError, ValueError):
+                continue
+            if v <= 0:
+                continue
+            bucket = by_date.setdefault(date_str, {})
+            # Preferimos el ticker explicito (AL30D/AL30C) sobre el price_market
+            if ticker == "AL30D":
+                bucket["usd"] = v
+            elif ticker == "AL30C":
+                bucket["cable"] = v
+            elif ticker == "AL30":
+                if pm in ("pesos", "ars", "unspecified", ""):
+                    bucket["pesos"] = v
+                elif pm in ("usd", "dolar"):
+                    bucket.setdefault("usd", v)
+                elif pm == "cable":
+                    bucket.setdefault("cable", v)
+
+        inserted = 0
+        skipped = 0
+        for date_str in sorted(by_date.keys()):
+            b = by_date[date_str]
+            pesos = b.get("pesos")
+            usd   = b.get("usd")
+            cable = b.get("cable")
+            mep_last = (pesos / usd) if (pesos is not None and usd not in (None, 0)) else None
+            ccl_last = (pesos / cable) if (pesos is not None and cable not in (None, 0)) else None
+            canje_last = None
+            if mep_last is not None and ccl_last is not None and mep_last != 0:
+                canje_last = ((ccl_last / mep_last) - 1) * 100
+            if mep_last is None and ccl_last is None:
+                skipped += 1
+                continue
+            # Timestamp = mediodia local del dia historico
+            ts = f"{date_str}T12:00:00"
+            snap = FxSnapshot(
+                ts=ts, spot=None, a3500=None,
+                mep_bid=None, mep_last=mep_last, mep_offer=None,
+                ccl_bid=None, ccl_last=ccl_last, ccl_offer=None,
+                canje_last=canje_last,
+            )
+            try:
+                self.insert(snap)
+                inserted += 1
+            except Exception:
+                skipped += 1
+        return {"dates_seen": len(by_date), "inserted": inserted, "skipped": skipped}
 
     def cleanup(self) -> int:
         """Borra snapshots mas viejos que RETENTION_DAYS. Devuelve cantidad borrada."""

@@ -1087,6 +1087,38 @@ async def fx_history_endpoint(
     raise HTTPException(status_code=422, detail="kind invalido")
 
 
+@app.post("/api/fx/backfill")
+async def fx_backfill(request: Request) -> dict:
+    """Triggera el backfill: lee historical_data (AL30/AL30D/AL30C, dirty_price)
+    y deriva MEP/CCL en fx_snapshots para cada fecha disponible. Idempotente
+    (INSERT OR REPLACE por ts), se puede correr cuantas veces sea necesario.
+    Solo admin para evitar abuso (la operacion lee toda la tabla)."""
+    _require_admin(request)
+    stats = fx_history.backfill_from_historical()
+    return {"ok": True, **stats}
+
+
+@app.get("/api/fx/value-at")
+async def fx_value_at(
+    kind: str = "tc",
+    instr: str = "MEP",
+    field: str = "last",
+    op: str = "relativo",
+    num: str = "CCL",
+    den: str = "Spot",
+    at: str | None = None,
+) -> dict:
+    """Lookup de un valor a un datetime especifico.
+    kind=tc: usa instr (mep|ccl|canje|spot|a3500) + field (last|bid|offer)
+    kind=brecha: usa op (spread|relativo) + num + den (mep|ccl|spot|a3500)
+    at: ISO datetime (default = ahora). Devuelve el valor mas cercano <= at.
+    """
+    return fx_history.get_value_at(
+        kind=kind, instr=instr, field=field,
+        op=op, num=num, den=den, at_iso=at,
+    )
+
+
 @app.get("/api/market/cauciones")
 async def market_cauciones() -> dict:
     items = market.caucion_quotes()
@@ -2529,6 +2561,20 @@ async def upload_historical_data(
 
     if imported or replaced:
         _maybe_backup_after_write()
+        # Si subimos datos relevantes para FX (AL30 family con dirty_price),
+        # disparamos el backfill automatico para que los charts del modulo FX
+        # se llenen con la historia completa.
+        try:
+            base_ticker = _normalize_base_ticker(ticker).upper()
+            if normalized_metric == "dirty_price" and base_ticker in ("AL30", "AL30D", "AL30C"):
+                stats = fx_history.backfill_from_historical()
+                import logging
+                logging.getLogger(__name__).info(
+                    "[fx_history] backfill auto-disparado tras upload %s: %s", base_ticker, stats
+                )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("[fx_history] backfill auto fallo")
     return {
         "ticker": _normalize_base_ticker(ticker),
         "metric_type": normalized_metric,
