@@ -1256,9 +1256,45 @@ async def calculator_bond_draft(payload: BondDraftRequest) -> dict:
     }
 
 
+def _all_lecap_tickers() -> list[str]:
+    """Lista combinada: hardcoded base + customs guardados en storage."""
+    base = list(LECAP_TICKERS)
+    customs = storage.list_custom_lecap_tickers()
+    seen = set(base)
+    for t in customs:
+        if t not in seen:
+            base.append(t)
+            seen.add(t)
+    return base
+
+
 @app.get("/api/calculators/lecaps/tickers")
 async def calculator_lecap_tickers() -> dict:
-    return {"tickers": list(LECAP_TICKERS)}
+    return {"tickers": _all_lecap_tickers()}
+
+
+class LecapCustomTickerRequest(BaseModel):
+    ticker: str
+
+
+@app.post("/api/calculators/lecaps/tickers")
+async def calculator_add_lecap_ticker(request: Request, payload: LecapCustomTickerRequest) -> dict:
+    _require_admin(request)
+    ticker = (payload.ticker or "").upper().strip()
+    if not ticker or len(ticker) > 12 or not ticker.isalnum():
+        raise HTTPException(status_code=422, detail="Ticker invalido (max 12, alfanumerico).")
+    added = storage.add_custom_lecap_ticker(ticker)
+    return {"ticker": ticker, "added": added, "tickers": _all_lecap_tickers()}
+
+
+@app.delete("/api/calculators/lecaps/tickers/{ticker}")
+async def calculator_delete_lecap_ticker(request: Request, ticker: str) -> dict:
+    _require_admin(request)
+    if ticker.upper() in LECAP_TICKERS:
+        raise HTTPException(status_code=422, detail="No se pueden borrar tickers base.")
+    if not storage.delete_custom_lecap_ticker(ticker):
+        raise HTTPException(status_code=404, detail="Ticker custom no encontrado.")
+    return {"deleted": True, "tickers": _all_lecap_tickers()}
 
 
 @app.post("/api/calculators/lecaps")
@@ -1272,6 +1308,7 @@ async def calculator_lecaps(payload: LecapCalculationRequest) -> dict:
             tem_emission_percent=payload.tem_emission_percent,
             calendar=market_calendar,
             today=now_argentina().date(),
+            allowed_tickers=set(_all_lecap_tickers()),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

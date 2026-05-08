@@ -219,6 +219,14 @@ class CalculatorStorage:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS lecap_custom_tickers (
+                    ticker TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS calculator_cashflows (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     calculator_type TEXT NOT NULL,
@@ -591,6 +599,36 @@ class CalculatorStorage:
             cursor = connection.execute(
                 "DELETE FROM lecap_calculators WHERE id = ?",
                 (item_id,),
+            )
+        return cursor.rowcount > 0
+
+    def list_custom_lecap_tickers(self) -> list[str]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT ticker FROM lecap_custom_tickers ORDER BY ticker"
+            ).fetchall()
+        return [row["ticker"] for row in rows]
+
+    def add_custom_lecap_ticker(self, ticker: str) -> bool:
+        ticker = ticker.upper().strip()
+        if not ticker:
+            raise ValueError("Ticker vacio.")
+        with closing(self._connect()) as connection, connection:
+            try:
+                connection.execute(
+                    "INSERT INTO lecap_custom_tickers (ticker, created_at) VALUES (?, ?)",
+                    (ticker, now_argentina_iso()),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False  # ya existia
+
+    def delete_custom_lecap_ticker(self, ticker: str) -> bool:
+        ticker = ticker.upper().strip()
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM lecap_custom_tickers WHERE ticker = ?",
+                (ticker,),
             )
         return cursor.rowcount > 0
 

@@ -2368,6 +2368,7 @@ function setBondModel(model) {
 
   if (isLecap) {
     calculatorPlaceholder.textContent = "";
+    fetchLecapTickers().catch(() => {});
     setLecapMode("search");
   } else if (showHdTemplate) {
     renderHardDollarCouponInputs();
@@ -4223,6 +4224,55 @@ function setLecapMode(mode) {
   } else {
     // Cuando entras a "crear nuevo" se limpian los campos del calculo anterior
     resetLecapForm();
+    // Refresca la lista de tickers (puede haber customs nuevos) y muestra el
+    // input de "agregar ticker" si el usuario es admin
+    fetchLecapTickers().catch(() => {});
+    const addWrap = document.querySelector("#lecapAddTickerWrap");
+    const isAdmin = window.__currentUser?.role === "admin";
+    if (addWrap) addWrap.classList.toggle("d-none", !isAdmin);
+  }
+}
+
+async function fetchLecapTickers() {
+  if (!lecapTicker) return;
+  try {
+    const r = await fetch("/api/calculators/lecaps/tickers", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const j = await r.json();
+    const previous = lecapTicker.value;
+    lecapTicker.innerHTML = (j.tickers || [])
+      .map((t) => `<option value="${t}">${t}</option>`)
+      .join("");
+    if (previous && (j.tickers || []).includes(previous)) lecapTicker.value = previous;
+  } catch (e) {
+    console.error("[lecap] tickers fetch", e);
+  }
+}
+
+async function addLecapTicker() {
+  const inputEl = document.querySelector("#lecapNewTicker");
+  if (!inputEl) return;
+  const ticker = (inputEl.value || "").toUpperCase().trim();
+  if (!ticker) return;
+  try {
+    const r = await fetch("/api/calculators/lecaps/tickers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ ticker }),
+    });
+    if (!r.ok) {
+      const detail = r.status === 403 ? "Solo admin puede agregar" : "Ticker invalido";
+      setCalculatorStatus("error", detail);
+      return;
+    }
+    inputEl.value = "";
+    await fetchLecapTickers();
+    if (lecapTicker) lecapTicker.value = ticker;
+    setCalculatorStatus("ok", `${ticker} agregado`);
+  } catch (e) {
+    console.error("[lecap] add ticker", e);
+    setCalculatorStatus("error", "Error de red");
   }
 }
 
@@ -4523,6 +4573,10 @@ savedLecaps?.addEventListener("click", (event) => {
     console.error("[lecap] delete error", err);
     setCalculatorStatus("error", "Error al eliminar");
   });
+});
+document.querySelector("#lecapAddTickerBtn")?.addEventListener("click", () => addLecapTicker());
+document.querySelector("#lecapNewTicker")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); addLecapTicker(); }
 });
 hdSearchSubmit?.addEventListener("click", () => {
   fetchHdSavedList().catch(() => setHdSaveStatus("error", "No se pudo buscar"));

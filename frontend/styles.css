@@ -496,6 +496,13 @@ tbody td {
   color: white;
 }
 
+.lc-add-ticker-row {
+  display: flex;
+  gap: 4px;
+}
+.lc-add-ticker-row input { flex: 1 1 auto; }
+.lc-add-ticker-row button { flex: 0 0 auto; padding: 2px 10px; }
+
 .hd-mode-panel {
   display: block;
 }

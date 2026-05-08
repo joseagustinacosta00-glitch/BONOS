@@ -1086,17 +1086,14 @@
                 <form id="bondDraftForm" class="calculator-form lecap-form">
                   <label>
                     <span>Ticker</span>
-                    <select id="lecapTicker" class="form-select form-select-sm" required>
-                      <option value="S15Y6">S15Y6</option>
-                      <option value="S29Y6">S29Y6</option>
-                      <option value="T30J6">T30J6</option>
-                      <option value="S17L6">S17L6</option>
-                      <option value="S31L6">S31L6</option>
-                      <option value="S14G6">S14G6</option>
-                      <option value="S31G6">S31G6</option>
-                      <option value="S30S6">S30S6</option>
-                      <option value="S30O6">S30O6</option>
-                    </select>
+                    <select id="lecapTicker" class="form-select form-select-sm" required></select>
+                  </label>
+                  <label id="lecapAddTickerWrap" class="d-none">
+                    <span>Agregar ticker</span>
+                    <span class="lc-add-ticker-row">
+                      <input id="lecapNewTicker" class="form-control form-control-sm" type="text" maxlength="12" placeholder="Ej: S30N6" autocomplete="off">
+                      <button id="lecapAddTickerBtn" class="btn btn-sm btn-outline-dark" type="button">+</button>
+                    </span>
                   </label>
                   <label>
                     <span>Fecha de emision</span>

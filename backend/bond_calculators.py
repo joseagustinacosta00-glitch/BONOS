@@ -24,13 +24,14 @@ class DayCount(StrEnum):
 LECAP_TICKERS: tuple[str, ...] = (
     "S15Y6",
     "S29Y6",
-    "T30J6",
+    "S12J6",
     "S17L6",
     "S31L6",
     "S14G6",
     "S31G6",
     "S30S6",
     "S30O6",
+    "S30N6",
 )
 
 
@@ -273,9 +274,10 @@ def build_lecap_calculation(
     today: date,
     price_t0: float | None = None,
     price_t1: float | None = None,
+    allowed_tickers: set[str] | None = None,
 ) -> LecapCalculation:
     ticker = ticker.upper().strip()
-    if ticker not in LECAP_TICKERS:
+    if allowed_tickers is not None and ticker not in allowed_tickers:
         raise ValueError("Ticker LECAP no soportado.")
     if maturity_date <= issue_date:
         raise ValueError("La fecha de vencimiento debe ser posterior a la fecha de emision.")
