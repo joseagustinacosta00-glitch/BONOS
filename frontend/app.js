@@ -4535,15 +4535,17 @@ const _arsWhatIfs = {};
 // en cada WebSocket tick cuando los datos no cambiaron.
 let _arsCurveLastHash = "";
 
+let _arsActiveWhatIfTicker = null;
+
 function _arsAttachListeners() {
   if (_arsAttachListeners._done) return;
   _arsAttachListeners._done = true;
-  // Click en fila de tabla -> prompt what-if
+  // Click en fila de tabla -> abrir panel inline
   quotesBody?.addEventListener("click", (event) => {
     if (currentMarketCategory !== "ars") return;
     const row = event.target.closest("tr[data-ars-ticker]");
     if (!row) return;
-    promptArsWhatIf(row.getAttribute("data-ars-ticker"));
+    openArsWhatIfPanel(row.getAttribute("data-ars-ticker"));
   });
   // Toggles del chart
   ["arsCurveYAxis", "arsCurveXAxis", "arsCurveModel"].forEach((id) => {
@@ -4556,45 +4558,81 @@ function _arsAttachListeners() {
     Object.keys(_arsWhatIfs).forEach((k) => delete _arsWhatIfs[k]);
     renderArsCurve();
   });
+  // Panel what-if buttons
+  document.getElementById("arsWhatIfApply")?.addEventListener("click", applyArsWhatIfFromPanel);
+  document.getElementById("arsWhatIfRemove")?.addEventListener("click", removeArsWhatIfFromPanel);
+  document.getElementById("arsWhatIfClose")?.addEventListener("click", closeArsWhatIfPanel);
+  // Inputs: aceptar Enter para aplicar, ESC para cerrar; mutex price <-> tna
+  const priceEl = document.getElementById("arsWhatIfPrice");
+  const tnaEl = document.getElementById("arsWhatIfTna");
+  [priceEl, tnaEl].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); applyArsWhatIfFromPanel(); }
+      if (e.key === "Escape") closeArsWhatIfPanel();
+    });
+  });
+  priceEl?.addEventListener("input", () => { if (priceEl.value) tnaEl.value = ""; });
+  tnaEl?.addEventListener("input", () => { if (tnaEl.value) priceEl.value = ""; });
+  // ESC global cierra el panel
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && _arsActiveWhatIfTicker) closeArsWhatIfPanel();
+  });
 }
 
-async function promptArsWhatIf(ticker) {
-  const existing = _arsWhatIfs[ticker];
-  const baseInfo = (_latestArsItems || []).find((x) => x.ticker === ticker);
-  const currentPrice = baseInfo?.last;
-  const currentTna = baseInfo?.tna_365;
-  const promptStr = [
-    `What-if para ${ticker}`,
-    currentPrice != null ? `Precio actual: ${currentPrice.toFixed(2)}` : "Sin precio actual",
-    currentTna != null ? `TNA actual: ${(currentTna * 100).toFixed(2)}%` : "",
-    "",
-    "Ingresa precio (ej: 1450.5) o TNA% (ej: tna 35.5)",
-    "Para borrar el what-if, ingresa 'x'",
-  ].filter(Boolean).join("\n");
-  const initial = existing
-    ? (existing.type === "price" ? String(existing.value) : `tna ${existing.value}`)
-    : "";
-  const ans = window.prompt(promptStr, initial);
-  if (ans == null) return;
-  const trimmed = ans.trim().toLowerCase();
-  if (!trimmed) return;
-  if (trimmed === "x") {
-    delete _arsWhatIfs[ticker];
-    renderArsCurve();
-    return;
+function openArsWhatIfPanel(ticker) {
+  const panel = document.getElementById("arsWhatIfPanel");
+  if (!panel) return;
+  _arsActiveWhatIfTicker = ticker;
+  const info = (_latestArsItems || []).find((x) => x.ticker === ticker);
+  const tickerEl = document.getElementById("arsWhatIfTicker");
+  const metaEl = document.getElementById("arsWhatIfMeta");
+  const priceEl = document.getElementById("arsWhatIfPrice");
+  const tnaEl = document.getElementById("arsWhatIfTna");
+  if (tickerEl) tickerEl.textContent = ticker;
+  if (metaEl && info) {
+    const last = info.last != null ? info.last.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
+    const tna = info.tna_365 != null ? (info.tna_365 * 100).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%" : "—";
+    metaEl.textContent = `Last ${last} · TNA ${tna}`;
+  } else if (metaEl) {
+    metaEl.textContent = "";
   }
+  // Pre-cargar valor existente del what-if
+  const existing = _arsWhatIfs[ticker];
+  if (priceEl) priceEl.value = existing?.type === "price" ? String(existing.value) : "";
+  if (tnaEl) tnaEl.value = existing?.type === "tna" ? String(existing.value) : "";
+  panel.hidden = false;
+  panel.classList.add("is-open");
+  // Auto-focus al primer input vacio
+  setTimeout(() => {
+    if (priceEl && !priceEl.value) priceEl.focus();
+    else if (tnaEl) tnaEl.focus();
+  }, 50);
+}
+
+function closeArsWhatIfPanel() {
+  const panel = document.getElementById("arsWhatIfPanel");
+  if (!panel) return;
+  panel.hidden = true;
+  panel.classList.remove("is-open");
+  _arsActiveWhatIfTicker = null;
+}
+
+async function applyArsWhatIfFromPanel() {
+  const ticker = _arsActiveWhatIfTicker;
+  if (!ticker) return;
+  const priceVal = parseNumberArg(document.getElementById("arsWhatIfPrice")?.value);
+  const tnaVal = parseNumberArg(document.getElementById("arsWhatIfTna")?.value);
   let url = `/api/market/ars/whatif?ticker=${encodeURIComponent(ticker)}`;
   let stored;
-  if (trimmed.startsWith("tna")) {
-    const val = parseFloat(trimmed.replace("tna", "").replace(",", ".").trim());
-    if (!isFinite(val)) { alert("TNA invalida"); return; }
-    url += `&tna=${val}`;
-    stored = { type: "tna", value: val };
+  if (isFinite(priceVal) && priceVal > 0) {
+    url += `&price=${priceVal}`;
+    stored = { type: "price", value: priceVal };
+  } else if (isFinite(tnaVal)) {
+    url += `&tna=${tnaVal}`;
+    stored = { type: "tna", value: tnaVal };
   } else {
-    const val = parseFloat(trimmed.replace(",", "."));
-    if (!isFinite(val)) { alert("Precio invalido"); return; }
-    url += `&price=${val}`;
-    stored = { type: "price", value: val };
+    return;
   }
   try {
     const r = await fetch(url, { credentials: "same-origin" });
@@ -4606,10 +4644,19 @@ async function promptArsWhatIf(ticker) {
     const j = await r.json();
     _arsWhatIfs[ticker] = { ...stored, computed: j };
     renderArsCurve();
+    closeArsWhatIfPanel();
   } catch (e) {
     console.error("[ars] whatif error", e);
     alert("Error de red");
   }
+}
+
+function removeArsWhatIfFromPanel() {
+  const ticker = _arsActiveWhatIfTicker;
+  if (!ticker) return;
+  delete _arsWhatIfs[ticker];
+  renderArsCurve();
+  closeArsWhatIfPanel();
 }
 
 let _arsCurveChart = null;
@@ -4652,38 +4699,45 @@ function renderArsCurve() {
     const def = ARS_FIELD_DEFS[field] || ARS_FIELD_DEFS.last;
     const points = items.map((it) => xy(it, field)).filter(Boolean).sort((a, b) => a.x - b.x);
     if (!points.length) continue;
-    // Linea conectora observada
-    datasets.push({
-      type: "line", label: `${def.label} obs`,
-      data: points.map((p) => ({ x: p.x, y: p.y })),
-      borderColor: def.stroke, backgroundColor: def.fill,
-      borderWidth: 1.5, pointRadius: 0, tension: 0.2, order: 3, spanGaps: true,
-    });
-    // Scatter de los puntos con tooltip
+    // Scatter de los puntos (sin linea recta conectandolos: la curva real
+    // viene del modelo fiteado abajo).
     datasets.push({
       type: "scatter", label: `${def.label}`,
       data: points.map((p) => ({ x: p.x, y: p.y, _meta: p })),
       backgroundColor: def.stroke, borderColor: def.stroke,
       pointRadius: 5, pointHoverRadius: 7, order: 2,
     });
-    // Modelo teorico (reusa FuturesCurve.fitModel)
+    // Modelo teorico (reusa FuturesCurve.fitModel). El modelo espera puntos
+    // con shape { isIncludedInCurve, tnaPct, daysToMaturity } — el filtro
+    // del fitter requiere esos campos.
     if (modelName !== "none" && points.length >= 2 && window.FuturesCurve?.fitModel) {
       try {
-        const model = window.FuturesCurve.fitModel(points.map((p) => ({ x: p.x, y: p.y })), modelName);
-        if (model && model.predict) {
+        // FuturesCurve.fitModel trabaja con tnaPct en porcentaje (0-100).
+        // Mi y esta en decimal (0.35 = 35%). Escalo *100 para fittear y /100
+        // para predecir, asi mantengo coherencia.
+        const observedForFit = points.map((p) => ({
+          isIncludedInCurve: true,
+          tnaPct: p.y * 100,
+          daysToMaturity: p.x,
+        }));
+        const model = window.FuturesCurve.fitModel(observedForFit, modelName);
+        if (model && typeof model.predict === "function") {
           const minX = points[0].x, maxX = points[points.length - 1].x;
-          const N = 80;
+          const N = 120;
           const theoLine = [];
           for (let i = 0; i <= N; i++) {
             const x = minX + (maxX - minX) * (i / N);
-            const y = model.predict(x);
-            if (y != null && isFinite(y)) theoLine.push({ x, y });
+            const yPct = model.predict(x);
+            if (yPct != null && isFinite(yPct)) theoLine.push({ x, y: yPct / 100 });
           }
           datasets.push({
-            type: "line", label: `${def.label} ${modelName}`,
-            data: theoLine, borderColor: def.stroke, borderDash: [5, 4],
-            borderWidth: 1, pointRadius: 0, order: 4, spanGaps: true,
+            type: "line", label: `${def.label} (${modelName})`,
+            data: theoLine, borderColor: def.stroke, backgroundColor: def.fill,
+            borderWidth: 2, pointRadius: 0, order: 3, spanGaps: true,
+            tension: 0.2,
           });
+        } else {
+          console.warn("[ars] fitModel devolvio null/sin predict", modelName, points.length);
         }
       } catch (e) { console.warn("[ars] fitModel fallo", e); }
     }

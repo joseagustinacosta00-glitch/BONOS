@@ -180,12 +180,12 @@
               </label>
               <label><span>Modelo:</span>
                 <select id="arsCurveModel" class="form-select form-select-sm">
+                  <option value="polynomial" selected>Polinomico (cuadratico)</option>
+                  <option value="spline">Spline cubico</option>
+                  <option value="nelson_siegel">Nelson-Siegel</option>
+                  <option value="svensson">Svensson</option>
                   <option value="linear">Lineal</option>
-                  <option value="poly2">Polinomico 2</option>
-                  <option value="poly3">Polinomico 3</option>
-                  <option value="exp">Exponencial</option>
-                  <option value="log">Logaritmico</option>
-                  <option value="none">Sin modelo (solo puntos)</option>
+                  <option value="none">Sin curva (solo puntos)</option>
                 </select>
               </label>
               <label class="ars-curve-field"><input type="checkbox" data-ars-field="bid"> Bid</label>
@@ -193,6 +193,23 @@
               <label class="ars-curve-field"><input type="checkbox" data-ars-field="offer"> Offer</label>
               <button id="arsCurveClearWhatIf" type="button" class="btn btn-sm btn-outline-dark">Limpiar what-ifs</button>
             </div>
+          </div>
+          <div id="arsWhatIfPanel" class="ars-whatif-panel" hidden>
+            <span class="ars-whatif-label">What-if</span>
+            <strong id="arsWhatIfTicker" class="ars-whatif-ticker">—</strong>
+            <span class="ars-whatif-meta" id="arsWhatIfMeta"></span>
+            <span class="ars-whatif-field">
+              <label>Precio</label>
+              <input id="arsWhatIfPrice" type="text" inputmode="decimal" placeholder="ej. 1450,5">
+            </span>
+            <span class="ars-whatif-sep">o</span>
+            <span class="ars-whatif-field">
+              <label>TNA %</label>
+              <input id="arsWhatIfTna" type="text" inputmode="decimal" placeholder="ej. 35,5">
+            </span>
+            <button id="arsWhatIfApply" type="button" class="btn btn-sm btn-dark">Aplicar</button>
+            <button id="arsWhatIfRemove" type="button" class="btn btn-sm btn-outline-dark">Quitar</button>
+            <button id="arsWhatIfClose" type="button" class="ars-whatif-close" aria-label="Cerrar">×</button>
           </div>
           <div class="ars-curve-canvas-wrap">
             <canvas id="arsCurveCanvas"></canvas>

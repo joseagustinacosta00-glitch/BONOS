@@ -549,6 +549,79 @@ tbody td {
 .ars-row-clickable:hover { background: #f6f4ee; }
 .ars-clickable-ticker { font-weight: 600; }
 
+.ars-whatif-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #fffbef;
+  border: 1px solid #c9a961;
+  border-radius: 4px;
+  font-size: 12px;
+  position: relative;
+  animation: arsWhatIfFadeIn 0.15s ease-out;
+}
+.ars-whatif-panel[hidden] { display: none; }
+@keyframes arsWhatIfFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ars-whatif-label {
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #8a7a4f;
+  font-size: 10px;
+}
+.ars-whatif-ticker {
+  font-size: 14px;
+  color: #1f3d2e;
+  letter-spacing: 0.5px;
+}
+.ars-whatif-meta {
+  color: #6b6452;
+  font-style: italic;
+}
+.ars-whatif-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ars-whatif-field label {
+  font-weight: 500;
+  color: #6b6452;
+}
+.ars-whatif-field input {
+  width: 90px;
+  padding: 3px 6px;
+  border: 1px solid #d4cbb3;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.ars-whatif-field input:focus {
+  outline: none;
+  border-color: #1f3d2e;
+  box-shadow: 0 0 0 2px rgba(31, 61, 46, 0.15);
+}
+.ars-whatif-sep {
+  color: #999;
+  font-style: italic;
+  font-size: 11px;
+}
+.ars-whatif-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: #999;
+  padding: 0 6px;
+}
+.ars-whatif-close:hover { color: #c0392b; }
+
 .ars-header-title {
   text-align: left;
   background: #1f3d2e !important;
