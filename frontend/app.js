@@ -2418,11 +2418,15 @@ function renderSavedLecaps(payload) {
   }
 
   const fmt3 = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
+  const isAdmin = window.__currentUser?.role === "admin";
   savedLecaps.innerHTML = items.map((item) => {
     const cashflow = item.calculation.cashflows[0];
+    const adminBtn = isAdmin
+      ? `<button type="button" class="lc-delete-btn" data-lecap-delete="${item.id}" title="Eliminar">✕</button>`
+      : "";
     return `
       <tr>
-        <td class="ticker">${item.ticker}</td>
+        <td class="ticker">${adminBtn}${item.ticker}</td>
         <td>${formatDate(item.issue_date)}</td>
         <td>${formatDate(item.maturity_date)}</td>
         <td>${formatDate(cashflow.effective_payment_date)}</td>
@@ -2434,6 +2438,22 @@ function renderSavedLecaps(payload) {
       </tr>
     `;
   }).join("");
+}
+
+async function deleteLecap(itemId) {
+  if (!itemId) return;
+  if (!confirm("¿Eliminar esta LECAP guardada? No se puede deshacer.")) return;
+  const r = await fetch(`/api/calculators/lecaps/saved/${itemId}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (!r.ok) {
+    const detail = r.status === 403 ? "Solo admin puede eliminar" : "No se pudo eliminar";
+    setCalculatorStatus("error", detail);
+    return;
+  }
+  setCalculatorStatus("ok", "LECAP eliminada");
+  await fetchSavedLecaps();
 }
 
 async function fetchSavedLecaps() {
@@ -4495,6 +4515,14 @@ hdModeSwitch?.querySelectorAll("[data-hd-mode]").forEach((button) => {
 });
 document.querySelector("#lcModeSwitch")?.querySelectorAll("[data-lc-mode]").forEach((button) => {
   button.addEventListener("click", () => setLecapMode(button.dataset.lcMode));
+});
+savedLecaps?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-lecap-delete]");
+  if (!btn) return;
+  deleteLecap(btn.dataset.lecapDelete).catch((err) => {
+    console.error("[lecap] delete error", err);
+    setCalculatorStatus("error", "Error al eliminar");
+  });
 });
 hdSearchSubmit?.addEventListener("click", () => {
   fetchHdSavedList().catch(() => setHdSaveStatus("error", "No se pudo buscar"));

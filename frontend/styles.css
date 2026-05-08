@@ -479,6 +479,23 @@ tbody td {
   flex-wrap: wrap;
 }
 
+.lc-delete-btn {
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 5px;
+  margin-right: 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+.lc-delete-btn:hover {
+  background: #c0392b;
+  color: white;
+}
+
 .hd-mode-panel {
   display: block;
 }

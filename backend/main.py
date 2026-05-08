@@ -1326,7 +1326,8 @@ async def calculator_save_lecap(payload: LecapCalculationRequest) -> dict:
 
 
 @app.delete("/api/calculators/lecaps/saved/{item_id}")
-async def calculator_delete_lecap(item_id: int) -> dict:
+async def calculator_delete_lecap(request: Request, item_id: int) -> dict:
+    _require_admin(request)
     if not storage.delete_lecap(item_id):
         raise HTTPException(status_code=404, detail="LECAP no encontrada.")
     return {"deleted": True}
