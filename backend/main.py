@@ -49,7 +49,7 @@ from backend.bond_calculators import (
     build_lecap_market_row,
     generate_bond_hd_default_dates,
 )
-from backend.bonds import BOND_TICKERS, TICKER_BY_SYMBOL
+from backend.bonds import BOND_TICKERS, TASA_FIJA_TICKERS, TICKER_BY_SYMBOL
 from backend.config import get_settings
 from backend.hard_dollar import calculate_hard_dollar_ytm, hard_dollar_bond
 from backend.market_calendar import market_calendar, parse_date
@@ -2545,6 +2545,48 @@ def _build_fixed_rate_calculation_payload(req: FixedRateCalculationRequest) -> d
     d = calc.to_dict()
     d["mode"] = "hd"
     return d
+
+
+def _all_tasa_fija_tickers() -> list[str]:
+    """Lista combinada: hardcoded base (TASA_FIJA_TICKERS family) + customs."""
+    base = [t.family for t in TASA_FIJA_TICKERS]
+    customs = storage.list_custom_tasa_fija_tickers()
+    seen = set(base)
+    for t in customs:
+        if t not in seen:
+            base.append(t)
+            seen.add(t)
+    return base
+
+
+@app.get("/api/calculators/bond-fixed-rate/tickers")
+async def calculator_tasa_fija_tickers() -> dict:
+    return {"tickers": _all_tasa_fija_tickers()}
+
+
+class TasaFijaCustomTickerRequest(BaseModel):
+    ticker: str
+
+
+@app.post("/api/calculators/bond-fixed-rate/tickers")
+async def calculator_add_tasa_fija_ticker(request: Request, payload: TasaFijaCustomTickerRequest) -> dict:
+    _require_admin(request)
+    ticker = (payload.ticker or "").upper().strip()
+    if not ticker or len(ticker) > 12 or not ticker.isalnum():
+        raise HTTPException(status_code=422, detail="Ticker invalido (max 12, alfanumerico).")
+    added = storage.add_custom_tasa_fija_ticker(ticker)
+    return {"ticker": ticker, "added": added, "tickers": _all_tasa_fija_tickers()}
+
+
+@app.delete("/api/calculators/bond-fixed-rate/tickers/{ticker}")
+async def calculator_delete_tasa_fija_ticker(request: Request, ticker: str) -> dict:
+    _require_admin(request)
+    base_set = {t.family for t in TASA_FIJA_TICKERS}
+    if ticker.upper() in base_set:
+        raise HTTPException(status_code=422, detail="No se pueden borrar tickers base.")
+    if not storage.delete_custom_tasa_fija_ticker(ticker):
+        raise HTTPException(status_code=404, detail="Ticker custom no encontrado.")
+    return {"deleted": True, "tickers": _all_tasa_fija_tickers()}
 
 
 @app.post("/api/calculators/bond-fixed-rate")

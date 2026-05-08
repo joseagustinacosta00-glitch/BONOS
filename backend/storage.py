@@ -269,6 +269,14 @@ class CalculatorStorage:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS tasa_fija_custom_tickers (
+                    ticker TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bond_fixed_rate_calculations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticker TEXT NOT NULL UNIQUE,
@@ -689,6 +697,36 @@ class CalculatorStorage:
         with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 "DELETE FROM lecap_custom_tickers WHERE ticker = ?",
+                (ticker,),
+            )
+        return cursor.rowcount > 0
+
+    def list_custom_tasa_fija_tickers(self) -> list[str]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT ticker FROM tasa_fija_custom_tickers ORDER BY ticker"
+            ).fetchall()
+        return [row["ticker"] for row in rows]
+
+    def add_custom_tasa_fija_ticker(self, ticker: str) -> bool:
+        ticker = ticker.upper().strip()
+        if not ticker:
+            raise ValueError("Ticker vacio.")
+        with closing(self._connect()) as connection, connection:
+            try:
+                connection.execute(
+                    "INSERT INTO tasa_fija_custom_tickers (ticker, created_at) VALUES (?, ?)",
+                    (ticker, now_argentina_iso()),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def delete_custom_tasa_fija_ticker(self, ticker: str) -> bool:
+        ticker = ticker.upper().strip()
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM tasa_fija_custom_tickers WHERE ticker = ?",
                 (ticker,),
             )
         return cursor.rowcount > 0

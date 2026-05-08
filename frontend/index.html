@@ -1150,9 +1150,27 @@
               </div>
 
               <section id="frSearchPanel" class="hd-mode-panel">
-                <div class="hd-saved-list" id="frSavedList">
-                  <span class="empty-cell">Cargando bonos guardados...</span>
-                </div>
+                <section class="cashflow-preview" aria-label="Bonos Tasa Fija guardados">
+                  <h3>Bonos Tasa Fija guardados</h3>
+                  <div class="table-wrap inner-table">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>Ticker</th>
+                          <th>Modo</th>
+                          <th>Emision</th>
+                          <th>Vencimiento</th>
+                          <th class="text-end">VNO</th>
+                          <th class="text-end">Tasa</th>
+                          <th>Detalle</th>
+                        </tr>
+                      </thead>
+                      <tbody id="frSavedList">
+                        <tr><td colspan="7" class="empty-state">Cargando bonos guardados...</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
                 <section id="frSavedDetail" class="cashflow-preview d-none" aria-label="Detalle bono guardado">
                   <h3 id="frSavedDetailTitle">Cashflow guardado</h3>
                   <p id="frSavedDetailMeta" class="hd-help"></p>
@@ -1177,7 +1195,14 @@
                 <form id="frHdForm" class="calculator-form hard-dollar-form">
                   <label>
                     <span>Ticker</span>
-                    <input id="frTicker" class="form-control form-control-sm" type="text" maxlength="20" placeholder="Ej: TO26" autocomplete="off" required>
+                    <select id="frTicker" class="form-select form-select-sm" required></select>
+                  </label>
+                  <label id="frAddTickerWrap" class="d-none">
+                    <span>Agregar ticker</span>
+                    <span class="lc-add-ticker-row">
+                      <input id="frNewTicker" class="form-control form-control-sm" type="text" maxlength="12" placeholder="Ej: T15Z7" autocomplete="off">
+                      <button id="frAddTickerBtn" class="btn btn-sm btn-outline-dark" type="button">+</button>
+                    </span>
                   </label>
                   <label>
                     <span>Fecha de emision</span>
@@ -1214,6 +1239,8 @@
                     <select id="frConvention" class="form-select form-select-sm">
                       <option value="30_360_us">30/360 US</option>
                       <option value="30_360_eu">30/360 EU</option>
+                      <option value="180_360_us">180/360 US</option>
+                      <option value="180_360_eu">180/360 EU</option>
                       <option value="act_365">ACT/365</option>
                       <option value="act_360">ACT/360</option>
                       <option value="act_act">ACT/ACT</option>

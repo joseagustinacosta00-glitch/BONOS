@@ -5458,6 +5458,12 @@ function initFrTemplate() {
   // Toggle Lecap-mode
   $$("#frLecapMode")?.addEventListener("change", applyFrLecapMode);
 
+  // Agregar ticker custom (admin)
+  $$("#frAddTickerBtn")?.addEventListener("click", () => addFrTicker());
+  $$("#frNewTicker")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addFrTicker(); }
+  });
+
   // Generar fechas (HD-mode)
   $$("#frGenerateSchedule")?.addEventListener("click", () => {
     generateFrSchedule().catch((err) => {
@@ -5503,7 +5509,10 @@ function initFrTemplate() {
       return;
     }
     const item = event.target.closest("[data-fr-open]");
-    if (item) openFrDetail(item.dataset.frOpen).catch(() => {});
+    if (item) {
+      event.preventDefault();
+      openFrDetail(item.dataset.frOpen).catch(() => {});
+    }
   });
 
   applyFrLecapMode();
@@ -5513,6 +5522,50 @@ function applyFrLecapMode() {
   const isLecap = $$("#frLecapMode")?.checked || false;
   document.querySelectorAll("[data-fr-hd]").forEach((el) => el.classList.toggle("d-none", isLecap));
   document.querySelectorAll("[data-fr-tem]").forEach((el) => el.classList.toggle("d-none", !isLecap));
+}
+
+async function fetchFrTickers() {
+  const sel = $$("#frTicker");
+  if (!sel) return;
+  try {
+    const r = await fetch("/api/calculators/bond-fixed-rate/tickers", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const j = await r.json();
+    const previous = sel.value;
+    sel.innerHTML = (j.tickers || [])
+      .map((t) => `<option value="${t}">${t}</option>`)
+      .join("");
+    if (previous && (j.tickers || []).includes(previous)) sel.value = previous;
+  } catch (e) {
+    console.error("[fr] tickers fetch", e);
+  }
+}
+
+async function addFrTicker() {
+  const inputEl = $$("#frNewTicker");
+  if (!inputEl) return;
+  const ticker = (inputEl.value || "").toUpperCase().trim();
+  if (!ticker) return;
+  try {
+    const r = await fetch("/api/calculators/bond-fixed-rate/tickers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ ticker }),
+    });
+    if (!r.ok) {
+      const detail = r.status === 403 ? "Solo admin puede agregar" : "Ticker invalido";
+      setCalculatorStatus("error", detail);
+      return;
+    }
+    inputEl.value = "";
+    await fetchFrTickers();
+    if ($$("#frTicker")) $$("#frTicker").value = ticker;
+    setCalculatorStatus("ok", `${ticker} agregado`);
+  } catch (e) {
+    console.error("[fr] add ticker", e);
+    setCalculatorStatus("error", "Error de red");
+  }
 }
 
 function setFrMode(mode) {
@@ -5532,6 +5585,10 @@ function setFrMode(mode) {
     fetchFrSavedList().catch(() => {});
   } else {
     resetFrForm();
+    fetchFrTickers().catch(() => {});
+    const addWrap = $$("#frAddTickerWrap");
+    const isAdmin = window.__currentUser?.role === "admin";
+    if (addWrap) addWrap.classList.toggle("d-none", !isAdmin);
   }
 }
 
@@ -5765,25 +5822,30 @@ async function fetchFrSavedList() {
     const j = await r.json();
     const items = j.items || [];
     if (!items.length) {
-      list.innerHTML = '<span class="empty-cell">No hay bonos Tasa Fija guardados</span>';
+      list.innerHTML = '<tr><td colspan="7" class="empty-state">No hay bonos Tasa Fija guardados</td></tr>';
       return;
     }
     const isAdmin = window.__currentUser?.role === "admin";
+    const fmt3 = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
     list.innerHTML = items.map((it) => {
-      const mode = it.lecap_mode ? "TEM" : "HD";
-      const meta = it.lecap_mode
-        ? `TEM ${formatNumber(it.tem_emission_percent || 0, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}%`
-        : `${it.bond_type || "-"} · ${it.frequency || "-"}`;
       const adminBtn = isAdmin
         ? `<button type="button" class="lc-delete-btn" data-fr-delete="${it.ticker}" title="Eliminar">✕</button>`
         : "";
-      return `<div class="hd-saved-row" data-fr-open="${it.ticker}">
-        <strong>${adminBtn}${it.ticker}</strong>
-        <span class="hd-help">${formatDate(it.issue_date)} → ${formatDate(it.maturity_date)} · VNO ${it.face_value} · [${mode}] ${meta}</span>
-      </div>`;
+      const tasa = it.lecap_mode
+        ? `${formatNumber(it.tem_emission_percent || 0, fmt3)}% TEM`
+        : `${it.bond_type || "-"} · ${it.frequency || "-"}`;
+      return `<tr>
+        <td class="ticker">${adminBtn}${it.ticker}</td>
+        <td>${it.lecap_mode ? "TEM" : "HD"}</td>
+        <td>${formatDate(it.issue_date)}</td>
+        <td>${formatDate(it.maturity_date)}</td>
+        <td class="text-end">${it.face_value}</td>
+        <td class="text-end">${tasa}</td>
+        <td><a href="#" data-fr-open="${it.ticker}">Ver cashflow</a></td>
+      </tr>`;
     }).join("");
   } catch (e) {
-    list.innerHTML = '<span class="empty-cell">Error al cargar lista</span>';
+    list.innerHTML = '<tr><td colspan="7" class="empty-state">Error al cargar lista</td></tr>';
   }
 }
 
