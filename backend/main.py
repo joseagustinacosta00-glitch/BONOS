@@ -357,6 +357,36 @@ class BondHdScheduleRequest(BaseModel):
     frequency: str = Field(pattern="^(annual|semiannual|quarterly|monthly|one_payment)$")
 
 
+# --- Tasa Fija (ARS) ---
+# Cuando lecap_mode=True, se calcula bullet con TEM compuesta (logica LECAP).
+# Cuando lecap_mode=False, se calcula como Hard Dollar (cupones, frecuencia, etc.)
+class FixedRateCalculationRequest(BaseModel):
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
+    lecap_mode: bool = False
+    # Modo TEM (lecap_mode=True)
+    tem_emission_percent: float | None = None
+    # Modo HD (lecap_mode=False)
+    bond_type: str | None = Field(default=None, pattern="^(bullet|amortizable|zero_coupon)$")
+    frequency: str | None = Field(default=None, pattern="^(annual|semiannual|quarterly|monthly|one_payment)$")
+    convention: str | None = Field(default=None, pattern="^(30_360_eu|30_360_us|180_360_eu|180_360_us|act_360|act_365|act_act)$")
+    coupons: list[BondHdCouponPayload] | None = None
+
+
+class FixedRateSavePayload(BaseModel):
+    ticker: str = Field(min_length=1, max_length=20)
+    issue_date: date
+    maturity_date: date
+    face_value: float = Field(gt=0)
+    lecap_mode: bool = False
+    tem_emission_percent: float | None = None
+    bond_type: str | None = Field(default=None, pattern="^(bullet|amortizable|zero_coupon)$")
+    frequency: str | None = Field(default=None, pattern="^(annual|semiannual|quarterly|monthly|one_payment)$")
+    convention: str | None = Field(default=None, pattern="^(30_360_eu|30_360_us|180_360_eu|180_360_us|act_360|act_365|act_act)$")
+    payload: dict
+
+
 class TPlusConversionRequest(BaseModel):
     direction: str = Field(pattern="^(t0_to_t1|t1_to_t0)$")
     price: float = Field(gt=0)
@@ -2464,6 +2494,108 @@ async def calculator_bond_hd(payload: BondHdCalculationRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return calculation.to_dict()
+
+
+# ============================================================
+# Tasa Fija (ARS)
+# ============================================================
+
+def _build_fixed_rate_calculation_payload(req: FixedRateCalculationRequest) -> dict:
+    """Decide ruta segun lecap_mode y devuelve el dict del calculo.
+    Reusa build_lecap_calculation o build_bond_hd_calculation 1:1."""
+    if req.lecap_mode:
+        if req.tem_emission_percent is None:
+            raise ValueError("tem_emission_percent es requerido cuando lecap_mode=True.")
+        # Pasamos un ticker dummy ya que el calculo en si no depende del nombre
+        # (no validamos contra LECAP_TICKERS porque Tasa Fija tiene su propio
+        # universo de tickers).
+        calc = build_lecap_calculation(
+            ticker="FR",  # placeholder, no se usa para validar
+            issue_date=req.issue_date,
+            maturity_date=req.maturity_date,
+            face_value=req.face_value,
+            tem_emission_percent=req.tem_emission_percent,
+            calendar=market_calendar,
+            today=now_argentina().date(),
+            allowed_tickers=None,  # sin validacion de ticker
+        )
+        d = calc.to_dict()
+        d["mode"] = "tem"
+        return d
+    # Modo HD-like
+    if not (req.bond_type and req.frequency and req.convention and req.coupons):
+        raise ValueError("bond_type, frequency, convention y coupons son requeridos cuando lecap_mode=False.")
+    calc = build_bond_hd_calculation(
+        issue_date=req.issue_date,
+        maturity_date=req.maturity_date,
+        face_value=req.face_value,
+        bond_type=BondHdType(req.bond_type),
+        frequency=BondHdFrequency(req.frequency),
+        convention=BondHdConvention(req.convention),
+        coupons=[
+            BondHdCouponInput(
+                payment_date=c.payment_date,
+                annual_rate_percent=c.annual_rate_percent,
+                amortization_percent=c.amortization_percent,
+            )
+            for c in req.coupons
+        ],
+        calendar=market_calendar,
+    )
+    d = calc.to_dict()
+    d["mode"] = "hd"
+    return d
+
+
+@app.post("/api/calculators/bond-fixed-rate")
+async def calculator_bond_fixed_rate(payload: FixedRateCalculationRequest) -> dict:
+    try:
+        return _build_fixed_rate_calculation_payload(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/calculators/bond-fixed-rate/saved")
+async def calculator_fixed_rate_saved() -> dict:
+    return {"items": [s.to_dict() for s in storage.list_fixed_rate()]}
+
+
+@app.get("/api/calculators/bond-fixed-rate/saved/{ticker}")
+async def calculator_fixed_rate_saved_one(ticker: str) -> dict:
+    saved = storage.get_fixed_rate(ticker)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Bono Tasa Fija no encontrado.")
+    return {"item": saved.to_dict()}
+
+
+@app.post("/api/calculators/bond-fixed-rate/saved")
+async def calculator_fixed_rate_save(request: Request, payload: FixedRateSavePayload) -> dict:
+    _require_user(request)
+    import json as _json
+    try:
+        saved = storage.upsert_fixed_rate(
+            ticker=payload.ticker,
+            issue_date=payload.issue_date,
+            maturity_date=payload.maturity_date,
+            face_value=payload.face_value,
+            lecap_mode=payload.lecap_mode,
+            tem_emission_percent=payload.tem_emission_percent,
+            bond_type=payload.bond_type,
+            frequency=payload.frequency,
+            convention=payload.convention,
+            payload_json=_json.dumps(payload.payload or {}),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"item": saved.to_dict()}
+
+
+@app.delete("/api/calculators/bond-fixed-rate/saved/{ticker}")
+async def calculator_fixed_rate_delete(request: Request, ticker: str) -> dict:
+    _require_admin(request)
+    if not storage.delete_fixed_rate(ticker):
+        raise HTTPException(status_code=404, detail="Bono Tasa Fija no encontrado.")
+    return {"deleted": True}
 
 
 @app.get("/api/calculators/cashflows")

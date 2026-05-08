@@ -173,6 +173,48 @@ class SavedBondHd:
 
 
 @dataclass(frozen=True)
+class SavedFixedRate:
+    """Bono Tasa Fija persistido. Si lecap_mode=True, el cashflow es un
+    bullet calculado con TEM compuesta (logica LECAP). Si False, sigue la
+    estructura HD con coupons/frequency/convention."""
+    id: int
+    ticker: str
+    issue_date: date
+    maturity_date: date
+    face_value: float
+    lecap_mode: bool
+    tem_emission_percent: float | None
+    bond_type: str | None
+    frequency: str | None
+    convention: str | None
+    payload_json: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        import json
+        try:
+            payload = json.loads(self.payload_json) if self.payload_json else {}
+        except (TypeError, ValueError):
+            payload = {}
+        return {
+            "id": self.id,
+            "ticker": self.ticker,
+            "issue_date": self.issue_date.isoformat(),
+            "maturity_date": self.maturity_date.isoformat(),
+            "face_value": self.face_value,
+            "lecap_mode": self.lecap_mode,
+            "tem_emission_percent": self.tem_emission_percent,
+            "bond_type": self.bond_type,
+            "frequency": self.frequency,
+            "convention": self.convention,
+            "payload": payload,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass(frozen=True)
 class AiMemoryNote:
     id: int
     title: str
@@ -222,6 +264,25 @@ class CalculatorStorage:
                 CREATE TABLE IF NOT EXISTS lecap_custom_tickers (
                     ticker TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bond_fixed_rate_calculations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL UNIQUE,
+                    issue_date TEXT NOT NULL,
+                    maturity_date TEXT NOT NULL,
+                    face_value REAL NOT NULL,
+                    lecap_mode INTEGER NOT NULL DEFAULT 0,
+                    tem_emission_percent REAL,
+                    bond_type TEXT,
+                    frequency TEXT,
+                    convention TEXT,
+                    payload_json TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -1085,6 +1146,130 @@ class CalculatorStorage:
                 (normalized,),
             )
         return cursor.rowcount > 0
+
+    # --- Bono Tasa Fija persistencia ---
+    def list_fixed_rate(self) -> list[SavedFixedRate]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       lecap_mode, tem_emission_percent, bond_type, frequency,
+                       convention, payload_json, created_at, updated_at
+                FROM bond_fixed_rate_calculations
+                ORDER BY ticker ASC
+                """
+            ).fetchall()
+        return [self._row_to_fixed_rate(row) for row in rows]
+
+    def get_fixed_rate(self, ticker: str) -> SavedFixedRate | None:
+        normalized = _normalize_base_ticker(ticker)
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       lecap_mode, tem_emission_percent, bond_type, frequency,
+                       convention, payload_json, created_at, updated_at
+                FROM bond_fixed_rate_calculations
+                WHERE ticker = ?
+                """,
+                (normalized,),
+            ).fetchone()
+        return self._row_to_fixed_rate(row) if row else None
+
+    def upsert_fixed_rate(
+        self,
+        ticker: str,
+        issue_date: date,
+        maturity_date: date,
+        face_value: float,
+        lecap_mode: bool,
+        tem_emission_percent: float | None,
+        bond_type: str | None,
+        frequency: str | None,
+        convention: str | None,
+        payload_json: str,
+    ) -> SavedFixedRate:
+        now = now_argentina_iso()
+        normalized = _normalize_base_ticker(ticker)
+        if not normalized:
+            raise ValueError("El ticker es obligatorio.")
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO bond_fixed_rate_calculations (
+                    ticker, issue_date, maturity_date, face_value, lecap_mode,
+                    tem_emission_percent, bond_type, frequency, convention,
+                    payload_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    issue_date = excluded.issue_date,
+                    maturity_date = excluded.maturity_date,
+                    face_value = excluded.face_value,
+                    lecap_mode = excluded.lecap_mode,
+                    tem_emission_percent = excluded.tem_emission_percent,
+                    bond_type = excluded.bond_type,
+                    frequency = excluded.frequency,
+                    convention = excluded.convention,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    normalized,
+                    issue_date.isoformat(),
+                    maturity_date.isoformat(),
+                    face_value,
+                    1 if lecap_mode else 0,
+                    tem_emission_percent,
+                    bond_type,
+                    frequency,
+                    convention,
+                    payload_json,
+                    now,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT id, ticker, issue_date, maturity_date, face_value,
+                       lecap_mode, tem_emission_percent, bond_type, frequency,
+                       convention, payload_json, created_at, updated_at
+                FROM bond_fixed_rate_calculations
+                WHERE ticker = ?
+                """,
+                (normalized,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("No se pudo guardar el bono Tasa Fija.")
+        return self._row_to_fixed_rate(row)
+
+    def delete_fixed_rate(self, ticker: str) -> bool:
+        normalized = _normalize_base_ticker(ticker)
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM bond_fixed_rate_calculations WHERE ticker = ?",
+                (normalized,),
+            )
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_to_fixed_rate(row: sqlite3.Row) -> SavedFixedRate:
+        tem_raw = row["tem_emission_percent"]
+        return SavedFixedRate(
+            id=int(row["id"]),
+            ticker=str(row["ticker"]),
+            issue_date=date.fromisoformat(str(row["issue_date"])),
+            maturity_date=date.fromisoformat(str(row["maturity_date"])),
+            face_value=float(row["face_value"]),
+            lecap_mode=bool(row["lecap_mode"]),
+            tem_emission_percent=float(tem_raw) if tem_raw is not None else None,
+            bond_type=str(row["bond_type"]) if row["bond_type"] else None,
+            frequency=str(row["frequency"]) if row["frequency"] else None,
+            convention=str(row["convention"]) if row["convention"] else None,
+            payload_json=str(row["payload_json"] or ""),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
 
     # --- Bono TAMAR persistencia ---
     def list_bond_tamar(self) -> list[SavedBondTamar]:

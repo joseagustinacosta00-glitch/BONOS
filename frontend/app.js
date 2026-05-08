@@ -2350,13 +2350,16 @@ function setBondModel(model) {
   const showHdTemplate = isHardDollar || isDlk;
   const isTamar = model === "tamar";
   const isDual = model === "dual";
+  const isFixedRate = model === "pesos_fixed_rate";
+  const fixedRateTemplate = document.querySelector("#fixedRateTemplate");
   currentBondModel = model;
   lecapTemplate.classList.toggle("d-none", !isLecap);
   hardDollarTemplate.classList.toggle("d-none", !showHdTemplate);
   if (tamarTemplate) tamarTemplate.classList.toggle("d-none", !isTamar);
+  if (fixedRateTemplate) fixedRateTemplate.classList.toggle("d-none", !isFixedRate);
   lecapSubmenu.classList.toggle("d-none", !isLecap);
   dualSubmenu.classList.toggle("d-none", !isDual);
-  calculatorPlaceholder.classList.toggle("d-none", isLecap || showHdTemplate || isTamar);
+  calculatorPlaceholder.classList.toggle("d-none", isLecap || showHdTemplate || isTamar || isFixedRate);
 
   // Mostrar/ocultar extras DLK + ajustar titulo del cashflow
   const dlkBar = document.querySelector("#dlkFxBar");
@@ -2379,6 +2382,10 @@ function setBondModel(model) {
     if (tamarMaturityDate) attachDdmmAutoformat(tamarMaturityDate);
     if (tamarAsOfDate && !tamarAsOfDate.value) tamarAsOfDate.value = _todayIso();
     fetchTamarSavedList?.().catch(() => {});
+  } else if (isFixedRate) {
+    calculatorPlaceholder.textContent = "";
+    initFrTemplate();
+    setFrMode("search");
   } else if (isDual) {
     calculatorPlaceholder.textContent = "DUAL queda preparado con CER, TAMAR y FIJA como dualidades seleccionables. El formulario se agrega cuando definamos el flujo.";
   } else {
@@ -5421,3 +5428,432 @@ function renderSystemStatus(p) {
 
 systemStatusRefresh?.addEventListener("click", () => refreshSystemStatus());
 if (systemStatusBody) refreshSystemStatus();
+
+// ============================================================
+// Calculadora Tasa Fija (ARS) - replica HD + toggle TEM
+// ============================================================
+let _frInitDone = false;
+let _frCoupons = [];           // [{date_iso, annual_rate, amort_pct}, ...]
+let _frLatestCalc = null;
+let _frLatestPayload = null;   // request body que generó _frLatestCalc
+
+const $$ = (sel) => document.querySelector(sel);
+
+function initFrTemplate() {
+  const issueEl = $$("#frIssueDate");
+  const matEl = $$("#frMaturityDate");
+  if (issueEl) attachDdmmAutoformat(issueEl);
+  if (matEl) attachDdmmAutoformat(matEl);
+  if (_frInitDone) {
+    applyFrLecapMode();
+    return;
+  }
+  _frInitDone = true;
+
+  // Mode switch (search/new)
+  $$("#frModeSwitch")?.querySelectorAll("[data-fr-mode]").forEach((b) => {
+    b.addEventListener("click", () => setFrMode(b.dataset.frMode));
+  });
+
+  // Toggle Lecap-mode
+  $$("#frLecapMode")?.addEventListener("change", applyFrLecapMode);
+
+  // Generar fechas (HD-mode)
+  $$("#frGenerateSchedule")?.addEventListener("click", () => {
+    generateFrSchedule().catch((err) => {
+      console.error("[fr] schedule", err);
+      setCalculatorStatus("error", "Error al generar fechas");
+    });
+  });
+
+  // Cupon anual % aplica a toda la tabla
+  $$("#frCouponRate")?.addEventListener("input", () => {
+    const rate = parseNumberArg($$("#frCouponRate").value);
+    if (!isFinite(rate)) return;
+    _frCoupons.forEach((c) => { c.annual_rate = rate; });
+    renderFrCouponsTable();
+  });
+
+  // Form submit = calcular
+  $$("#frHdForm")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    calculateFr().catch((err) => {
+      console.error("[fr] calculate", err);
+      setCalculatorStatus("error", "Error al calcular");
+    });
+  });
+
+  // Save
+  $$("#frSave")?.addEventListener("click", () => {
+    saveFr().catch((err) => {
+      console.error("[fr] save", err);
+      setCalculatorStatus("error", "Error al guardar");
+    });
+  });
+
+  // Saved list click delegation (open detail / delete)
+  $$("#frSavedList")?.addEventListener("click", (event) => {
+    const delBtn = event.target.closest("[data-fr-delete]");
+    if (delBtn) {
+      event.stopPropagation();
+      deleteFr(delBtn.dataset.frDelete).catch((err) => {
+        console.error("[fr] delete", err);
+        setCalculatorStatus("error", "Error al eliminar");
+      });
+      return;
+    }
+    const item = event.target.closest("[data-fr-open]");
+    if (item) openFrDetail(item.dataset.frOpen).catch(() => {});
+  });
+
+  applyFrLecapMode();
+}
+
+function applyFrLecapMode() {
+  const isLecap = $$("#frLecapMode")?.checked || false;
+  document.querySelectorAll("[data-fr-hd]").forEach((el) => el.classList.toggle("d-none", isLecap));
+  document.querySelectorAll("[data-fr-tem]").forEach((el) => el.classList.toggle("d-none", !isLecap));
+}
+
+function setFrMode(mode) {
+  const search = $$("#frSearchPanel");
+  const create = $$("#frNewPanel");
+  if (!search || !create) return;
+  const isSearch = mode === "search";
+  search.classList.toggle("d-none", !isSearch);
+  create.classList.toggle("d-none", isSearch);
+  $$("#frModeSwitch")?.querySelectorAll("[data-fr-mode]").forEach((b) => {
+    const active = b.dataset.frMode === mode;
+    b.classList.toggle("active", active);
+    b.classList.toggle("btn-dark", active);
+    b.classList.toggle("btn-outline-dark", !active);
+  });
+  if (isSearch) {
+    fetchFrSavedList().catch(() => {});
+  } else {
+    resetFrForm();
+  }
+}
+
+function resetFrForm() {
+  $$("#frTicker").value = "";
+  $$("#frIssueDate").value = "";
+  $$("#frMaturityDate").value = "";
+  $$("#frFaceValue").value = "100";
+  $$("#frTemEmission").value = "";
+  $$("#frCouponRate").value = "0";
+  $$("#frLecapMode").checked = false;
+  applyFrLecapMode();
+  _frCoupons = [];
+  _frLatestCalc = null;
+  _frLatestPayload = null;
+  $$("#frSave").disabled = true;
+  renderFrCouponsTable();
+  $$("#frCashflowBody").innerHTML = '<tr><td colspan="9" class="empty-state">Completa los datos y calcula</td></tr>';
+  $$("#frCashflowHead").innerHTML = "";
+  setCalculatorStatus("draft", "Borrador");
+}
+
+async function generateFrSchedule() {
+  const issueIso = parseDdmmYyyy($$("#frIssueDate").value);
+  const matIso = parseDdmmYyyy($$("#frMaturityDate").value);
+  const freq = $$("#frFrequency").value;
+  if (!issueIso || !matIso) {
+    setCalculatorStatus("error", "Fechas invalidas");
+    return;
+  }
+  const r = await fetch("/api/calculators/bond-hd/schedule", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ issue_date: issueIso, maturity_date: matIso, frequency: freq }),
+  });
+  if (!r.ok) {
+    setCalculatorStatus("error", "No se pudo generar fechas");
+    return;
+  }
+  const j = await r.json();
+  const bondType = $$("#frBondType").value;
+  const couponRate = parseNumberArg($$("#frCouponRate").value) || 0;
+  const dates = j.payment_dates || [];
+  // Distribucion de amortizacion: amortizable -> uniforme; bullet/zero -> 100% al ultimo
+  _frCoupons = dates.map((d, idx) => {
+    let amort = 0;
+    if (bondType === "amortizable") {
+      amort = 100 / dates.length;
+    } else if (idx === dates.length - 1) {
+      amort = 100;
+    }
+    return { date_iso: d, annual_rate: bondType === "zero_coupon" ? 0 : couponRate, amort_pct: amort };
+  });
+  renderFrCouponsTable();
+  setCalculatorStatus("ok", `${dates.length} cupones generados`);
+}
+
+function renderFrCouponsTable() {
+  const body = $$("#frCouponsBody");
+  if (!body) return;
+  if (!_frCoupons.length) {
+    body.innerHTML = '<tr><td colspan="4" class="empty-state">Generar fechas o calcular</td></tr>';
+    return;
+  }
+  body.innerHTML = _frCoupons.map((c, idx) => `
+    <tr>
+      <td>${idx + 1}</td>
+      <td>${formatDate(c.date_iso)}</td>
+      <td class="text-end"><input class="fr-coupon-input" data-fr-coupon-rate="${idx}" value="${c.annual_rate}"></td>
+      <td class="text-end"><input class="fr-coupon-input" data-fr-coupon-amort="${idx}" value="${c.amort_pct}"></td>
+    </tr>
+  `).join("");
+  body.querySelectorAll("[data-fr-coupon-rate]").forEach((el) => {
+    el.addEventListener("input", () => {
+      const i = +el.dataset.frCouponRate;
+      _frCoupons[i].annual_rate = parseNumberArg(el.value) || 0;
+    });
+  });
+  body.querySelectorAll("[data-fr-coupon-amort]").forEach((el) => {
+    el.addEventListener("input", () => {
+      const i = +el.dataset.frCouponAmort;
+      _frCoupons[i].amort_pct = parseNumberArg(el.value) || 0;
+    });
+  });
+}
+
+async function calculateFr() {
+  const issueIso = parseDdmmYyyy($$("#frIssueDate").value);
+  const matIso = parseDdmmYyyy($$("#frMaturityDate").value);
+  const faceValue = parseInt($$("#frFaceValue").value, 10);
+  const lecapMode = $$("#frLecapMode").checked;
+  if (!issueIso || !matIso) {
+    setCalculatorStatus("error", "Fechas invalidas (DD/MM/AAAA)");
+    return;
+  }
+  if (!Number.isInteger(faceValue) || faceValue <= 0) {
+    setCalculatorStatus("error", "VNO invalido");
+    return;
+  }
+  const body = {
+    issue_date: issueIso,
+    maturity_date: matIso,
+    face_value: faceValue,
+    lecap_mode: lecapMode,
+  };
+  if (lecapMode) {
+    const tem = parseNumberArg($$("#frTemEmission").value);
+    if (!isFinite(tem)) { setCalculatorStatus("error", "TEM invalida"); return; }
+    body.tem_emission_percent = tem;
+  } else {
+    if (!_frCoupons.length) {
+      setCalculatorStatus("error", "Genera fechas y carga cupones primero");
+      return;
+    }
+    body.bond_type = $$("#frBondType").value;
+    body.frequency = $$("#frFrequency").value;
+    body.convention = $$("#frConvention").value;
+    body.coupons = _frCoupons.map((c) => ({
+      payment_date: c.date_iso,
+      annual_rate_percent: c.annual_rate || 0,
+      amortization_percent: c.amort_pct || 0,
+    }));
+  }
+  setCalculatorStatus("draft", "Calculando");
+  const r = await fetch("/api/calculators/bond-fixed-rate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let detail = "Revisar datos";
+    try { detail = (await r.json()).detail || detail; } catch {}
+    setCalculatorStatus("error", String(detail).slice(0, 80));
+    return;
+  }
+  _frLatestCalc = await r.json();
+  _frLatestPayload = body;
+  renderFrCashflow(_frLatestCalc);
+  $$("#frSave").disabled = false;
+  setCalculatorStatus("ok", "Calculo OK");
+}
+
+function renderFrCashflow(payload) {
+  const head = $$("#frCashflowHead");
+  const body = $$("#frCashflowBody");
+  if (!head || !body) return;
+  const fmt3 = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
+  if (payload.mode === "tem") {
+    head.innerHTML = `<tr>
+      <th>#</th><th>Fecha pago</th><th>Fecha efectiva</th>
+      <th class="text-end">Dias 360</th>
+      <th class="text-end">Amort VN</th><th class="text-end">Tasa TEM</th>
+      <th class="text-end">Interes</th><th class="text-end">Total</th>
+    </tr>`;
+    body.innerHTML = (payload.cashflows || []).map((c) => `
+      <tr>
+        <td>${c.number}</td>
+        <td>${formatDate(c.payment_date)}</td>
+        <td>${formatDate(c.effective_payment_date)}</td>
+        <td class="text-end">${c.applicable_days}</td>
+        <td class="text-end">${formatNumber(c.amortization_vn, fmt3)}</td>
+        <td class="text-end">${formatPercent(c.applicable_rate, 3)}</td>
+        <td class="text-end">${formatNumber(c.interest, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.total, fmt3)}</td>
+      </tr>
+    `).join("");
+  } else {
+    head.innerHTML = `<tr>
+      <th>#</th><th>Fecha teorica</th><th>Fecha efectiva</th>
+      <th class="text-end">Dias periodo</th>
+      <th class="text-end">Tasa anual</th><th class="text-end">VR%</th>
+      <th class="text-end">Amort/100</th><th class="text-end">Interes/100</th><th class="text-end">Total/100</th>
+    </tr>`;
+    body.innerHTML = (payload.cashflows || []).map((c) => `
+      <tr>
+        <td>${c.number}</td>
+        <td>${formatDate(c.payment_date)}</td>
+        <td>${formatDate(c.effective_payment_date)}</td>
+        <td class="text-end">${c.period_days}</td>
+        <td class="text-end">${formatPercent((c.annual_rate_percent || 0) / 100, 3)}</td>
+        <td class="text-end">${formatNumber(c.residual_vn_percent, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.amortization_per_100, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.interest_per_100, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.total_per_100, fmt3)}</td>
+      </tr>
+    `).join("");
+  }
+}
+
+async function saveFr() {
+  if (!_frLatestCalc || !_frLatestPayload) {
+    setCalculatorStatus("error", "Calcula primero");
+    return;
+  }
+  const ticker = ($$("#frTicker").value || "").toUpperCase().trim();
+  if (!ticker) {
+    setCalculatorStatus("error", "Ticker vacio");
+    return;
+  }
+  const body = {
+    ticker,
+    issue_date: _frLatestPayload.issue_date,
+    maturity_date: _frLatestPayload.maturity_date,
+    face_value: _frLatestPayload.face_value,
+    lecap_mode: _frLatestPayload.lecap_mode,
+    tem_emission_percent: _frLatestPayload.tem_emission_percent,
+    bond_type: _frLatestPayload.bond_type,
+    frequency: _frLatestPayload.frequency,
+    convention: _frLatestPayload.convention,
+    payload: _frLatestCalc,
+  };
+  const r = await fetch("/api/calculators/bond-fixed-rate/saved", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    setCalculatorStatus("error", "No se pudo guardar");
+    return;
+  }
+  setCalculatorStatus("ok", `${ticker} guardada`);
+}
+
+async function fetchFrSavedList() {
+  const list = $$("#frSavedList");
+  if (!list) return;
+  try {
+    const r = await fetch("/api/calculators/bond-fixed-rate/saved", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("fetch fallo");
+    const j = await r.json();
+    const items = j.items || [];
+    if (!items.length) {
+      list.innerHTML = '<span class="empty-cell">No hay bonos Tasa Fija guardados</span>';
+      return;
+    }
+    const isAdmin = window.__currentUser?.role === "admin";
+    list.innerHTML = items.map((it) => {
+      const mode = it.lecap_mode ? "TEM" : "HD";
+      const meta = it.lecap_mode
+        ? `TEM ${formatNumber(it.tem_emission_percent || 0, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}%`
+        : `${it.bond_type || "-"} · ${it.frequency || "-"}`;
+      const adminBtn = isAdmin
+        ? `<button type="button" class="lc-delete-btn" data-fr-delete="${it.ticker}" title="Eliminar">✕</button>`
+        : "";
+      return `<div class="hd-saved-row" data-fr-open="${it.ticker}">
+        <strong>${adminBtn}${it.ticker}</strong>
+        <span class="hd-help">${formatDate(it.issue_date)} → ${formatDate(it.maturity_date)} · VNO ${it.face_value} · [${mode}] ${meta}</span>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    list.innerHTML = '<span class="empty-cell">Error al cargar lista</span>';
+  }
+}
+
+async function openFrDetail(ticker) {
+  const r = await fetch(`/api/calculators/bond-fixed-rate/saved/${ticker}`, { credentials: "same-origin" });
+  if (!r.ok) return;
+  const j = await r.json();
+  const it = j.item;
+  const detail = $$("#frSavedDetail");
+  if (!detail) return;
+  detail.classList.remove("d-none");
+  $$("#frSavedDetailTitle").textContent = it.ticker;
+  $$("#frSavedDetailMeta").textContent = `${formatDate(it.issue_date)} → ${formatDate(it.maturity_date)} · VNO ${it.face_value} · ${it.lecap_mode ? "Modo TEM" : "Modo HD"}`;
+  // El payload guardado tiene la respuesta completa del calculo (mode + cashflows)
+  const head = $$("#frSavedDetailHead");
+  const body = $$("#frSavedDetailBody");
+  const calc = it.payload || {};
+  const fmt3 = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
+  if (calc.mode === "tem") {
+    head.innerHTML = `<tr>
+      <th>#</th><th>Fecha pago</th><th>Fecha efectiva</th>
+      <th class="text-end">Dias 360</th><th class="text-end">Amort VN</th>
+      <th class="text-end">TEM</th><th class="text-end">Interes</th><th class="text-end">Total</th>
+    </tr>`;
+    body.innerHTML = (calc.cashflows || []).map((c) => `
+      <tr>
+        <td>${c.number}</td>
+        <td>${formatDate(c.payment_date)}</td>
+        <td>${formatDate(c.effective_payment_date)}</td>
+        <td class="text-end">${c.applicable_days}</td>
+        <td class="text-end">${formatNumber(c.amortization_vn, fmt3)}</td>
+        <td class="text-end">${formatPercent(c.applicable_rate, 3)}</td>
+        <td class="text-end">${formatNumber(c.interest, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.total, fmt3)}</td>
+      </tr>
+    `).join("");
+  } else {
+    head.innerHTML = `<tr>
+      <th>#</th><th>Fecha teorica</th><th>Fecha efectiva</th>
+      <th class="text-end">Dias periodo</th><th class="text-end">Tasa anual</th>
+      <th class="text-end">VR%</th><th class="text-end">Amort/100</th>
+      <th class="text-end">Interes/100</th><th class="text-end">Total/100</th>
+    </tr>`;
+    body.innerHTML = (calc.cashflows || []).map((c) => `
+      <tr>
+        <td>${c.number}</td>
+        <td>${formatDate(c.payment_date)}</td>
+        <td>${formatDate(c.effective_payment_date)}</td>
+        <td class="text-end">${c.period_days}</td>
+        <td class="text-end">${formatPercent((c.annual_rate_percent || 0) / 100, 3)}</td>
+        <td class="text-end">${formatNumber(c.residual_vn_percent, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.amortization_per_100, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.interest_per_100, fmt3)}</td>
+        <td class="text-end">${formatNumber(c.total_per_100, fmt3)}</td>
+      </tr>
+    `).join("");
+  }
+}
+
+async function deleteFr(ticker) {
+  if (!confirm(`¿Eliminar el bono ${ticker}? No se puede deshacer.`)) return;
+  const r = await fetch(`/api/calculators/bond-fixed-rate/saved/${ticker}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  if (!r.ok) {
+    const detail = r.status === 403 ? "Solo admin puede eliminar" : "No se pudo eliminar";
+    setCalculatorStatus("error", detail);
+    return;
+  }
+  setCalculatorStatus("ok", `${ticker} eliminado`);
+  await fetchFrSavedList();
+}

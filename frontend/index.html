@@ -1142,6 +1142,130 @@
                 </section>
               </section>
             </div>
+
+            <div id="fixedRateTemplate" class="d-none">
+              <div id="frModeSwitch" class="hd-mode-switch">
+                <button type="button" class="btn btn-sm btn-dark active" data-fr-mode="search">Bonos guardados</button>
+                <button type="button" class="btn btn-sm btn-outline-dark" data-fr-mode="new">Crear nuevo cashflow</button>
+              </div>
+
+              <section id="frSearchPanel" class="hd-mode-panel">
+                <div class="hd-saved-list" id="frSavedList">
+                  <span class="empty-cell">Cargando bonos guardados...</span>
+                </div>
+                <section id="frSavedDetail" class="cashflow-preview d-none" aria-label="Detalle bono guardado">
+                  <h3 id="frSavedDetailTitle">Cashflow guardado</h3>
+                  <p id="frSavedDetailMeta" class="hd-help"></p>
+                  <div class="table-wrap inner-table">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead id="frSavedDetailHead"></thead>
+                      <tbody id="frSavedDetailBody">
+                        <tr><td colspan="9" class="empty-state">Elegi un bono para ver el cashflow</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+
+              <section id="frNewPanel" class="hd-mode-panel d-none">
+                <label class="fr-tem-toggle">
+                  <input type="checkbox" id="frLecapMode">
+                  <span>Licitar via TEM (cashflow bullet con TEM compuesta, estilo LECAP)</span>
+                </label>
+
+                <!-- Form HD-mode (default) -->
+                <form id="frHdForm" class="calculator-form hard-dollar-form">
+                  <label>
+                    <span>Ticker</span>
+                    <input id="frTicker" class="form-control form-control-sm" type="text" maxlength="20" placeholder="Ej: TO26" autocomplete="off" required>
+                  </label>
+                  <label>
+                    <span>Fecha de emision</span>
+                    <input id="frIssueDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
+                  </label>
+                  <label>
+                    <span>Fecha de vencimiento</span>
+                    <input id="frMaturityDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
+                  </label>
+                  <label>
+                    <span>VNO</span>
+                    <input id="frFaceValue" class="form-control form-control-sm" type="number" min="1" step="1" value="100" required>
+                  </label>
+                  <label data-fr-hd>
+                    <span>Frecuencia</span>
+                    <select id="frFrequency" class="form-select form-select-sm">
+                      <option value="semiannual">Semestral</option>
+                      <option value="annual">Anual</option>
+                      <option value="quarterly">Trimestral</option>
+                      <option value="monthly">Mensual</option>
+                      <option value="one_payment">Un solo pago</option>
+                    </select>
+                  </label>
+                  <label data-fr-hd>
+                    <span>Tipo de bono</span>
+                    <select id="frBondType" class="form-select form-select-sm">
+                      <option value="bullet">Bullet</option>
+                      <option value="amortizable">Amortizable</option>
+                      <option value="zero_coupon">Cupon cero</option>
+                    </select>
+                  </label>
+                  <label data-fr-hd>
+                    <span>Convencion</span>
+                    <select id="frConvention" class="form-select form-select-sm">
+                      <option value="30_360_us">30/360 US</option>
+                      <option value="30_360_eu">30/360 EU</option>
+                      <option value="act_365">ACT/365</option>
+                      <option value="act_360">ACT/360</option>
+                      <option value="act_act">ACT/ACT</option>
+                    </select>
+                  </label>
+                  <label data-fr-hd>
+                    <span>Cupon anual %</span>
+                    <input id="frCouponRate" class="form-control form-control-sm" type="text" inputmode="decimal" placeholder="Ej: 5,5" value="0">
+                  </label>
+                  <label data-fr-tem class="d-none">
+                    <span>TEM emision %</span>
+                    <input id="frTemEmission" class="form-control form-control-sm" type="text" inputmode="decimal" placeholder="Ej: 2,5">
+                  </label>
+                  <button data-fr-hd id="frGenerateSchedule" type="button" class="btn btn-sm btn-outline-dark">Generar fechas</button>
+                  <button id="frCalculate" type="submit" class="btn btn-sm btn-dark">Calcular</button>
+                  <button id="frSave" type="button" class="btn btn-sm btn-outline-dark" disabled>Confirmar y guardar</button>
+                </form>
+
+                <!-- Tabla editable de cupones (solo visible en modo HD) -->
+                <section data-fr-hd class="cashflow-preview" aria-label="Cupones HD">
+                  <h3>Cupones</h3>
+                  <div class="table-wrap inner-table">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Fecha</th>
+                          <th class="text-end">Cupon anual %</th>
+                          <th class="text-end">Amortizacion %</th>
+                        </tr>
+                      </thead>
+                      <tbody id="frCouponsBody">
+                        <tr><td colspan="4" class="empty-state">Generar fechas o calcular</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <!-- Cashflow resultado -->
+                <section class="cashflow-preview" aria-label="Cashflow Tasa Fija">
+                  <h3>Cashflow</h3>
+                  <div class="table-wrap inner-table">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead id="frCashflowHead"></thead>
+                      <tbody id="frCashflowBody">
+                        <tr><td colspan="9" class="empty-state">Completa los datos y calcula</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+            </div>
           </section>
         </section>
       </section>
