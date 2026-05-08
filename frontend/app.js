@@ -4680,17 +4680,18 @@ function renderArsCurve() {
     .map((el) => el.dataset.arsField);
   if (!fields.length) fields.push("last");
 
-  // Helper para obtener (x, y) de un item dado un field
+  // Helper para obtener (x, y) de un item dado un field. x > 0 obligatorio
+  // (log scale lo requiere; ademas, no tiene sentido plotear bonos vencidos).
   const xy = (it, field) => {
     const m = field === "bid" ? it.metrics_bid : field === "offer" ? it.metrics_offer : it.metrics_last;
     if (!m) return null;
     const y = m[yKey];
-    if (y == null) return null;
+    if (y == null || !isFinite(y)) return null;
     let x;
     if (xKey === "days") x = it.days_to_maturity;
     else if (xKey === "duration") x = m.duration;
     else if (xKey === "md") x = m.modified_duration;
-    if (x == null || !isFinite(x)) return null;
+    if (x == null || !isFinite(x) || x <= 0) return null;
     return { x, y, ticker: it.ticker, mat: it.maturity_date };
   };
 
@@ -4818,15 +4819,33 @@ function renderArsCurve() {
       },
     },
   };
-  // Animation off: chart.update("none") evita el flicker que se ve cuando
-  // los datasets se reasignan (Chart.js por default anima cada update).
-  if (_arsCurveChart) {
-    _arsCurveChart.data = cfg.data;
-    _arsCurveChart.options = cfg.options;
-    _arsCurveChart.update("none");
-  } else {
-    cfg.options.animation = false;
-    _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
+  // Animation off + handle scale type changes: si el tipo de scale (log
+  // vs linear) cambio, hay que destruir y recrear el chart porque Chart.js
+  // no maneja bien el cambio de tipo via options reassignment.
+  cfg.options.animation = false;
+  try {
+    const prevXType = _arsCurveChart?.options?.scales?.x?.type;
+    if (_arsCurveChart && prevXType === xScale) {
+      _arsCurveChart.data = cfg.data;
+      _arsCurveChart.options = cfg.options;
+      _arsCurveChart.update("none");
+    } else {
+      if (_arsCurveChart) {
+        try { _arsCurveChart.destroy(); } catch (e) { console.warn("[ars] destroy", e); }
+        _arsCurveChart = null;
+      }
+      _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
+    }
+  } catch (e) {
+    console.error("[ars] renderArsCurve fallo:", e);
+    // Fallback: limpiar y re-intentar lineal
+    try {
+      if (_arsCurveChart) { _arsCurveChart.destroy(); _arsCurveChart = null; }
+      cfg.options.scales.x.type = "linear";
+      _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
+    } catch (e2) {
+      console.error("[ars] fallback fallo:", e2);
+    }
   }
 }
 
