@@ -525,6 +525,16 @@ tbody td {
   text-align: right;
 }
 
+.ars-header-title {
+  text-align: left;
+  background: #1f3d2e !important;
+  color: #f4f1ea;
+  font-size: 14px;
+  letter-spacing: 1px;
+  padding: 8px 12px !important;
+  border-bottom: 2px solid #c9a961;
+}
+
 .saved-row { cursor: pointer; }
 .saved-row:hover { background: #f6f4ee; }
 .saved-detail-row td.saved-detail-cell {

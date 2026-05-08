@@ -40,6 +40,80 @@ class BusinessCalendar(Protocol):
         ...
 
 
+def solve_irr(flows: list[tuple[float, float]], price: float) -> float | None:
+    """Resuelve la TIR efectiva anual via biseccion robusta.
+    flows: lista de (anios_desde_settlement, monto_total).
+    price: precio del bono al settlement (NPV objetivo).
+    Devuelve la TIR como decimal anual (0.30 = 30% anual efectivo) o None si
+    no converge."""
+    flows = [(t, a) for t, a in flows if t > 0 and a is not None]
+    if not flows or price is None or price <= 0:
+        return None
+
+    def npv(y: float) -> float:
+        return sum(a / (1 + y) ** t for t, a in flows) - price
+
+    # Buscar rango donde haya cambio de signo. Para Argentina inflacionaria
+    # puede ser hasta 1000% anual, asi que extendemos lo necesario.
+    lo, hi = -0.99, 5.0
+    f_lo = npv(lo)
+    f_hi = npv(hi)
+    while f_lo * f_hi > 0 and hi < 1000.0:
+        hi *= 2
+        f_hi = npv(hi)
+    if f_lo * f_hi > 0:
+        return None
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        f_mid = npv(mid)
+        if abs(f_mid) < 1e-9 or (hi - lo) < 1e-12:
+            return mid
+        if f_lo * f_mid < 0:
+            hi, f_hi = mid, f_mid
+        else:
+            lo, f_lo = mid, f_mid
+    return 0.5 * (lo + hi)
+
+
+def compute_bond_metrics_from_cashflows(
+    cashflows: list[tuple[date, float]],
+    price: float,
+    settlement_date: date,
+) -> dict[str, float] | None:
+    """Calcula TIR efectiva, TNA base 365 (capitalizable diaria), TEM,
+    Macaulay duration y Modified duration desde una lista de cashflows
+    futuros (payment_date, total_amount).
+    Devuelve un dict con todas las metricas o None si no se puede calcular."""
+    if price is None or price <= 0:
+        return None
+    flows_years = [
+        ((cf_date - settlement_date).days / 365.0, cf_amount)
+        for cf_date, cf_amount in cashflows
+        if cf_amount is not None and (cf_date - settlement_date).days > 0
+    ]
+    if not flows_years:
+        return None
+    irr = solve_irr(flows_years, price)
+    if irr is None:
+        return None
+    discounted = [(t, a / (1 + irr) ** t) for t, a in flows_years]
+    pv = sum(d for _, d in discounted)
+    if not pv:
+        return None
+    duration = sum(t * d for t, d in discounted) / pv  # Macaulay (anios)
+    modified_duration = duration / (1 + irr)
+    # TNA base 365 (capitalizable diaria) equivalente a TIR efectiva
+    tna_365 = 365.0 * ((1 + irr) ** (1 / 365.0) - 1)
+    tem = (1 + irr) ** (1 / 12.0) - 1
+    return {
+        "tir": irr,
+        "tna_365": tna_365,
+        "tem": tem,
+        "duration": duration,
+        "modified_duration": modified_duration,
+    }
+
+
 def days_30_360(start: date, end: date, us: bool = True) -> int:
     """Conteo de dias 30/360 entre start y end.
 

@@ -46,6 +46,7 @@ from backend.bond_calculators import (
     build_bond_draft,
     build_bond_hd_calculation,
     build_lecap_calculation,
+    compute_bond_metrics_from_cashflows,
     build_lecap_market_row,
     generate_bond_hd_default_dates,
 )
@@ -733,6 +734,150 @@ async def market_lecaps(settlement: str = "t1") -> dict:
     return {
         "status": market.status,
         "source": market.settings.market_source,
+        "settlement_type": settlement_type,
+        "settlement_date": settlement_date.isoformat(),
+        "updated_at": now_argentina_iso(),
+        "items": rows,
+    }
+
+
+@app.get("/api/market/ars")
+async def market_ars(settlement: str = "t1") -> dict:
+    """Mercado pesos: combina LECAPs + Tasa Fija en una sola tabla con TIR,
+    Duration, MD, TNA base 365 y TEM. Los datos de calculo (cashflows, fechas)
+    salen de las calculadoras guardadas. El precio (last/bid/ask) sale del
+    market data en vivo. Ordenado por maturity asc."""
+    settlement_type = _normalize_lecap_settlement(settlement)
+    today = now_argentina().date()
+    settlement_date = (
+        today
+        if settlement_type == "t0"
+        else market_calendar.next_business_day(today, include_current=False)
+    )
+
+    # Quotes en vivo
+    lecap_quote_by_ticker = {q["symbol"]: q for q in market.lecap_quotes(settlement_type)}
+    snap = market.snapshot()
+    general_quote_by_symbol = {q["symbol"]: q for q in (snap.get("quotes") or [])}
+
+    rows: list[dict] = []
+
+    # ---- LECAPs ----
+    saved_lecaps_by_ticker = {s.ticker: s for s in storage.list_lecaps()}
+    all_lecap_tickers = list(LECAP_TICKERS)
+    for custom in storage.list_custom_lecap_tickers():
+        if custom not in all_lecap_tickers:
+            all_lecap_tickers.append(custom)
+    for ticker in all_lecap_tickers:
+        saved = saved_lecaps_by_ticker.get(ticker)
+        quote = lecap_quote_by_ticker.get(ticker, {}) or {}
+        last = _coerce_optional_float(quote.get("last"))
+        bid = _coerce_optional_float(quote.get("bid"))
+        ask = _coerce_optional_float(quote.get("ask"))
+        change = _coerce_optional_float(quote.get("change"))
+        if saved is None:
+            rows.append({
+                "kind": "lecap",
+                "ticker": ticker,
+                "maturity_date": None,
+                "last": last, "bid": bid, "offer": ask, "change_pct": change,
+                "tir": None, "tna_365": None, "tem": None,
+                "duration": None, "modified_duration": None,
+                "updated_at": quote.get("updated_at"),
+            })
+            continue
+        try:
+            calc = build_lecap_calculation(
+                ticker=saved.ticker, issue_date=saved.issue_date,
+                maturity_date=saved.maturity_date, face_value=saved.face_value,
+                tem_emission_percent=saved.tem_emission_percent,
+                calendar=market_calendar, today=today, allowed_tickers=None,
+            )
+        except ValueError:
+            calc = None
+        metrics = None
+        if calc and last:
+            cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
+            metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date)
+        rows.append({
+            "kind": "lecap",
+            "ticker": ticker,
+            "maturity_date": saved.maturity_date.isoformat() if saved else None,
+            "last": last, "bid": bid, "offer": ask, "change_pct": change,
+            "tir": metrics.get("tir") if metrics else None,
+            "tna_365": metrics.get("tna_365") if metrics else None,
+            "tem": metrics.get("tem") if metrics else None,
+            "duration": metrics.get("duration") if metrics else None,
+            "modified_duration": metrics.get("modified_duration") if metrics else None,
+            "updated_at": quote.get("updated_at"),
+        })
+
+    # ---- Tasa Fija ----
+    saved_tf_by_ticker = {s.ticker: s for s in storage.list_fixed_rate()}
+    all_tf_tickers = [t.family for t in TASA_FIJA_TICKERS]
+    for custom in storage.list_custom_tasa_fija_tickers():
+        if custom not in all_tf_tickers:
+            all_tf_tickers.append(custom)
+    for ticker in all_tf_tickers:
+        saved = saved_tf_by_ticker.get(ticker)
+        # Buscar en quotes generales por symbol == ticker
+        quote = general_quote_by_symbol.get(ticker, {}) or {}
+        last = _coerce_optional_float(quote.get("last"))
+        bid = _coerce_optional_float(quote.get("bid"))
+        ask = _coerce_optional_float(quote.get("ask"))
+        change = _coerce_optional_float(quote.get("change"))
+        if saved is None:
+            rows.append({
+                "kind": "tasa_fija",
+                "ticker": ticker,
+                "maturity_date": None,
+                "last": last, "bid": bid, "offer": ask, "change_pct": change,
+                "tir": None, "tna_365": None, "tem": None,
+                "duration": None, "modified_duration": None,
+                "updated_at": quote.get("updated_at"),
+            })
+            continue
+        # Reusar la logica de calculadora segun lecap_mode/HD
+        cashflows_pairs: list[tuple[date, float]] = []
+        try:
+            if saved.lecap_mode and saved.tem_emission_percent is not None:
+                calc = build_lecap_calculation(
+                    ticker=saved.ticker, issue_date=saved.issue_date,
+                    maturity_date=saved.maturity_date, face_value=saved.face_value,
+                    tem_emission_percent=saved.tem_emission_percent,
+                    calendar=market_calendar, today=today, allowed_tickers=None,
+                )
+                cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
+            elif saved.bond_type and saved.frequency and saved.convention:
+                # Cashflows guardados en payload_json (incluye coupons editados)
+                import json as _json
+                payload = _json.loads(saved.payload_json) if saved.payload_json else {}
+                for cf in payload.get("cashflows", []) or []:
+                    pd_iso = cf.get("effective_payment_date") or cf.get("payment_date")
+                    total = cf.get("total_amount") or cf.get("total_per_100")
+                    if pd_iso and total is not None:
+                        cashflows_pairs.append((date.fromisoformat(pd_iso), float(total)))
+        except (ValueError, KeyError, TypeError):
+            cashflows_pairs = []
+        metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date) if (cashflows_pairs and last) else None
+        rows.append({
+            "kind": "tasa_fija",
+            "ticker": ticker,
+            "maturity_date": saved.maturity_date.isoformat(),
+            "last": last, "bid": bid, "offer": ask, "change_pct": change,
+            "tir": metrics.get("tir") if metrics else None,
+            "tna_365": metrics.get("tna_365") if metrics else None,
+            "tem": metrics.get("tem") if metrics else None,
+            "duration": metrics.get("duration") if metrics else None,
+            "modified_duration": metrics.get("modified_duration") if metrics else None,
+            "updated_at": quote.get("updated_at"),
+        })
+
+    # Ordenar por maturity asc; los sin maturity al final
+    rows.sort(key=lambda r: (r["maturity_date"] is None, r["maturity_date"] or ""))
+
+    return {
+        "status": market.status,
         "settlement_type": settlement_type,
         "settlement_date": settlement_date.isoformat(),
         "updated_at": now_argentina_iso(),

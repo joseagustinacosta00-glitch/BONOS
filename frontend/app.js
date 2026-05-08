@@ -616,6 +616,12 @@ function renderQuotes() {
     return;
   }
 
+  if (currentMarketCategory === "ars") {
+    showMarketTable("main");
+    renderArsMarket();
+    return;
+  }
+
   showMarketTable("main");
   setMarketTableLayout("general", `
     <tr>
@@ -4415,8 +4421,81 @@ document.querySelectorAll("[data-market-category]").forEach((button) => {
       pollFutures();
       pollSpot();
     }
+    if (currentMarketCategory === "ars") {
+      pollArsMarket();
+    }
   });
 });
+
+// ============================================================
+// ARS Market: combina LECAPs + Tasa Fija con metricas de tasa
+// ============================================================
+let _latestArsItems = [];
+let _arsPollTimer = null;
+
+async function pollArsMarket() {
+  try {
+    const r = await fetch("/api/market/ars?settlement=t1", { credentials: "same-origin" });
+    if (!r.ok) return;
+    const j = await r.json();
+    _latestArsItems = j.items || [];
+    if (currentMarketCategory === "ars") renderArsMarket();
+  } catch (e) {
+    console.error("[ars] fetch error", e);
+  }
+  // Re-pol cada 30s mientras estemos en la tab
+  if (_arsPollTimer) clearTimeout(_arsPollTimer);
+  if (currentMarketCategory === "ars") {
+    _arsPollTimer = setTimeout(pollArsMarket, 30000);
+  }
+}
+
+function renderArsMarket() {
+  setMarketTableLayout("ars", `
+    <tr>
+      <th scope="col" colspan="9" class="ars-header-title">Tasa Fija</th>
+    </tr>
+    <tr>
+      <th scope="col" class="text-end">Var %</th>
+      <th scope="col">Nombre</th>
+      <th scope="col" class="text-end">Precio</th>
+      <th scope="col" class="text-end">TIR</th>
+      <th scope="col" class="text-end">Duration</th>
+      <th scope="col" class="text-end">MD</th>
+      <th scope="col">Vencimiento</th>
+      <th scope="col" class="text-end">TNA (365)</th>
+      <th scope="col" class="text-end">TEM</th>
+    </tr>
+  `);
+  const items = _latestArsItems || [];
+  if (!items.length) {
+    quotesBody.innerHTML = '<tr><td colspan="9" class="empty-state">Cargando bonos pesos...</td></tr>';
+    instrumentCount.textContent = 0;
+    return;
+  }
+  instrumentCount.textContent = items.length;
+  const fmtPct = (v) => v == null ? "—" : (v * 100).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  const fmtNum = (v, dec = 2) => v == null ? "—" : Number(v).toLocaleString("es-AR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    const [y, m, d] = iso.split("-");
+    return `${d}/${m}/${y}`;
+  };
+  patchMarketBody(items, [
+    {
+      html: (it) => fmtNum(it.change_pct),
+      className: (it) => "text-end " + (it.change_pct > 0 ? "positive" : it.change_pct < 0 ? "negative" : ""),
+    },
+    { html: (it) => it.ticker, className: "ticker" },
+    { html: (it) => fmtNum(it.last), className: "text-end" },
+    { html: (it) => fmtPct(it.tir), className: "text-end" },
+    { html: (it) => fmtNum(it.duration, 2), className: "text-end" },
+    { html: (it) => fmtNum(it.modified_duration, 2), className: "text-end" },
+    { html: (it) => fmtDate(it.maturity_date) },
+    { html: (it) => fmtPct(it.tna_365), className: "text-end" },
+    { html: (it) => fmtPct(it.tem), className: "text-end" },
+  ], (it) => it.ticker);
+}
 
 document.querySelectorAll("[data-market-settlement]").forEach((button) => {
   button.addEventListener("click", () => {
