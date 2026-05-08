@@ -40,27 +40,43 @@ class BusinessCalendar(Protocol):
         ...
 
 
-def days_30_360(start: date, end: date) -> int:
-    """Conteo de dias 30/360 (US / NASD convention) entre start y end.
-    Equivale a DAYS360(start, end) de Excel sin el flag European.
-    Reglas:
-      - Si d1 == 31, d1 -> 30
-      - Si d2 == 31 y d1 >= 30, d2 -> 30
-      - Si d2 == 31 y d1 < 30, d2 -> 1 y m2 += 1 (rollover de mes)
+def days_30_360(start: date, end: date, us: bool = True) -> int:
+    """Conteo de dias 30/360 entre start y end.
+
+    us=True (default): convencion US/NASD (matchea Excel DAYS360 sin flag EU).
+        Reglas:
+          - Si d1 == 31, d1 -> 30
+          - Si d2 == 31 y d1 >= 30, d2 -> 30
+          - Si d2 == 31 y d1 < 30, d2 -> 1 y m2 += 1 (rollover)
+        Casos test (matchean Excel):
+          (10/11/2025, 31/08/2026) -> 291
+          (01/01/2025, 31/12/2025) -> 360
+          (15/05/2026, 31/05/2026) -> 16
+
+    us=False: convencion European (ICMA). Cada dia >30 cae a 30 en ambos
+        extremos. No hay rollover.
+        Casos test:
+          (10/11/2025, 31/08/2026) -> 290
+          (01/01/2025, 31/12/2025) -> 359
+          (15/05/2026, 31/05/2026) -> 15
     """
     y1, m1, d1 = start.year, start.month, start.day
     y2, m2, d2 = end.year, end.month, end.day
-    if d1 == 31:
-        d1 = 30
-    if d2 == 31:
-        if d1 >= 30:
-            d2 = 30
-        else:
-            d2 = 1
-            m2 += 1
-            if m2 > 12:
-                m2 = 1
-                y2 += 1
+    if us:
+        if d1 == 31:
+            d1 = 30
+        if d2 == 31:
+            if d1 >= 30:
+                d2 = 30
+            else:
+                d2 = 1
+                m2 += 1
+                if m2 > 12:
+                    m2 = 1
+                    y2 += 1
+    else:
+        d1 = min(d1, 30)
+        d2 = min(d2, 30)
     return 360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)
 
 
@@ -529,18 +545,8 @@ class BondHdCalculation:
 
 
 def _days_30_360(start: date, end: date, us: bool) -> int:
-    """Day count 30/360. EU: cap dia a 30 en ambos. US (DAYS360 de Excel):
-    si d1==31 -> 30; si d2==31 y d1>=30 -> 30."""
-    d1, d2 = start.day, end.day
-    if us:
-        if d1 == 31:
-            d1 = 30
-        if d2 == 31 and d1 >= 30:
-            d2 = 30
-    else:
-        d1 = min(d1, 30)
-        d2 = min(d2, 30)
-    return (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
+    """Wrapper retro-compat. Delega en days_30_360 (fuente unica de verdad)."""
+    return days_30_360(start, end, us=us)
 
 
 def hd_year_fraction(
@@ -564,18 +570,9 @@ def hd_year_fraction(
     if convention == BondHdConvention.ACT_ACT:
         return (end - start).days / 365.25
     if convention == BondHdConvention.THIRTY_360_EU:
-        d1 = min(start.day, 30)
-        d2 = min(end.day, 30)
-        days = (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
-        return days / 360
+        return days_30_360(start, end, us=False) / 360
     if convention == BondHdConvention.THIRTY_360_US:
-        d1, d2 = start.day, end.day
-        if d1 == 31:
-            d1 = 30
-        if d2 == 31 and d1 >= 30:
-            d2 = 30
-        days = (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
-        return days / 360
+        return days_30_360(start, end, us=True) / 360
     raise ValueError("Convencion de intereses no soportada.")
 
 
@@ -589,16 +586,8 @@ def hd_period_days(
         us = convention == BondHdConvention.ONE_EIGHTY_360_US
         return _days_30_360(start, end, us=us)
     if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
-        if convention == BondHdConvention.THIRTY_360_EU:
-            d1 = min(start.day, 30)
-            d2 = min(end.day, 30)
-        else:
-            d1, d2 = start.day, end.day
-            if d1 == 31:
-                d1 = 30
-            if d2 == 31 and d1 >= 30:
-                d2 = 30
-        return (end.year - start.year) * 360 + (end.month - start.month) * 30 + (d2 - d1)
+        us = convention == BondHdConvention.THIRTY_360_US
+        return days_30_360(start, end, us=us)
     return (end - start).days
 
 
