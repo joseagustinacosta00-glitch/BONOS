@@ -6044,15 +6044,19 @@ function applyFrGrace(silent = false) {
 }
 
 async function calculateFr() {
+  console.log("[fr] calculateFr llamada");
   const issueIso = parseDdmmYyyy($$("#frIssueDate").value);
   const matIso = parseDdmmYyyy($$("#frMaturityDate").value);
   const faceValue = parseInt($$("#frFaceValue").value, 10);
   const lecapMode = $$("#frLecapMode").checked;
+  console.log("[fr] inputs:", { issueIso, matIso, faceValue, lecapMode, cupones: _frCoupons.length });
   if (!issueIso || !matIso) {
+    alert("Fechas invalidas. Cargar emision y vencimiento en formato DD/MM/AAAA.");
     setCalculatorStatus("error", "Fechas invalidas (DD/MM/AAAA)");
     return;
   }
   if (!Number.isInteger(faceValue) || faceValue <= 0) {
+    alert("VNO invalido. Debe ser un entero positivo (ej. 100).");
     setCalculatorStatus("error", "VNO invalido");
     return;
   }
@@ -6064,10 +6068,15 @@ async function calculateFr() {
   };
   if (lecapMode) {
     const tem = parseNumberArg($$("#frTemEmission").value);
-    if (!isFinite(tem)) { setCalculatorStatus("error", "TEM invalida"); return; }
+    if (!isFinite(tem)) {
+      alert("TEM invalida. Cargar la TEM de emision (ej. 2,5).");
+      setCalculatorStatus("error", "TEM invalida");
+      return;
+    }
     body.tem_emission_percent = tem;
   } else {
     if (!_frCoupons.length) {
+      alert("Falta generar los cupones. Click en 'Generar fechas' primero, o usar 'Importar fechas' del modulo opcional.");
       setCalculatorStatus("error", "Genera fechas y carga cupones primero");
       return;
     }
@@ -6080,20 +6089,33 @@ async function calculateFr() {
       amortization_percent: c.amort_pct || 0,
     }));
   }
+  console.log("[fr] body a enviar:", body);
   setCalculatorStatus("draft", "Calculando");
-  const r = await fetch("/api/calculators/bond-fixed-rate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let r;
+  try {
+    r = await fetch("/api/calculators/bond-fixed-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error("[fr] fetch fallo:", err);
+    alert("Error de red al llamar al backend. Ver consola.");
+    setCalculatorStatus("error", "Error de red");
+    return;
+  }
+  console.log("[fr] respuesta status:", r.status);
   if (!r.ok) {
     let detail = "Revisar datos";
     try { detail = (await r.json()).detail || detail; } catch {}
+    console.error("[fr] error backend:", detail);
+    alert("Backend rechazo el calculo: " + JSON.stringify(detail));
     setCalculatorStatus("error", String(detail).slice(0, 80));
     return;
   }
   _frLatestCalc = await r.json();
   _frLatestPayload = body;
+  console.log("[fr] respuesta OK, cashflows:", _frLatestCalc?.cashflows?.length);
   renderFrCashflow(_frLatestCalc);
   $$("#frSave").disabled = false;
   setCalculatorStatus("ok", "Calculo OK");
