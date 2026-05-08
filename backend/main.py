@@ -790,6 +790,47 @@ async def market_ars(settlement: str = "t1") -> dict:
             ordered_tickers.append(ticker)
             seen.add(ticker)
 
+    def _build_row(
+        ticker: str,
+        kind: str,
+        saved_maturity_iso: str | None,
+        cashflows_pairs: list[tuple[date, float]],
+        last: float | None,
+        bid: float | None,
+        ask: float | None,
+        change: float | None,
+        updated_at,
+    ) -> dict:
+        # Calcular metrics para los 3 fields (bid / last / offer). Si el field
+        # esta vacio, las metrics quedan None.
+        m_last = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date) if (cashflows_pairs and last) else None
+        m_bid = compute_bond_metrics_from_cashflows(cashflows_pairs, bid, settlement_date) if (cashflows_pairs and bid) else None
+        m_offer = compute_bond_metrics_from_cashflows(cashflows_pairs, ask, settlement_date) if (cashflows_pairs and ask) else None
+        days_to_maturity = (
+            (date.fromisoformat(saved_maturity_iso) - settlement_date).days
+            if saved_maturity_iso else None
+        )
+        def _pack(m):
+            return {
+                "tir": m.get("tir") if m else None,
+                "tna_365": m.get("tna_365") if m else None,
+                "tem": m.get("tem") if m else None,
+                "duration": m.get("duration") if m else None,
+                "modified_duration": m.get("modified_duration") if m else None,
+            }
+        return {
+            "kind": kind, "ticker": ticker,
+            "maturity_date": saved_maturity_iso,
+            "days_to_maturity": days_to_maturity,
+            "last": last, "bid": bid, "offer": ask, "change_pct": change,
+            # Por compatibilidad: tir/tna_365/tem/duration/MD del LAST (sin sufijo)
+            **_pack(m_last),
+            "metrics_last": _pack(m_last),
+            "metrics_bid": _pack(m_bid),
+            "metrics_offer": _pack(m_offer),
+            "updated_at": updated_at,
+        }
+
     def _row_from_lecap(ticker: str) -> dict:
         saved = saved_lecaps_by_ticker.get(ticker)
         quote = lecap_quote_by_ticker.get(ticker, {}) or {}
@@ -797,38 +838,21 @@ async def market_ars(settlement: str = "t1") -> dict:
         bid = _coerce_optional_float(quote.get("bid"))
         ask = _coerce_optional_float(quote.get("ask"))
         change = _coerce_optional_float(quote.get("change"))
-        if saved is None:
-            return {
-                "kind": "lecap", "ticker": ticker, "maturity_date": None,
-                "last": last, "bid": bid, "offer": ask, "change_pct": change,
-                "tir": None, "tna_365": None, "tem": None,
-                "duration": None, "modified_duration": None,
-                "updated_at": quote.get("updated_at"),
-            }
-        try:
-            calc = build_lecap_calculation(
-                ticker=saved.ticker, issue_date=saved.issue_date,
-                maturity_date=saved.maturity_date, face_value=saved.face_value,
-                tem_emission_percent=saved.tem_emission_percent,
-                calendar=market_calendar, today=today, allowed_tickers=None,
-            )
-        except ValueError:
-            calc = None
-        metrics = None
-        if calc and last:
-            cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
-            metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date)
-        return {
-            "kind": "lecap", "ticker": ticker,
-            "maturity_date": saved.maturity_date.isoformat(),
-            "last": last, "bid": bid, "offer": ask, "change_pct": change,
-            "tir": metrics.get("tir") if metrics else None,
-            "tna_365": metrics.get("tna_365") if metrics else None,
-            "tem": metrics.get("tem") if metrics else None,
-            "duration": metrics.get("duration") if metrics else None,
-            "modified_duration": metrics.get("modified_duration") if metrics else None,
-            "updated_at": quote.get("updated_at"),
-        }
+        cashflows_pairs: list[tuple[date, float]] = []
+        maturity_iso = None
+        if saved is not None:
+            maturity_iso = saved.maturity_date.isoformat()
+            try:
+                calc = build_lecap_calculation(
+                    ticker=saved.ticker, issue_date=saved.issue_date,
+                    maturity_date=saved.maturity_date, face_value=saved.face_value,
+                    tem_emission_percent=saved.tem_emission_percent,
+                    calendar=market_calendar, today=today, allowed_tickers=None,
+                )
+                cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
+            except ValueError:
+                pass
+        return _build_row(ticker, "lecap", maturity_iso, cashflows_pairs, last, bid, ask, change, quote.get("updated_at"))
 
     def _row_from_tf(ticker: str) -> dict:
         saved = saved_tf_by_ticker.get(ticker)
@@ -837,46 +861,30 @@ async def market_ars(settlement: str = "t1") -> dict:
         bid = _coerce_optional_float(quote.get("bid"))
         ask = _coerce_optional_float(quote.get("ask"))
         change = _coerce_optional_float(quote.get("change"))
-        if saved is None:
-            return {
-                "kind": "tasa_fija", "ticker": ticker, "maturity_date": None,
-                "last": last, "bid": bid, "offer": ask, "change_pct": change,
-                "tir": None, "tna_365": None, "tem": None,
-                "duration": None, "modified_duration": None,
-                "updated_at": quote.get("updated_at"),
-            }
         cashflows_pairs: list[tuple[date, float]] = []
-        try:
-            if saved.lecap_mode and saved.tem_emission_percent is not None:
-                calc = build_lecap_calculation(
-                    ticker=saved.ticker, issue_date=saved.issue_date,
-                    maturity_date=saved.maturity_date, face_value=saved.face_value,
-                    tem_emission_percent=saved.tem_emission_percent,
-                    calendar=market_calendar, today=today, allowed_tickers=None,
-                )
-                cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
-            elif saved.bond_type and saved.frequency and saved.convention:
-                import json as _json
-                payload = _json.loads(saved.payload_json) if saved.payload_json else {}
-                for cf in payload.get("cashflows", []) or []:
-                    pd_iso = cf.get("effective_payment_date") or cf.get("payment_date")
-                    total = cf.get("total_amount") or cf.get("total_per_100")
-                    if pd_iso and total is not None:
-                        cashflows_pairs.append((date.fromisoformat(pd_iso), float(total)))
-        except (ValueError, KeyError, TypeError):
-            cashflows_pairs = []
-        metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date) if (cashflows_pairs and last) else None
-        return {
-            "kind": "tasa_fija", "ticker": ticker,
-            "maturity_date": saved.maturity_date.isoformat(),
-            "last": last, "bid": bid, "offer": ask, "change_pct": change,
-            "tir": metrics.get("tir") if metrics else None,
-            "tna_365": metrics.get("tna_365") if metrics else None,
-            "tem": metrics.get("tem") if metrics else None,
-            "duration": metrics.get("duration") if metrics else None,
-            "modified_duration": metrics.get("modified_duration") if metrics else None,
-            "updated_at": quote.get("updated_at"),
-        }
+        maturity_iso = None
+        if saved is not None:
+            maturity_iso = saved.maturity_date.isoformat()
+            try:
+                if saved.lecap_mode and saved.tem_emission_percent is not None:
+                    calc = build_lecap_calculation(
+                        ticker=saved.ticker, issue_date=saved.issue_date,
+                        maturity_date=saved.maturity_date, face_value=saved.face_value,
+                        tem_emission_percent=saved.tem_emission_percent,
+                        calendar=market_calendar, today=today, allowed_tickers=None,
+                    )
+                    cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
+                elif saved.bond_type and saved.frequency and saved.convention:
+                    import json as _json
+                    payload = _json.loads(saved.payload_json) if saved.payload_json else {}
+                    for cf in payload.get("cashflows", []) or []:
+                        pd_iso = cf.get("effective_payment_date") or cf.get("payment_date")
+                        total = cf.get("total_amount") or cf.get("total_per_100")
+                        if pd_iso and total is not None:
+                            cashflows_pairs.append((date.fromisoformat(pd_iso), float(total)))
+            except (ValueError, KeyError, TypeError):
+                cashflows_pairs = []
+        return _build_row(ticker, "tasa_fija", maturity_iso, cashflows_pairs, last, bid, ask, change, quote.get("updated_at"))
 
     rows: list[dict] = []
     for ticker in ordered_tickers:
@@ -899,6 +907,90 @@ async def market_ars(settlement: str = "t1") -> dict:
         "settlement_date": settlement_date.isoformat(),
         "updated_at": now_argentina_iso(),
         "items": rows,
+    }
+
+
+@app.get("/api/market/ars/whatif")
+async def market_ars_whatif(
+    ticker: str,
+    price: float | None = None,
+    tna: float | None = None,
+    settlement: str = "t1",
+) -> dict:
+    """What-if para un bono ARS: dado un precio o una TNA hipotetica, devuelve
+    todas las metricas (TIR, TNA, TEM, Duration, MD, days_to_maturity).
+    Uno de los dos (price o tna) es requerido. tna se interpreta como base
+    365 capitalizable diaria (en decimal o en %, ambos aceptados)."""
+    if price is None and tna is None:
+        raise HTTPException(status_code=422, detail="Especificar price o tna")
+    settlement_type = _normalize_lecap_settlement(settlement)
+    today = now_argentina().date()
+    settlement_date = (
+        today if settlement_type == "t0"
+        else market_calendar.next_business_day(today, include_current=False)
+    )
+    ticker_up = ticker.upper().strip()
+    # Reconstruir cashflows del ticker (LECAP saved o TF saved)
+    saved_lecap = next((s for s in storage.list_lecaps() if s.ticker == ticker_up), None)
+    saved_tf = next((s for s in storage.list_fixed_rate() if s.ticker == ticker_up), None)
+    cashflows_pairs: list[tuple[date, float]] = []
+    maturity: date | None = None
+    if saved_lecap is not None:
+        try:
+            calc = build_lecap_calculation(
+                ticker=saved_lecap.ticker, issue_date=saved_lecap.issue_date,
+                maturity_date=saved_lecap.maturity_date, face_value=saved_lecap.face_value,
+                tem_emission_percent=saved_lecap.tem_emission_percent,
+                calendar=market_calendar, today=today, allowed_tickers=None,
+            )
+            cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
+            maturity = saved_lecap.maturity_date
+        except ValueError:
+            pass
+    elif saved_tf is not None:
+        maturity = saved_tf.maturity_date
+        try:
+            if saved_tf.lecap_mode and saved_tf.tem_emission_percent is not None:
+                calc = build_lecap_calculation(
+                    ticker=saved_tf.ticker, issue_date=saved_tf.issue_date,
+                    maturity_date=saved_tf.maturity_date, face_value=saved_tf.face_value,
+                    tem_emission_percent=saved_tf.tem_emission_percent,
+                    calendar=market_calendar, today=today, allowed_tickers=None,
+                )
+                cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
+            elif saved_tf.bond_type:
+                import json as _json
+                payload = _json.loads(saved_tf.payload_json) if saved_tf.payload_json else {}
+                for cf in payload.get("cashflows", []) or []:
+                    pd_iso = cf.get("effective_payment_date") or cf.get("payment_date")
+                    total = cf.get("total_amount") or cf.get("total_per_100")
+                    if pd_iso and total is not None:
+                        cashflows_pairs.append((date.fromisoformat(pd_iso), float(total)))
+        except (ValueError, KeyError, TypeError):
+            pass
+    if not cashflows_pairs or maturity is None:
+        raise HTTPException(status_code=404, detail=f"No hay cashflow guardado para {ticker_up}")
+    days = (maturity - settlement_date).days
+    if price is None:
+        # tna -> price. Usamos compounding diaria base 365: precio que produce
+        # esa TNA como TIR. Solver Newton sobre price.
+        # tna -> tir efectiva: tir = (1 + tna/365)^365 - 1
+        tna_dec = tna if tna is not None else 0
+        if tna_dec > 1.5:
+            tna_dec = tna_dec / 100.0  # acepta % (e.g. 35 -> 0.35)
+        tir_target = (1 + tna_dec / 365.0) ** 365 - 1
+        # price = sum(CF / (1+tir_target)^t)
+        price = sum(amt / (1 + tir_target) ** ((d - settlement_date).days / 365.0)
+                    for d, amt in cashflows_pairs if (d - settlement_date).days > 0)
+    metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, price, settlement_date)
+    if metrics is None:
+        raise HTTPException(status_code=422, detail="No se pudo calcular las metricas")
+    return {
+        "ticker": ticker_up,
+        "price": price,
+        "days_to_maturity": days,
+        "maturity_date": maturity.isoformat(),
+        **metrics,
     }
 
 

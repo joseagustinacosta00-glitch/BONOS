@@ -595,6 +595,9 @@ function showMarketTable(which) {
   if (mainTableWrap) mainTableWrap.style.display = which === "main" ? "" : "none";
   if (fxTableWrap)   fxTableWrap.style.display   = which === "fx"   ? "" : "none";
   if (futTableWrap)  futTableWrap.style.display  = which === "fut"  ? "" : "none";
+  // Curva ARS solo cuando estamos en la categoria ars
+  const arsCurveWrap = document.querySelector("#arsCurveWrap");
+  if (arsCurveWrap) arsCurveWrap.style.display = (which === "main" && currentMarketCategory === "ars") ? "" : "none";
 }
 
 function renderQuotes() {
@@ -4486,7 +4489,7 @@ function renderArsMarket() {
       html: (it) => fmtNum(it.change_pct),
       className: (it) => "text-end " + (it.change_pct > 0 ? "positive" : it.change_pct < 0 ? "negative" : ""),
     },
-    { html: (it) => it.ticker, className: "ticker" },
+    { html: (it) => it.ticker, className: "ticker ars-clickable-ticker" },
     { html: (it) => fmtNum(it.last), className: "text-end" },
     { html: (it) => fmtPct(it.tir), className: "text-end" },
     { html: (it) => fmtNum(it.duration, 2), className: "text-end" },
@@ -4495,6 +4498,231 @@ function renderArsMarket() {
     { html: (it) => fmtPct(it.tna_365), className: "text-end" },
     { html: (it) => fmtPct(it.tem), className: "text-end" },
   ], (it) => it.ticker);
+  // Marcar las filas con data-ars-row para click handler
+  quotesBody.querySelectorAll("tr[data-key]").forEach((row) => {
+    row.classList.add("ars-row-clickable");
+    row.setAttribute("data-ars-ticker", row.getAttribute("data-key"));
+  });
+  renderArsCurve();
+}
+
+// What-ifs: { ticker: { type: "price"|"tna", value, computed: {tir, tna_365, tem, duration, modified_duration, days_to_maturity, price} } }
+const _arsWhatIfs = {};
+
+function _arsAttachListeners() {
+  if (_arsAttachListeners._done) return;
+  _arsAttachListeners._done = true;
+  // Click en fila de tabla -> prompt what-if
+  quotesBody?.addEventListener("click", (event) => {
+    if (currentMarketCategory !== "ars") return;
+    const row = event.target.closest("tr[data-ars-ticker]");
+    if (!row) return;
+    promptArsWhatIf(row.getAttribute("data-ars-ticker"));
+  });
+  // Toggles del chart
+  ["arsCurveYAxis", "arsCurveXAxis", "arsCurveModel"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", renderArsCurve);
+  });
+  document.querySelectorAll("[data-ars-field]").forEach((el) => {
+    el.addEventListener("change", renderArsCurve);
+  });
+  document.getElementById("arsCurveClearWhatIf")?.addEventListener("click", () => {
+    Object.keys(_arsWhatIfs).forEach((k) => delete _arsWhatIfs[k]);
+    renderArsCurve();
+  });
+}
+
+async function promptArsWhatIf(ticker) {
+  const existing = _arsWhatIfs[ticker];
+  const baseInfo = (_latestArsItems || []).find((x) => x.ticker === ticker);
+  const currentPrice = baseInfo?.last;
+  const currentTna = baseInfo?.tna_365;
+  const promptStr = [
+    `What-if para ${ticker}`,
+    currentPrice != null ? `Precio actual: ${currentPrice.toFixed(2)}` : "Sin precio actual",
+    currentTna != null ? `TNA actual: ${(currentTna * 100).toFixed(2)}%` : "",
+    "",
+    "Ingresa precio (ej: 1450.5) o TNA% (ej: tna 35.5)",
+    "Para borrar el what-if, ingresa 'x'",
+  ].filter(Boolean).join("\n");
+  const initial = existing
+    ? (existing.type === "price" ? String(existing.value) : `tna ${existing.value}`)
+    : "";
+  const ans = window.prompt(promptStr, initial);
+  if (ans == null) return;
+  const trimmed = ans.trim().toLowerCase();
+  if (!trimmed) return;
+  if (trimmed === "x") {
+    delete _arsWhatIfs[ticker];
+    renderArsCurve();
+    return;
+  }
+  let url = `/api/market/ars/whatif?ticker=${encodeURIComponent(ticker)}`;
+  let stored;
+  if (trimmed.startsWith("tna")) {
+    const val = parseFloat(trimmed.replace("tna", "").replace(",", ".").trim());
+    if (!isFinite(val)) { alert("TNA invalida"); return; }
+    url += `&tna=${val}`;
+    stored = { type: "tna", value: val };
+  } else {
+    const val = parseFloat(trimmed.replace(",", "."));
+    if (!isFinite(val)) { alert("Precio invalido"); return; }
+    url += `&price=${val}`;
+    stored = { type: "price", value: val };
+  }
+  try {
+    const r = await fetch(url, { credentials: "same-origin" });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert("Error: " + (d.detail || "no se pudo calcular"));
+      return;
+    }
+    const j = await r.json();
+    _arsWhatIfs[ticker] = { ...stored, computed: j };
+    renderArsCurve();
+  } catch (e) {
+    console.error("[ars] whatif error", e);
+    alert("Error de red");
+  }
+}
+
+let _arsCurveChart = null;
+const ARS_FIELD_DEFS = {
+  bid:   { label: "Bid",   stroke: "#1f7a3e", fill: "rgba(31,122,62,0.10)" },
+  last:  { label: "Last",  stroke: "#1f3d2e", fill: "rgba(31,61,46,0.10)" },
+  offer: { label: "Offer", stroke: "#c9a961", fill: "rgba(201,169,97,0.15)" },
+};
+
+function renderArsCurve() {
+  _arsAttachListeners();
+  const canvas = document.getElementById("arsCurveCanvas");
+  if (!canvas || typeof Chart === "undefined") return;
+  const items = _latestArsItems || [];
+
+  const yKey = document.getElementById("arsCurveYAxis")?.value || "tna_365";
+  const xKey = document.getElementById("arsCurveXAxis")?.value || "days";
+  const modelName = document.getElementById("arsCurveModel")?.value || "linear";
+  const fields = Array.from(document.querySelectorAll("[data-ars-field]"))
+    .filter((el) => el.checked)
+    .map((el) => el.dataset.arsField);
+  if (!fields.length) fields.push("last");
+
+  // Helper para obtener (x, y) de un item dado un field
+  const xy = (it, field) => {
+    const m = field === "bid" ? it.metrics_bid : field === "offer" ? it.metrics_offer : it.metrics_last;
+    if (!m) return null;
+    const y = m[yKey];
+    if (y == null) return null;
+    let x;
+    if (xKey === "days") x = it.days_to_maturity;
+    else if (xKey === "duration") x = m.duration;
+    else if (xKey === "md") x = m.modified_duration;
+    if (x == null || !isFinite(x)) return null;
+    return { x, y, ticker: it.ticker, mat: it.maturity_date };
+  };
+
+  const datasets = [];
+  for (const field of fields) {
+    const def = ARS_FIELD_DEFS[field] || ARS_FIELD_DEFS.last;
+    const points = items.map((it) => xy(it, field)).filter(Boolean).sort((a, b) => a.x - b.x);
+    if (!points.length) continue;
+    // Linea conectora observada
+    datasets.push({
+      type: "line", label: `${def.label} obs`,
+      data: points.map((p) => ({ x: p.x, y: p.y })),
+      borderColor: def.stroke, backgroundColor: def.fill,
+      borderWidth: 1.5, pointRadius: 0, tension: 0.2, order: 3, spanGaps: true,
+    });
+    // Scatter de los puntos con tooltip
+    datasets.push({
+      type: "scatter", label: `${def.label}`,
+      data: points.map((p) => ({ x: p.x, y: p.y, _meta: p })),
+      backgroundColor: def.stroke, borderColor: def.stroke,
+      pointRadius: 5, pointHoverRadius: 7, order: 2,
+    });
+    // Modelo teorico (reusa FuturesCurve.fitModel)
+    if (modelName !== "none" && points.length >= 2 && window.FuturesCurve?.fitModel) {
+      try {
+        const model = window.FuturesCurve.fitModel(points.map((p) => ({ x: p.x, y: p.y })), modelName);
+        if (model && model.predict) {
+          const minX = points[0].x, maxX = points[points.length - 1].x;
+          const N = 80;
+          const theoLine = [];
+          for (let i = 0; i <= N; i++) {
+            const x = minX + (maxX - minX) * (i / N);
+            const y = model.predict(x);
+            if (y != null && isFinite(y)) theoLine.push({ x, y });
+          }
+          datasets.push({
+            type: "line", label: `${def.label} ${modelName}`,
+            data: theoLine, borderColor: def.stroke, borderDash: [5, 4],
+            borderWidth: 1, pointRadius: 0, order: 4, spanGaps: true,
+          });
+        }
+      } catch (e) { console.warn("[ars] fitModel fallo", e); }
+    }
+  }
+
+  // What-ifs: scatter destacado (todos los what-ifs en un solo dataset)
+  const whatIfPoints = [];
+  for (const t of Object.keys(_arsWhatIfs)) {
+    const w = _arsWhatIfs[t]?.computed;
+    if (!w) continue;
+    let x;
+    if (xKey === "days") x = w.days_to_maturity;
+    else if (xKey === "duration") x = w.duration;
+    else if (xKey === "md") x = w.modified_duration;
+    const y = w[yKey];
+    if (x == null || y == null || !isFinite(x) || !isFinite(y)) continue;
+    whatIfPoints.push({ x, y, _meta: { ticker: t, mat: w.maturity_date, whatif: true, price: w.price } });
+  }
+  if (whatIfPoints.length) {
+    datasets.push({
+      type: "scatter", label: "What-ifs",
+      data: whatIfPoints,
+      backgroundColor: "#c0392b", borderColor: "#7d1f15",
+      pointRadius: 7, pointHoverRadius: 9, pointStyle: "rectRot", order: 1,
+    });
+  }
+
+  const yLabel = yKey === "tir" ? "TIR efectiva" : yKey === "tem" ? "TEM" : "TNA (365)";
+  const xLabel = xKey === "days" ? "Dias al vto" : xKey === "duration" ? "Duration (anios)" : "Modified Duration (anios)";
+
+  const cfg = {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "nearest", intersect: false },
+      scales: {
+        x: { type: "linear", title: { display: true, text: xLabel } },
+        y: { title: { display: true, text: yLabel },
+             ticks: { callback: (v) => (v * 100).toFixed(1) + "%" } },
+      },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const m = ctx.raw?._meta || {};
+              const yV = (ctx.parsed.y * 100).toFixed(2) + "%";
+              const xV = ctx.parsed.x.toFixed(0);
+              const tag = m.whatif ? " [WHAT-IF]" : "";
+              return `${m.ticker || ""}${tag}: ${yV} @ ${xV}`;
+            },
+          },
+        },
+      },
+    },
+  };
+  if (_arsCurveChart) {
+    _arsCurveChart.data = cfg.data;
+    _arsCurveChart.options = cfg.options;
+    _arsCurveChart.update();
+  } else {
+    _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
+  }
 }
 
 document.querySelectorAll("[data-market-settlement]").forEach((button) => {

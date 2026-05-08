@@ -157,6 +157,48 @@
           </table>
         </section>
 
+        <section id="arsCurveWrap" aria-label="Curva ARS" style="display:none; margin-top: 16px;">
+          <div class="ars-curve-controls">
+            <div class="ars-curve-meta">
+              <strong>Curva Tasa Fija ARS</strong>
+              <span class="hd-help">Click en una fila para agregar un what-if (precio o TNA hipotetica)</span>
+            </div>
+            <div class="ars-curve-toggles">
+              <label><span>Eje Y:</span>
+                <select id="arsCurveYAxis" class="form-select form-select-sm">
+                  <option value="tna_365">TNA (365)</option>
+                  <option value="tir">TIR efectiva</option>
+                  <option value="tem">TEM</option>
+                </select>
+              </label>
+              <label><span>Eje X:</span>
+                <select id="arsCurveXAxis" class="form-select form-select-sm">
+                  <option value="days">Dias al vto</option>
+                  <option value="duration">Duration</option>
+                  <option value="md">MD</option>
+                </select>
+              </label>
+              <label><span>Modelo:</span>
+                <select id="arsCurveModel" class="form-select form-select-sm">
+                  <option value="linear">Lineal</option>
+                  <option value="poly2">Polinomico 2</option>
+                  <option value="poly3">Polinomico 3</option>
+                  <option value="exp">Exponencial</option>
+                  <option value="log">Logaritmico</option>
+                  <option value="none">Sin modelo (solo puntos)</option>
+                </select>
+              </label>
+              <label class="ars-curve-field"><input type="checkbox" data-ars-field="bid"> Bid</label>
+              <label class="ars-curve-field"><input type="checkbox" data-ars-field="last" checked> Last</label>
+              <label class="ars-curve-field"><input type="checkbox" data-ars-field="offer"> Offer</label>
+              <button id="arsCurveClearWhatIf" type="button" class="btn btn-sm btn-outline-dark">Limpiar what-ifs</button>
+            </div>
+          </div>
+          <div class="ars-curve-canvas-wrap">
+            <canvas id="arsCurveCanvas"></canvas>
+          </div>
+        </section>
+
         <section id="fxTableWrap" aria-label="Ratios FX" style="display:none;">
           <div class="spot-brecha-banner">
             <div class="spot-banner-pair">
