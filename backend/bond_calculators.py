@@ -458,10 +458,10 @@ HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
 }
 
 HD_CONVENTION_LABELS: dict[BondHdConvention, str] = {
-    BondHdConvention.THIRTY_360_EU: "30/360 EU (variable, day count)",
-    BondHdConvention.THIRTY_360_US: "30/360 US (variable, DAYS360 Excel)",
-    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU (cupon fijo 1/frec)",
-    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US (cupon fijo 1/frec)",
+    BondHdConvention.THIRTY_360_EU: "30/360 EU",
+    BondHdConvention.THIRTY_360_US: "30/360 US (DAYS360 Excel)",
+    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU",
+    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US",
     BondHdConvention.ACT_360: "Act/360",
     BondHdConvention.ACT_365: "Act/365",
     BondHdConvention.ACT_ACT: "Act/Act",
@@ -558,16 +558,14 @@ def hd_year_fraction(
     if end < start:
         return 0.0
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
-        # 180/360: fraccion FIJA por periodo segun frecuencia. Cada cupon vale
-        # exactamente 1/periods_per_year del cupon anual, sin importar dias
-        # efectivos ni desplazamientos por fin de semana. Asi semianual = 0.5
-        # SIEMPRE, trimestral = 0.25, etc. Esta es la convencion estandar para
-        # bonos soberanos argentinos donde el cupon nominal es fijo.
-        # Si frequency = ONE_PAYMENT (sin frecuencia regular) o no hay
-        # frecuencia, fallback al 30/360 day count.
-        if frequency is not None and frequency != BondHdFrequency.ONE_PAYMENT:
-            ppy = HD_FREQUENCY_PERIODS_PER_YEAR.get(frequency, 1)
-            return 1.0 / ppy if ppy > 0 else 0.0
+        # 180/360: day count 30/360 sobre 360. Para periodos REGULARES
+        # (exactamente 6/12/3 meses entre fechas TEORICAS) da naturalmente
+        # 180/360 = 0.5, 360/360 = 1, 90/360 = 0.25, etc. Para periodos STUB
+        # (la primer fecha cae fuera del cycle regular del bono) proporcional
+        # al 30/360 day count, e.g. 176/360 = 0.4889.
+        # Importante: este calculo asume que start/end son TEORICAS, no
+        # efectivas. build_bond_hd_calculation pasa fechas teoricas para que
+        # los desplazamientos por fines de semana no afecten el accrual.
         us = convention == BondHdConvention.ONE_EIGHTY_360_US
         return days_30_360(start, end, us=us) / 360.0
     if convention == BondHdConvention.ACT_360:
@@ -590,12 +588,9 @@ def hd_period_days(
     frequency: BondHdFrequency | None = None,
 ) -> int:
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
-        # Coherente con hd_year_fraction: para 180/360 cada periodo es FIJO
-        # = 360/periods_per_year (semianual = 180, trimestral = 90, etc.).
-        # ONE_PAYMENT no tiene frecuencia regular -> fallback day count.
-        if frequency is not None and frequency != BondHdFrequency.ONE_PAYMENT:
-            ppy = HD_FREQUENCY_PERIODS_PER_YEAR.get(frequency, 1)
-            return int(360 / ppy) if ppy > 0 else 0
+        # Coherente con hd_year_fraction: 30/360 day count entre fechas
+        # TEORICAS. Para periodos regulares semianual da 180, trimestral 90,
+        # etc. Para stubs proporcional (e.g. 176 si emision desalineada).
         us = convention == BondHdConvention.ONE_EIGHTY_360_US
         return days_30_360(start, end, us=us)
     if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
@@ -687,15 +682,20 @@ def build_bond_hd_calculation(
             )
 
     cashflows: list[BondHdCashflow] = []
-    period_start_eff = calendar.next_business_day(issue_date, include_current=True)
+    # IMPORTANTE: el day count usa fechas TEORICAS (no efectivas). El accrual
+    # del cupon es teorico; las fechas efectivas solo determinan cuando llega
+    # el cash. Asi un feriado que corre el effective payment 2 dias no infla
+    # ni reduce el interes nominal del cupon. Y stubs (issue date no alineado
+    # al cycle) calculan correctamente proporcional.
+    period_start_theo = issue_date
     residual_vn_percent = 100.0
 
     for index, coupon in enumerate(sorted_coupons, start=1):
-        payment_date = coupon.payment_date
+        payment_date = coupon.payment_date  # teorica
         effective_payment_date = calendar.next_business_day(payment_date, include_current=True)
-        period_end_eff = effective_payment_date
-        period_days = hd_period_days(period_start_eff, period_end_eff, convention, frequency)
-        yf = hd_year_fraction(period_start_eff, period_end_eff, convention, frequency)
+        period_end_theo = payment_date
+        period_days = hd_period_days(period_start_theo, period_end_theo, convention, frequency)
+        yf = hd_year_fraction(period_start_theo, period_end_theo, convention, frequency)
 
         if bond_type == BondHdType.ZERO_COUPON:
             annual_rate = 0.0
@@ -717,8 +717,8 @@ def build_bond_hd_calculation(
                 number=index,
                 payment_date=payment_date,
                 effective_payment_date=effective_payment_date,
-                period_start=period_start_eff,
-                period_end=period_end_eff,
+                period_start=period_start_theo,
+                period_end=period_end_theo,
                 period_days=period_days,
                 year_fraction=yf,
                 annual_rate_percent=annual_rate,
@@ -735,7 +735,7 @@ def build_bond_hd_calculation(
         )
 
         residual_vn_percent = max(residual_after, 0.0)
-        period_start_eff = period_end_eff
+        period_start_theo = period_end_theo
 
     return BondHdCalculation(
         issue_date=issue_date,
