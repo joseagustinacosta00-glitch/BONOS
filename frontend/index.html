@@ -1062,19 +1062,16 @@
                       <thead>
                         <tr>
                           <th>Ticker</th>
+                          <th>Modo</th>
                           <th>Emision</th>
                           <th>Vencimiento</th>
-                          <th>Fecha efectiva</th>
-                          <th class="text-end">Dias</th>
                           <th class="text-end">VNO</th>
-                          <th class="text-end">TEM</th>
-                          <th class="text-end">Interes</th>
-                          <th class="text-end">Total</th>
+                          <th class="text-end">Tasa</th>
                         </tr>
                       </thead>
                       <tbody id="savedLecaps">
                         <tr>
-                          <td colspan="9" class="empty-state">Todavia no hay LECAPs guardadas</td>
+                          <td colspan="6" class="empty-state">Todavia no hay LECAPs guardadas</td>
                         </tr>
                       </tbody>
                     </table>
@@ -1162,23 +1159,10 @@
                           <th>Vencimiento</th>
                           <th class="text-end">VNO</th>
                           <th class="text-end">Tasa</th>
-                          <th>Detalle</th>
                         </tr>
                       </thead>
                       <tbody id="frSavedList">
-                        <tr><td colspan="7" class="empty-state">Cargando bonos guardados...</td></tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-                <section id="frSavedDetail" class="cashflow-preview d-none" aria-label="Detalle bono guardado">
-                  <h3 id="frSavedDetailTitle">Cashflow guardado</h3>
-                  <p id="frSavedDetailMeta" class="hd-help"></p>
-                  <div class="table-wrap inner-table">
-                    <table class="table table-sm align-middle mb-0">
-                      <thead id="frSavedDetailHead"></thead>
-                      <tbody id="frSavedDetailBody">
-                        <tr><td colspan="9" class="empty-state">Elegi un bono para ver el cashflow</td></tr>
+                        <tr><td colspan="6" class="empty-state">Cargando bonos guardados...</td></tr>
                       </tbody>
                     </table>
                   </div>
@@ -1258,6 +1242,80 @@
                   <button id="frCalculate" type="submit" class="btn btn-sm btn-dark">Calcular</button>
                   <button id="frSave" type="button" class="btn btn-sm btn-outline-dark" disabled>Confirmar y guardar</button>
                 </form>
+
+                <!-- Modulos opcionales (solo visibles en modo HD) -->
+                <details data-fr-hd id="frStepUpSection" class="cashflow-preview hd-import-toggle" aria-label="Cupon step-up por anio">
+                  <summary>
+                    <span class="hd-import-summary-title">Cupon step-up por anio (opcional)</span>
+                    <span class="hd-import-summary-hint">Click para abrir y cargar tasas anuales</span>
+                  </summary>
+                  <p class="hd-help">Definir una tasa anual % distinta por anio. Aplica a todos los cupones de ese anio.</p>
+                  <div id="frStepUpRows" class="step-up-grid"></div>
+                </details>
+
+                <details data-fr-hd id="frDeferredSection" class="cashflow-preview hd-import-toggle" aria-label="Inicio de pagos deferred">
+                  <summary><span class="hd-import-summary-title">Inicio de pagos / deferred (opcional)</span></summary>
+                  <p class="hd-help">Eliminar los primeros N flujos. El primer flujo restante acumula desde la emision.</p>
+                  <div class="hd-amort-controls">
+                    <label>
+                      <span>Primer flujo que paga</span>
+                      <select id="frDeferredPeriod" class="form-select form-select-sm"></select>
+                    </label>
+                    <button id="frDeferredApply" class="btn btn-sm btn-dark" type="button">Aplicar</button>
+                    <button id="frDeferredReset" class="btn btn-sm btn-outline-dark" type="button">Restaurar (regenerar)</button>
+                  </div>
+                </details>
+
+                <details data-fr-hd id="frGraceSection" class="cashflow-preview hd-import-toggle" aria-label="Periodo de gracia">
+                  <summary><span class="hd-import-summary-title">Periodo de gracia (opcional)</span></summary>
+                  <p class="hd-help">Cupones previos al N elegido se setean a tasa 0% (no devengan interes), pero las fechas siguen.</p>
+                  <div class="hd-amort-controls">
+                    <label>
+                      <span>Primer cupon que devenga</span>
+                      <select id="frGracePeriod" class="form-select form-select-sm"></select>
+                    </label>
+                    <button id="frGraceApply" class="btn btn-sm btn-dark" type="button">Aplicar (cupones previos = 0%)</button>
+                  </div>
+                </details>
+
+                <details data-fr-hd id="frAmortSection" class="cashflow-preview hd-import-toggle" aria-label="Amortizacion">
+                  <summary><span class="hd-import-summary-title">Amortizacion (opcional)</span></summary>
+                  <div class="hd-amort-controls">
+                    <button id="frAmortDistribute" class="btn btn-sm btn-dark" type="button">Distribuir 100% en cuotas iguales</button>
+                  </div>
+                  <div class="hd-amort-controls" style="margin-top:8px;">
+                    <label>
+                      <span>Empezar en cupon #</span>
+                      <select id="frAmortFromPeriod" class="form-select form-select-sm"></select>
+                    </label>
+                    <label>
+                      <span>% por periodo</span>
+                      <input id="frAmortPctPerPeriod" class="form-control form-control-sm" type="number" step="0.0001" min="0" placeholder="Ej: 10">
+                    </label>
+                    <button id="frAmortApplyUniform" class="btn btn-sm btn-outline-dark" type="button">Aplicar % uniforme desde ese cupon</button>
+                  </div>
+                </details>
+
+                <details data-fr-hd id="frImportSection" class="cashflow-preview hd-import-toggle" aria-label="Importar fechas">
+                  <summary>
+                    <span class="hd-import-summary-title">Importar fechas de pago (opcional)</span>
+                    <span class="hd-import-summary-hint">Imagen, Excel, CSV, TXT o pegar texto</span>
+                  </summary>
+                  <p class="hd-help">Reemplaza las fechas actuales. Imagenes pasan por OCR (la primera vez baja el motor).</p>
+                  <div class="hd-import-grid">
+                    <label class="hd-import-field">
+                      <span>Archivo</span>
+                      <input id="frDatesFile" type="file" accept="image/*,.xlsx,.xlsm,.csv,.txt" class="form-control form-control-sm">
+                    </label>
+                    <label class="hd-import-field">
+                      <span>Texto pegado</span>
+                      <textarea id="frDatesText" class="form-control form-control-sm" rows="3" placeholder="Pegar texto del prospecto..."></textarea>
+                    </label>
+                  </div>
+                  <div class="hd-import-actions">
+                    <button id="frImportDates" type="button" class="btn btn-sm btn-dark">Importar fechas</button>
+                  </div>
+                </details>
 
                 <!-- Tabla editable de cupones (solo visible en modo HD) -->
                 <section data-fr-hd class="cashflow-preview" aria-label="Cupones HD">

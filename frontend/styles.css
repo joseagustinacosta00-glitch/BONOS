@@ -525,6 +525,22 @@ tbody td {
   text-align: right;
 }
 
+.saved-row { cursor: pointer; }
+.saved-row:hover { background: #f6f4ee; }
+.saved-detail-row td.saved-detail-cell {
+  background: #fbf9f2;
+  padding: 8px 16px;
+}
+.saved-detail-inline {
+  margin: 0;
+  font-size: 12px;
+}
+.saved-detail-inline th {
+  background: transparent;
+  border-bottom: 1px solid #d4cbb3;
+  font-weight: 600;
+}
+
 .hd-mode-panel {
   display: block;
 }
