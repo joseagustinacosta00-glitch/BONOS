@@ -4548,7 +4548,7 @@ function _arsAttachListeners() {
     openArsWhatIfPanel(row.getAttribute("data-ars-ticker"));
   });
   // Toggles del chart
-  ["arsCurveYAxis", "arsCurveXAxis", "arsCurveModel"].forEach((id) => {
+  ["arsCurveYAxis", "arsCurveXAxis", "arsCurveModel", "arsCurveXScale"].forEach((id) => {
     document.getElementById(id)?.addEventListener("change", renderArsCurve);
   });
   document.querySelectorAll("[data-ars-field]").forEach((el) => {
@@ -4765,8 +4765,22 @@ function renderArsCurve() {
     });
   }
 
-  const yLabel = yKey === "tir" ? "TIR efectiva" : yKey === "tem" ? "TEM" : "TNA (365)";
+  const yLabel = yKey === "tir" ? "TIR efectiva" : yKey === "tem" ? "TEM" : "TNA";
   const xLabel = xKey === "days" ? "Dias al vto" : xKey === "duration" ? "Duration (anios)" : "Modified Duration (anios)";
+  const xScale = document.getElementById("arsCurveXScale")?.value || "log";
+
+  // Calcular Y min/max desde TODOS los puntos visibles (incluye what-ifs y curva)
+  // para dar padding consistente debajo del minimo (3% absoluto).
+  const allYs = [];
+  for (const ds of datasets) {
+    for (const pt of ds.data || []) {
+      if (pt && typeof pt.y === "number" && isFinite(pt.y)) allYs.push(pt.y);
+    }
+  }
+  const minY = allYs.length ? Math.min(...allYs) : 0;
+  const maxY = allYs.length ? Math.max(...allYs) : 1;
+  const yPadding = Math.max(0.02, (maxY - minY) * 0.15);
+  const yMin = Math.max(0, minY - yPadding); // arranca debajo del minimo
 
   const cfg = {
     type: "scatter",
@@ -4776,9 +4790,17 @@ function renderArsCurve() {
       maintainAspectRatio: false,
       interaction: { mode: "nearest", intersect: false },
       scales: {
-        x: { type: "linear", title: { display: true, text: xLabel } },
-        y: { title: { display: true, text: yLabel },
-             ticks: { callback: (v) => (v * 100).toFixed(1) + "%" } },
+        x: {
+          type: xScale, // "log" expande la zona corta; "linear" estandar
+          title: { display: true, text: xLabel + (xScale === "log" ? " (log)" : "") },
+          // En log, ticks autoMax pero forzamos buen formato
+          ticks: { callback: (v) => Math.round(v).toString() },
+        },
+        y: {
+          min: yMin,
+          title: { display: true, text: yLabel },
+          ticks: { callback: (v) => (v * 100).toFixed(1) + "%" },
+        },
       },
       plugins: {
         legend: { display: true, position: "top" },

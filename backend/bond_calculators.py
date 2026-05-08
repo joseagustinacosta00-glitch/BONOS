@@ -75,24 +75,49 @@ def solve_irr(flows: list[tuple[float, float]], price: float) -> float | None:
     return 0.5 * (lo + hi)
 
 
+def _detect_periods_per_year(flows_years: list[tuple[float, float]]) -> int:
+    """Detecta cantidad de pagos por anio desde el espaciado promedio de
+    los cashflows. Redondea a la frecuencia mas cercana entre {1, 2, 4, 12}."""
+    n = len(flows_years)
+    if n < 2:
+        return 1
+    span = flows_years[-1][0] - flows_years[0][0]
+    if span <= 0:
+        return 1
+    avg = span / (n - 1)
+    if avg <= 0:
+        return 1
+    ppy_raw = 1.0 / avg
+    candidates = [1, 2, 4, 12]
+    return min(candidates, key=lambda c: abs(c - ppy_raw))
+
+
 def compute_bond_metrics_from_cashflows(
     cashflows: list[tuple[date, float]],
     price: float,
     settlement_date: date,
 ) -> dict[str, float] | None:
-    """Calcula TIR efectiva, TNA base 365 (capitalizable diaria), TEM,
-    Macaulay duration y Modified duration desde una lista de cashflows
-    futuros (payment_date, total_amount).
-    Devuelve un dict con todas las metricas o None si no se puede calcular."""
+    """Calcula TIR efectiva anual, TNA, TEM, Duration de Macaulay y MD desde
+    una lista de cashflows futuros (payment_date, total_amount). Devuelve None
+    si no se puede calcular.
+
+    Convenciones (matchean la referencia del usuario):
+    - Bullet (1 solo cashflow futuro): TNA = simple lineal = (final/price-1)*
+      365/dias_to_maturity; MD = duration / (1 + TIR*dias/365)
+    - Multi-cupon: N detectado del espaciado promedio. TNA = N*((1+TIR)^(1/N)
+      - 1) capitalizable a esa frecuencia. MD = duration / (1 + TIR/N).
+    - TEM = (1+TIR)^(30/365) - 1 (mes de 30 dias en anio de 365), siempre.
+    """
     if price is None or price <= 0:
         return None
-    flows_years = [
-        ((cf_date - settlement_date).days / 365.0, cf_amount)
+    flows_years_with_days = [
+        ((cf_date - settlement_date).days, (cf_date - settlement_date).days / 365.0, cf_amount)
         for cf_date, cf_amount in cashflows
         if cf_amount is not None and (cf_date - settlement_date).days > 0
     ]
-    if not flows_years:
+    if not flows_years_with_days:
         return None
+    flows_years = [(t, a) for _, t, a in flows_years_with_days]
     irr = solve_irr(flows_years, price)
     if irr is None:
         return None
@@ -101,13 +126,23 @@ def compute_bond_metrics_from_cashflows(
     if not pv:
         return None
     duration = sum(t * d for t, d in discounted) / pv  # Macaulay (anios)
-    modified_duration = duration / (1 + irr)
-    # TNA base 365 (capitalizable diaria) equivalente a TIR efectiva
-    tna_365 = 365.0 * ((1 + irr) ** (1 / 365.0) - 1)
-    tem = (1 + irr) ** (1 / 12.0) - 1
+    n_flows = len(flows_years)
+    if n_flows == 1:
+        # Bullet: convencion simple lineal para TNA
+        days = flows_years_with_days[0][0]
+        amount = flows_years_with_days[0][2]
+        tna = (amount / price - 1) * 365.0 / days if days > 0 else 0.0
+        modified_duration = duration / (1 + irr * days / 365.0) if days > 0 else duration
+    else:
+        # Multi-cupon: capitalizacion natural a la frecuencia del bono
+        ppy = _detect_periods_per_year(flows_years)
+        tna = ppy * ((1 + irr) ** (1.0 / ppy) - 1)
+        modified_duration = duration / (1 + irr / ppy)
+    # TEM siempre: 30/365 (no 1/12)
+    tem = (1 + irr) ** (30.0 / 365.0) - 1
     return {
         "tir": irr,
-        "tna_365": tna_365,
+        "tna_365": tna,  # campo legacy: ahora es TNA segun convencion del bono
         "tem": tem,
         "duration": duration,
         "modified_duration": modified_duration,
