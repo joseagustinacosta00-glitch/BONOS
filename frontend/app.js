@@ -5513,10 +5513,9 @@ function initFrTemplate() {
     });
   });
   $$("#frDeferredApply")?.addEventListener("click", applyFrDeferred);
-  $$("#frDeferredReset")?.addEventListener("click", () => generateFrSchedule().catch(() => {}));
-  $$("#frGraceApply")?.addEventListener("click", applyFrGrace);
-  $$("#frAmortDistribute")?.addEventListener("click", applyFrAmortDistribute);
-  $$("#frAmortApplyUniform")?.addEventListener("click", applyFrAmortUniform);
+  $$("#frDeferredReset")?.addEventListener("click", resetFrDeferred);
+  $$("#frGraceMode")?.addEventListener("change", refreshFrGraceWraps);
+  $$("#frGraceApply")?.addEventListener("click", () => applyFrGrace(false));
 
   // Generar fechas (HD-mode)
   $$("#frGenerateSchedule")?.addEventListener("click", () => {
@@ -5653,6 +5652,7 @@ function resetFrForm() {
   $$("#frLecapMode").checked = false;
   applyFrLecapMode();
   _frCoupons = [];
+  _frCouponsOriginal = [];
   _frLatestCalc = null;
   _frLatestPayload = null;
   $$("#frSave").disabled = true;
@@ -5691,8 +5691,14 @@ async function generateFrSchedule() {
     } else if (idx === dates.length - 1) {
       amort = 100;
     }
-    return { date_iso: d, annual_rate: bondType === "zero_coupon" ? 0 : couponRate, amort_pct: amort };
+    return {
+      date_iso: d,
+      annual_rate: bondType === "zero_coupon" ? 0 : couponRate,
+      amort_pct: amort,
+      in_grace: false,
+    };
   });
+  snapshotFrCouponsOriginal();
   renderFrCouponsTable();
   refreshFrAuxSelectors();
   setCalculatorStatus("ok", `${dates.length} cupones generados`);
@@ -5742,107 +5748,210 @@ function renderFrCouponsTable() {
   });
 }
 
+// Snapshot del listado original tras generar/importar fechas, para poder
+// restaurar despues de aplicar deferred. Espejo del patron HD.
+let _frCouponsOriginal = [];
+
+function snapshotFrCouponsOriginal() {
+  _frCouponsOriginal = _frCoupons.map((c) => ({ ...c }));
+}
+
 function refreshFrAuxSelectors() {
-  // Refresca step-up rows + selectores de periodos para deferred/grace/amort
-  const stepUpWrap = $$("#frStepUpRows");
-  if (stepUpWrap) {
-    const years = [...new Set(_frCoupons.map((c) => c.date_iso.split("-")[0]))].sort();
-    stepUpWrap.innerHTML = years.map((y) => `
-      <label class="step-up-row">
-        <span>${y}</span>
-        <input type="text" inputmode="decimal" data-fr-stepup-year="${y}" placeholder="Tasa anual %" class="form-control form-control-sm">
-      </label>
-    `).join("");
-    stepUpWrap.querySelectorAll("[data-fr-stepup-year]").forEach((el) => {
-      el.addEventListener("input", () => {
-        const rate = parseNumberArg(el.value);
-        if (!isFinite(rate)) return;
-        const year = el.dataset.frStepupYear;
-        _frCoupons.forEach((c) => { if (c.date_iso.startsWith(year)) c.annual_rate = rate; });
-        renderFrCouponsTable();
-      });
-    });
+  // Selector deferred: usa el ORIGINAL como referencia (asi siempre podes
+  // volver a flujos anteriores sin regenerar)
+  const refList = (_frCouponsOriginal && _frCouponsOriginal.length >= _frCoupons.length)
+    ? _frCouponsOriginal : _frCoupons;
+  const optsDeferred = refList.map((c, i) =>
+    `<option value="${i}">Flujo ${i + 1} - ${formatDate(c.date_iso)}</option>`
+  ).join("");
+  const dEl = $$("#frDeferredPeriod");
+  if (dEl) dEl.innerHTML = optsDeferred;
+
+  // Selectores grace: solo los cupones actuales
+  const gPeriodEl = $$("#frGracePeriod");
+  if (gPeriodEl) {
+    gPeriodEl.innerHTML = _frCoupons.map((c, i) =>
+      `<option value="${i}">Flujo ${i + 1} - ${formatDate(c.date_iso)}</option>`
+    ).join("");
   }
-  const opts = _frCoupons.map((c, i) => `<option value="${i + 1}">${i + 1} - ${formatDate(c.date_iso)}</option>`).join("");
-  ["frDeferredPeriod", "frGracePeriod", "frAmortFromPeriod"].forEach((id) => {
-    const el = $$("#" + id);
-    if (el) el.innerHTML = opts;
-  });
+  const gYearEl = $$("#frGraceYear");
+  if (gYearEl) {
+    const years = [...new Set(_frCoupons.map((c) => c.date_iso.split("-")[0]))].sort();
+    const cur = gYearEl.value;
+    gYearEl.innerHTML = years.map((y) =>
+      `<option value="${y}" ${y === cur ? "selected" : ""}>${y}</option>`
+    ).join("");
+  }
+  // Refrescar visibilidad de wraps segun mode
+  refreshFrGraceWraps();
+}
+
+function refreshFrGraceWraps() {
+  const mode = $$("#frGraceMode")?.value || "none";
+  $$("#frGracePeriodWrap")?.classList.toggle("d-none", mode !== "period");
+  $$("#frGraceYearWrap")?.classList.toggle("d-none", mode !== "year" && mode !== "year_month");
+  $$("#frGraceMonthWrap")?.classList.toggle("d-none", mode !== "year_month");
 }
 
 async function importFrDates() {
   const fileEl = $$("#frDatesFile");
   const textEl = $$("#frDatesText");
-  if (!fileEl?.files[0] && !textEl?.value?.trim()) {
-    setCalculatorStatus("error", "Cargar archivo o pegar texto");
+  const file = fileEl?.files?.[0];
+  const pastedText = (textEl?.value || "").trim();
+  const setStatus = (state, msg) => {
+    const el = $$("#frImportStatus");
+    if (el) el.textContent = msg;
+    setCalculatorStatus(state, msg);
+  };
+  if (!file && !pastedText) {
+    setStatus("error", "Subir archivo o pegar texto con fechas");
     return;
   }
-  const fd = new FormData();
-  if (fileEl?.files[0]) fd.append("file", fileEl.files[0]);
-  if (textEl?.value) fd.append("text", textEl.value);
-  setCalculatorStatus("draft", "Parseando...");
-  const r = await fetch("/api/calculators/bond-hd/parse-dates", {
-    method: "POST",
-    body: fd,
-    credentials: "same-origin",
-  });
-  if (!r.ok) {
-    setCalculatorStatus("error", "No se pudieron parsear las fechas");
-    return;
+
+  let combinedText = pastedText;
+  let fileForBackend = null;
+
+  if (file) {
+    if (isImageFile(file)) {
+      try {
+        setStatus("draft", "Cargando OCR...");
+        const ocrText = await runOcrOnImage(file);
+        if (!ocrText && !combinedText) {
+          setStatus("error", "OCR no detecto texto en la imagen");
+          return;
+        }
+        combinedText = combinedText ? `${combinedText}\n\n${ocrText}` : ocrText;
+      } catch (error) {
+        setStatus("error", error.message || "OCR fallo");
+        console.error("[fr] OCR", error);
+        return;
+      }
+    } else {
+      fileForBackend = file;
+    }
   }
-  const j = await r.json();
-  const dates = j.dates || [];
-  if (!dates.length) {
-    setCalculatorStatus("error", "No se encontraron fechas");
-    return;
+
+  setStatus("draft", "Parseando fechas...");
+  const formData = new FormData();
+  if (fileForBackend) formData.append("file", fileForBackend);
+  if (combinedText) formData.append("text", combinedText);
+  // Para que el parser pueda expandir patrones tipo "10/07 y 09/01 de cada anio"
+  const issueIso = parseDdmmYyyy($$("#frIssueDate")?.value);
+  const maturityIso = parseDdmmYyyy($$("#frMaturityDate")?.value);
+  if (issueIso) formData.append("issue_date", issueIso);
+  if (maturityIso) formData.append("maturity_date", maturityIso);
+
+  try {
+    const response = await fetch("/api/calculators/bond-hd/parse-dates", {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : "No se pudieron parsear fechas");
+    }
+    const payload = await response.json();
+    const dates = payload.dates || [];
+    if (!dates.length) {
+      setStatus("error", "No se detectaron fechas");
+      return;
+    }
+    const couponRate = parseNumberArg($$("#frCouponRate")?.value) || 0;
+    const bondType = $$("#frBondType")?.value || "bullet";
+    _frCoupons = dates.map((d, idx) => ({
+      date_iso: d,
+      annual_rate: bondType === "zero_coupon" ? 0 : couponRate,
+      amort_pct: bondType === "amortizable" ? 100 / dates.length : (idx === dates.length - 1 ? 100 : 0),
+      in_grace: false,
+    }));
+    snapshotFrCouponsOriginal();
+    renderFrCouponsTable();
+    refreshFrAuxSelectors();
+    setStatus("ok", `Importadas ${dates.length} fechas`);
+  } catch (error) {
+    setStatus("error", error.message || "Error al parsear fechas");
   }
-  const couponRate = parseNumberArg($$("#frCouponRate").value) || 0;
-  const bondType = $$("#frBondType").value;
-  _frCoupons = dates.map((d, idx) => ({
-    date_iso: d,
-    annual_rate: bondType === "zero_coupon" ? 0 : couponRate,
-    amort_pct: bondType === "amortizable" ? 100 / dates.length : (idx === dates.length - 1 ? 100 : 0),
-  }));
-  renderFrCouponsTable();
-  refreshFrAuxSelectors();
-  setCalculatorStatus("ok", `${dates.length} fechas importadas`);
 }
 
 function applyFrDeferred() {
-  const period = parseInt($$("#frDeferredPeriod").value, 10);
-  if (!period || period < 1 || period > _frCoupons.length) return;
-  _frCoupons = _frCoupons.slice(period - 1);
-  renderFrCouponsTable();
-  refreshFrAuxSelectors();
-  setCalculatorStatus("ok", `Eliminados ${period - 1} flujos`);
-}
-
-function applyFrGrace() {
-  const period = parseInt($$("#frGracePeriod").value, 10);
-  if (!period || period < 1) return;
-  _frCoupons.forEach((c, i) => { if (i < period - 1) c.annual_rate = 0; });
-  renderFrCouponsTable();
-  setCalculatorStatus("ok", `Cupones 1..${period - 1} en gracia (0%)`);
-}
-
-function applyFrAmortDistribute() {
-  if (!_frCoupons.length) return;
-  const pct = 100 / _frCoupons.length;
-  _frCoupons.forEach((c) => { c.amort_pct = pct; });
-  renderFrCouponsTable();
-  setCalculatorStatus("ok", "Amortizacion uniforme aplicada");
-}
-
-function applyFrAmortUniform() {
-  const fromPeriod = parseInt($$("#frAmortFromPeriod").value, 10);
-  const pct = parseNumberArg($$("#frAmortPctPerPeriod").value);
-  if (!fromPeriod || !isFinite(pct)) {
-    setCalculatorStatus("error", "Faltan datos");
+  if (!_frCouponsOriginal.length) {
+    setCalculatorStatus("error", "Generar o importar cupones primero");
     return;
   }
-  _frCoupons.forEach((c, i) => { if (i + 1 >= fromPeriod) c.amort_pct = pct; });
+  const idx = parseInt($$("#frDeferredPeriod")?.value, 10);
+  if (!Number.isFinite(idx) || idx < 0 || idx >= _frCouponsOriginal.length) {
+    setCalculatorStatus("error", "Seleccionar un flujo valido");
+    return;
+  }
+  _frCoupons = _frCouponsOriginal.slice(idx).map((c) => ({ ...c, in_grace: false }));
+  const stat = $$("#frDeferredStatus");
+  if (stat) {
+    stat.textContent = idx === 0
+      ? "Sin diferimiento"
+      : `Eliminados ${idx} flujos previos. Nuevo flujo 1 acumula desde la emision.`;
+  }
   renderFrCouponsTable();
-  setCalculatorStatus("ok", `${pct}% aplicado desde cupon ${fromPeriod}`);
+  refreshFrAuxSelectors();
+  // Re-aplicar gracia con la nueva lista (por si habia)
+  applyFrGrace(true);
+}
+
+function resetFrDeferred() {
+  if (!_frCouponsOriginal.length) return;
+  _frCoupons = _frCouponsOriginal.map((c) => ({ ...c, in_grace: false }));
+  const dEl = $$("#frDeferredPeriod");
+  if (dEl) dEl.value = "0";
+  const stat = $$("#frDeferredStatus");
+  if (stat) stat.textContent = "Restaurado a todos los flujos";
+  renderFrCouponsTable();
+  refreshFrAuxSelectors();
+}
+
+function findFrFirstPaymentIndex() {
+  const mode = $$("#frGraceMode")?.value || "none";
+  if (mode === "none" || !_frCoupons.length) return 0;
+  if (mode === "period") {
+    const idx = parseInt($$("#frGracePeriod")?.value, 10);
+    if (!Number.isFinite(idx)) return 0;
+    return Math.max(0, Math.min(idx, _frCoupons.length - 1));
+  }
+  if (mode === "year") {
+    const targetYear = String($$("#frGraceYear")?.value || "");
+    if (!targetYear) return 0;
+    const found = _frCoupons.findIndex((c) => c.date_iso && c.date_iso.slice(0, 4) >= targetYear);
+    return found === -1 ? _frCoupons.length : found;
+  }
+  if (mode === "year_month") {
+    const targetYear = String($$("#frGraceYear")?.value || "");
+    const targetMonth = parseInt($$("#frGraceMonth")?.value, 10);
+    if (!targetYear || !Number.isFinite(targetMonth)) return 0;
+    const targetKey = `${targetYear}-${String(targetMonth).padStart(2, "0")}`;
+    const found = _frCoupons.findIndex((c) => c.date_iso && c.date_iso.slice(0, 7) >= targetKey);
+    return found === -1 ? _frCoupons.length : found;
+  }
+  return 0;
+}
+
+function applyFrGrace(silent = false) {
+  if (!_frCoupons.length) return;
+  const firstIdx = findFrFirstPaymentIndex();
+  const fallbackRate = parseNumberArg($$("#frCouponRate")?.value) || 0;
+  _frCoupons = _frCoupons.map((coupon, index) => {
+    const inGrace = index < firstIdx;
+    return {
+      ...coupon,
+      in_grace: inGrace,
+      annual_rate: inGrace ? 0 : (coupon.annual_rate || fallbackRate),
+    };
+  });
+  const stat = $$("#frGraceStatus");
+  if (stat) {
+    stat.textContent = firstIdx === 0
+      ? "Sin gracia (paga desde flujo 1)"
+      : `${firstIdx} flujos en gracia, primer pago en flujo ${firstIdx + 1}`;
+  }
+  renderFrCouponsTable();
+  if (!silent) setCalculatorStatus("ok", "Gracia aplicada");
 }
 
 async function calculateFr() {
