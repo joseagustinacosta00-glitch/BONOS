@@ -41,11 +41,27 @@ class BusinessCalendar(Protocol):
 
 
 def days_30_360(start: date, end: date) -> int:
-    """Conteo de dias 30/360 (European convention) entre start y end.
-    Cada mes asumido de 30 dias, ano de 360. Dias > 30 caen a 30."""
-    d1 = min(start.day, 30)
-    d2 = min(end.day, 30)
-    return 360 * (end.year - start.year) + 30 * (end.month - start.month) + (d2 - d1)
+    """Conteo de dias 30/360 (US / NASD convention) entre start y end.
+    Equivale a DAYS360(start, end) de Excel sin el flag European.
+    Reglas:
+      - Si d1 == 31, d1 -> 30
+      - Si d2 == 31 y d1 >= 30, d2 -> 30
+      - Si d2 == 31 y d1 < 30, d2 -> 1 y m2 += 1 (rollover de mes)
+    """
+    y1, m1, d1 = start.year, start.month, start.day
+    y2, m2, d2 = end.year, end.month, end.day
+    if d1 == 31:
+        d1 = 30
+    if d2 == 31:
+        if d1 >= 30:
+            d2 = 30
+        else:
+            d2 = 1
+            m2 += 1
+            if m2 > 12:
+                m2 = 1
+                y2 += 1
+    return 360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)
 
 
 @dataclass(frozen=True)
