@@ -39,6 +39,14 @@ class BusinessCalendar(Protocol):
         ...
 
 
+def days_30_360(start: date, end: date) -> int:
+    """Conteo de dias 30/360 (European convention) entre start y end.
+    Cada mes asumido de 30 dias, ano de 360. Dias > 30 caen a 30."""
+    d1 = min(start.day, 30)
+    d2 = min(end.day, 30)
+    return 360 * (end.year - start.year) + 30 * (end.month - start.month) + (d2 - d1)
+
+
 @dataclass(frozen=True)
 class Cashflow:
     payment_date: date
@@ -278,17 +286,21 @@ def build_lecap_calculation(
 
     tem_emission = tem_emission_percent / 100
     effective_payment_date = calendar.next_business_day(maturity_date, include_current=True)
-    applicable_days = max((effective_payment_date - issue_date).days - 1, 0)
+    # LECAPs: dias base 360 (30/360 European) entre emision y vencimiento.
+    # Formula: ((1+TEM) ^ (DIAS_360/30)) * VNO - VNO = interes
+    # Final cashflow = VNO + interes = (1+TEM)^(d360/30) * VNO
+    # Redondeo a 3 decimales para presentacion consistente.
+    applicable_days = days_30_360(issue_date, maturity_date)
     final_value = face_value * (1 + tem_emission) ** (applicable_days / 30)
-    interest = final_value - face_value
+    interest = round(final_value - face_value, 3)
 
     cashflow = LecapCashflow(
         number=1,
         payment_date=maturity_date,
         effective_payment_date=effective_payment_date,
         applicable_days=applicable_days,
-        applicable_period_360=applicable_days / 360,
-        amortization_vn=face_value,
+        applicable_period_360=round(applicable_days / 360, 6),
+        amortization_vn=round(face_value, 3),
         amortization_vr=0,
         applicable_rate=tem_emission,
         interest=interest,

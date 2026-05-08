@@ -1049,92 +1049,101 @@
             </div>
 
             <div id="lecapTemplate">
-            <form id="bondDraftForm" class="calculator-form lecap-form">
-              <label>
-                <span>Ticker</span>
-                <select id="lecapTicker" class="form-select form-select-sm" required>
-                  <option value="S15Y6">S15Y6</option>
-                  <option value="S29Y6">S29Y6</option>
-                  <option value="T30J6">T30J6</option>
-                  <option value="S17L6">S17L6</option>
-                  <option value="S31L6">S31L6</option>
-                  <option value="S14G6">S14G6</option>
-                  <option value="S31G6">S31G6</option>
-                  <option value="S30S6">S30S6</option>
-                  <option value="S30O6">S30O6</option>
-                </select>
-              </label>
-              <label>
-                <span>Fecha de emision</span>
-                <input id="issueDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
-              </label>
-              <label>
-                <span>Fecha de vencimiento</span>
-                <input id="maturityDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
-              </label>
-              <label>
-                <span>VNO</span>
-                <input id="faceValue" class="form-control form-control-sm" type="number" min="0.0001" step="0.0001" value="100" required>
-              </label>
-              <label>
-                <span>TEM emision %</span>
-                <input id="temEmission" class="form-control form-control-sm" type="number" step="0.0001" required>
-              </label>
-              <button class="btn btn-sm btn-dark" type="submit">Calcular</button>
-              <button id="saveLecap" class="btn btn-sm btn-outline-dark" type="button" disabled>Confirmar y guardar</button>
-            </form>
-
-            <section class="cashflow-preview" aria-label="Cashflow LECAP">
-              <h3>Cashflow LECAP</h3>
-              <div class="table-wrap inner-table">
-                <table class="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Cashflow</th>
-                      <th>Fecha de pago</th>
-                      <th>Fecha efectiva</th>
-                      <th class="text-end">Periodo dias</th>
-                      <th class="text-end">Amortizacion VN</th>
-                      <th class="text-end">Amortizacion VR</th>
-                      <th class="text-end">Tasa aplicable</th>
-                      <th class="text-end">Interes</th>
-                      <th class="text-end">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody id="cashflowPreview">
-                    <tr>
-                      <td colspan="9" class="empty-state">Completa los datos iniciales</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div id="lcModeSwitch" class="hd-mode-switch">
+                <button type="button" class="btn btn-sm btn-dark active" data-lc-mode="search">Lecaps</button>
+                <button type="button" class="btn btn-sm btn-outline-dark" data-lc-mode="new">Crear nuevo cashflow</button>
               </div>
-            </section>
 
-            <section class="cashflow-preview" aria-label="LECAPs guardadas">
-              <h3>LECAPs guardadas</h3>
-              <div class="table-wrap inner-table">
-                <table class="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Ticker</th>
-                      <th>Emision</th>
-                      <th>Vencimiento</th>
-                      <th>Fecha efectiva</th>
-                      <th class="text-end">Dias</th>
-                      <th class="text-end">VNO</th>
-                      <th class="text-end">TEM</th>
-                      <th class="text-end">Interes</th>
-                      <th class="text-end">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody id="savedLecaps">
-                    <tr>
-                      <td colspan="9" class="empty-state">Todavia no hay LECAPs guardadas</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
+              <section id="lcSearchPanel" class="hd-mode-panel">
+                <section class="cashflow-preview" aria-label="LECAPs guardadas">
+                  <h3>LECAPs guardadas</h3>
+                  <div class="table-wrap inner-table">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>Ticker</th>
+                          <th>Emision</th>
+                          <th>Vencimiento</th>
+                          <th>Fecha efectiva</th>
+                          <th class="text-end">Dias</th>
+                          <th class="text-end">VNO</th>
+                          <th class="text-end">TEM</th>
+                          <th class="text-end">Interes</th>
+                          <th class="text-end">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody id="savedLecaps">
+                        <tr>
+                          <td colspan="9" class="empty-state">Todavia no hay LECAPs guardadas</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+
+              <section id="lcNewPanel" class="hd-mode-panel d-none">
+                <form id="bondDraftForm" class="calculator-form lecap-form">
+                  <label>
+                    <span>Ticker</span>
+                    <select id="lecapTicker" class="form-select form-select-sm" required>
+                      <option value="S15Y6">S15Y6</option>
+                      <option value="S29Y6">S29Y6</option>
+                      <option value="T30J6">T30J6</option>
+                      <option value="S17L6">S17L6</option>
+                      <option value="S31L6">S31L6</option>
+                      <option value="S14G6">S14G6</option>
+                      <option value="S31G6">S31G6</option>
+                      <option value="S30S6">S30S6</option>
+                      <option value="S30O6">S30O6</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Fecha de emision</span>
+                    <input id="issueDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
+                  </label>
+                  <label>
+                    <span>Fecha de vencimiento</span>
+                    <input id="maturityDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off" required>
+                  </label>
+                  <label>
+                    <span>VNO</span>
+                    <input id="faceValue" class="form-control form-control-sm" type="text" inputmode="decimal" placeholder="100" value="100" required>
+                  </label>
+                  <label>
+                    <span>TEM emision %</span>
+                    <input id="temEmission" class="form-control form-control-sm" type="text" inputmode="decimal" placeholder="Ej: 2,5" required>
+                  </label>
+                  <button class="btn btn-sm btn-dark" type="submit">Calcular</button>
+                  <button id="saveLecap" class="btn btn-sm btn-outline-dark" type="button" disabled>Confirmar y guardar</button>
+                </form>
+
+                <section class="cashflow-preview" aria-label="Cashflow LECAP">
+                  <h3>Cashflow LECAP</h3>
+                  <div class="table-wrap inner-table">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>Cashflow</th>
+                          <th>Fecha de pago</th>
+                          <th>Fecha efectiva</th>
+                          <th class="text-end">Periodo dias</th>
+                          <th class="text-end">Amortizacion VN</th>
+                          <th class="text-end">Amortizacion VR</th>
+                          <th class="text-end">Tasa aplicable</th>
+                          <th class="text-end">Interes</th>
+                          <th class="text-end">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody id="cashflowPreview">
+                        <tr>
+                          <td colspan="9" class="empty-state">Completa los datos iniciales</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
             </div>
           </section>
         </section>

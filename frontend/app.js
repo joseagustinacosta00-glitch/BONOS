@@ -2368,6 +2368,7 @@ function setBondModel(model) {
 
   if (isLecap) {
     calculatorPlaceholder.textContent = "";
+    setLecapMode("search");
   } else if (showHdTemplate) {
     renderHardDollarCouponInputs();
     setHdMode(isDlk ? "new" : "search");
@@ -2389,17 +2390,18 @@ function setBondModel(model) {
 }
 
 function renderLecapCalculation(payload) {
+  const fmt3 = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
   cashflowPreview.innerHTML = payload.cashflows.map((cashflow) => `
     <tr>
       <td>${cashflow.number}</td>
       <td>${formatDate(cashflow.payment_date)}</td>
       <td>${formatDate(cashflow.effective_payment_date)}</td>
       <td class="text-end">${formatNumber(cashflow.applicable_days)}</td>
-      <td class="text-end">${formatNumber(cashflow.amortization_vn, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatNumber(cashflow.amortization_vr, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-      <td class="text-end">${formatPercent(cashflow.applicable_rate, 4)}</td>
-      <td class="text-end">${formatNumber(cashflow.interest, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
-      <td class="text-end">${formatNumber(cashflow.total, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+      <td class="text-end">${formatNumber(cashflow.amortization_vn, fmt3)}</td>
+      <td class="text-end">${formatNumber(cashflow.amortization_vr, fmt3)}</td>
+      <td class="text-end">${formatPercent(cashflow.applicable_rate, 3)}</td>
+      <td class="text-end">${formatNumber(cashflow.interest, fmt3)}</td>
+      <td class="text-end">${formatNumber(cashflow.total, fmt3)}</td>
     </tr>
   `).join("");
 
@@ -2415,6 +2417,7 @@ function renderSavedLecaps(payload) {
     return;
   }
 
+  const fmt3 = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
   savedLecaps.innerHTML = items.map((item) => {
     const cashflow = item.calculation.cashflows[0];
     return `
@@ -2424,10 +2427,10 @@ function renderSavedLecaps(payload) {
         <td>${formatDate(item.maturity_date)}</td>
         <td>${formatDate(cashflow.effective_payment_date)}</td>
         <td class="text-end">${formatNumber(cashflow.applicable_days)}</td>
-        <td class="text-end">${formatNumber(item.face_value, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-        <td class="text-end">${formatNumber(item.tem_emission_percent, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%</td>
-        <td class="text-end">${formatNumber(cashflow.interest, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
-        <td class="text-end">${formatNumber(cashflow.total, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</td>
+        <td class="text-end">${formatNumber(item.face_value, fmt3)}</td>
+        <td class="text-end">${formatNumber(item.tem_emission_percent, fmt3)}%</td>
+        <td class="text-end">${formatNumber(cashflow.interest, fmt3)}</td>
+        <td class="text-end">${formatNumber(cashflow.total, fmt3)}</td>
       </tr>
     `;
   }).join("");
@@ -4161,6 +4164,48 @@ async function saveLatestLecap() {
   setCalculatorStatus("ok", `${latestLecapCalculation.ticker} guardada`);
 }
 
+// Parsea numero permitiendo coma o punto como separador decimal.
+function parseNumberArg(value) {
+  if (value == null) return NaN;
+  const s = String(value).trim().replace(",", ".");
+  if (s === "") return NaN;
+  return Number(s);
+}
+
+function resetLecapForm() {
+  if (lecapTicker) lecapTicker.selectedIndex = 0;
+  if (issueDate) issueDate.value = "";
+  if (maturityDate) maturityDate.value = "";
+  if (faceValue) faceValue.value = "100";
+  if (temEmission) temEmission.value = "";
+  if (cashflowPreview) cashflowPreview.innerHTML = '<tr><td colspan="9" class="empty-state">Completa los datos iniciales</td></tr>';
+  latestLecapCalculation = null;
+  if (saveLecap) saveLecap.disabled = true;
+  setCalculatorStatus("draft", "Borrador");
+}
+
+function setLecapMode(mode) {
+  const searchPanel = document.querySelector("#lcSearchPanel");
+  const newPanel = document.querySelector("#lcNewPanel");
+  const switcher = document.querySelector("#lcModeSwitch");
+  if (!searchPanel || !newPanel) return;
+  const isSearch = mode === "search";
+  searchPanel.classList.toggle("d-none", !isSearch);
+  newPanel.classList.toggle("d-none", isSearch);
+  switcher?.querySelectorAll("[data-lc-mode]").forEach((button) => {
+    const active = button.dataset.lcMode === mode;
+    button.classList.toggle("active", active);
+    button.classList.toggle("btn-dark", active);
+    button.classList.toggle("btn-outline-dark", !active);
+  });
+  if (isSearch) {
+    fetchSavedLecaps().catch(() => {});
+  } else {
+    // Cuando entras a "crear nuevo" se limpian los campos del calculo anterior
+    resetLecapForm();
+  }
+}
+
 async function submitBondDraft(event) {
   event.preventDefault();
   if (currentBondModel !== "lecap") return;
@@ -4173,6 +4218,17 @@ async function submitBondDraft(event) {
     return;
   }
 
+  const faceValueNum = parseNumberArg(faceValue.value);
+  const temNum = parseNumberArg(temEmission.value);
+  if (!isFinite(faceValueNum) || faceValueNum <= 0) {
+    setCalculatorStatus("error", "VNO invalido");
+    return;
+  }
+  if (!isFinite(temNum)) {
+    setCalculatorStatus("error", "TEM invalida");
+    return;
+  }
+
   const response = await fetch("/api/calculators/lecaps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -4180,8 +4236,8 @@ async function submitBondDraft(event) {
       ticker: lecapTicker.value,
       issue_date: issueIso,
       maturity_date: maturityIso,
-      face_value: Number(faceValue.value),
-      tem_emission_percent: Number(temEmission.value),
+      face_value: faceValueNum,
+      tem_emission_percent: temNum,
     }),
   });
 
@@ -4436,6 +4492,9 @@ hdImportDates?.addEventListener("click", () => {
 
 hdModeSwitch?.querySelectorAll("[data-hd-mode]").forEach((button) => {
   button.addEventListener("click", () => setHdMode(button.dataset.hdMode));
+});
+document.querySelector("#lcModeSwitch")?.querySelectorAll("[data-lc-mode]").forEach((button) => {
+  button.addEventListener("click", () => setLecapMode(button.dataset.lcMode));
 });
 hdSearchSubmit?.addEventListener("click", () => {
   fetchHdSavedList().catch(() => setHdSaveStatus("error", "No se pudo buscar"));
