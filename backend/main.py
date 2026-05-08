@@ -741,12 +741,22 @@ async def market_lecaps(settlement: str = "t1") -> dict:
     }
 
 
+# Orden CANONICO requerido por el usuario (LECAPs S* + bonos T* mezclados
+# por vencimiento). Los tickers que aparezcan en LECAP_TICKERS y/o
+# TASA_FIJA_TICKERS se procesan UNA sola vez en la posicion canonica.
+ARS_CANONICAL_ORDER: tuple[str, ...] = (
+    "S15Y6", "S29Y6", "S12J6", "T30J6", "S17L6", "S31L6",
+    "S14G6", "S31G6", "S30S6", "S30O6", "TO26", "S30N6",
+    "T15E7", "T30A7", "T31Y7", "T30J7", "TY30P",
+)
+
+
 @app.get("/api/market/ars")
 async def market_ars(settlement: str = "t1") -> dict:
     """Mercado pesos: combina LECAPs + Tasa Fija en una sola tabla con TIR,
     Duration, MD, TNA base 365 y TEM. Los datos de calculo (cashflows, fechas)
     salen de las calculadoras guardadas. El precio (last/bid/ask) sale del
-    market data en vivo. Ordenado por maturity asc."""
+    market data en vivo. Orden CANONICO (no por maturity)."""
     settlement_type = _normalize_lecap_settlement(settlement)
     today = now_argentina().date()
     settlement_date = (
@@ -760,15 +770,27 @@ async def market_ars(settlement: str = "t1") -> dict:
     snap = market.snapshot()
     general_quote_by_symbol = {q["symbol"]: q for q in (snap.get("quotes") or [])}
 
-    rows: list[dict] = []
-
-    # ---- LECAPs ----
     saved_lecaps_by_ticker = {s.ticker: s for s in storage.list_lecaps()}
-    all_lecap_tickers = list(LECAP_TICKERS)
-    for custom in storage.list_custom_lecap_tickers():
-        if custom not in all_lecap_tickers:
-            all_lecap_tickers.append(custom)
-    for ticker in all_lecap_tickers:
+    saved_tf_by_ticker = {s.ticker: s for s in storage.list_fixed_rate()}
+    custom_lecaps = set(storage.list_custom_lecap_tickers())
+    custom_tf = set(storage.list_custom_tasa_fija_tickers())
+    lecap_universe = set(LECAP_TICKERS) | custom_lecaps
+    tf_universe = {t.family for t in TASA_FIJA_TICKERS} | custom_tf
+
+    # Construir lista ordenada SIN duplicados: orden canonico + customs al
+    # final (por orden alfabetico para estabilidad).
+    seen: set[str] = set()
+    ordered_tickers: list[str] = []
+    for ticker in ARS_CANONICAL_ORDER:
+        if ticker not in seen:
+            ordered_tickers.append(ticker)
+            seen.add(ticker)
+    for ticker in sorted(custom_lecaps | custom_tf):
+        if ticker not in seen:
+            ordered_tickers.append(ticker)
+            seen.add(ticker)
+
+    def _row_from_lecap(ticker: str) -> dict:
         saved = saved_lecaps_by_ticker.get(ticker)
         quote = lecap_quote_by_ticker.get(ticker, {}) or {}
         last = _coerce_optional_float(quote.get("last"))
@@ -776,16 +798,13 @@ async def market_ars(settlement: str = "t1") -> dict:
         ask = _coerce_optional_float(quote.get("ask"))
         change = _coerce_optional_float(quote.get("change"))
         if saved is None:
-            rows.append({
-                "kind": "lecap",
-                "ticker": ticker,
-                "maturity_date": None,
+            return {
+                "kind": "lecap", "ticker": ticker, "maturity_date": None,
                 "last": last, "bid": bid, "offer": ask, "change_pct": change,
                 "tir": None, "tna_365": None, "tem": None,
                 "duration": None, "modified_duration": None,
                 "updated_at": quote.get("updated_at"),
-            })
-            continue
+            }
         try:
             calc = build_lecap_calculation(
                 ticker=saved.ticker, issue_date=saved.issue_date,
@@ -799,10 +818,9 @@ async def market_ars(settlement: str = "t1") -> dict:
         if calc and last:
             cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
             metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date)
-        rows.append({
-            "kind": "lecap",
-            "ticker": ticker,
-            "maturity_date": saved.maturity_date.isoformat() if saved else None,
+        return {
+            "kind": "lecap", "ticker": ticker,
+            "maturity_date": saved.maturity_date.isoformat(),
             "last": last, "bid": bid, "offer": ask, "change_pct": change,
             "tir": metrics.get("tir") if metrics else None,
             "tna_365": metrics.get("tna_365") if metrics else None,
@@ -810,34 +828,23 @@ async def market_ars(settlement: str = "t1") -> dict:
             "duration": metrics.get("duration") if metrics else None,
             "modified_duration": metrics.get("modified_duration") if metrics else None,
             "updated_at": quote.get("updated_at"),
-        })
+        }
 
-    # ---- Tasa Fija ----
-    saved_tf_by_ticker = {s.ticker: s for s in storage.list_fixed_rate()}
-    all_tf_tickers = [t.family for t in TASA_FIJA_TICKERS]
-    for custom in storage.list_custom_tasa_fija_tickers():
-        if custom not in all_tf_tickers:
-            all_tf_tickers.append(custom)
-    for ticker in all_tf_tickers:
+    def _row_from_tf(ticker: str) -> dict:
         saved = saved_tf_by_ticker.get(ticker)
-        # Buscar en quotes generales por symbol == ticker
         quote = general_quote_by_symbol.get(ticker, {}) or {}
         last = _coerce_optional_float(quote.get("last"))
         bid = _coerce_optional_float(quote.get("bid"))
         ask = _coerce_optional_float(quote.get("ask"))
         change = _coerce_optional_float(quote.get("change"))
         if saved is None:
-            rows.append({
-                "kind": "tasa_fija",
-                "ticker": ticker,
-                "maturity_date": None,
+            return {
+                "kind": "tasa_fija", "ticker": ticker, "maturity_date": None,
                 "last": last, "bid": bid, "offer": ask, "change_pct": change,
                 "tir": None, "tna_365": None, "tem": None,
                 "duration": None, "modified_duration": None,
                 "updated_at": quote.get("updated_at"),
-            })
-            continue
-        # Reusar la logica de calculadora segun lecap_mode/HD
+            }
         cashflows_pairs: list[tuple[date, float]] = []
         try:
             if saved.lecap_mode and saved.tem_emission_percent is not None:
@@ -849,7 +856,6 @@ async def market_ars(settlement: str = "t1") -> dict:
                 )
                 cashflows_pairs = [(cf.effective_payment_date, cf.total) for cf in calc.cashflows]
             elif saved.bond_type and saved.frequency and saved.convention:
-                # Cashflows guardados en payload_json (incluye coupons editados)
                 import json as _json
                 payload = _json.loads(saved.payload_json) if saved.payload_json else {}
                 for cf in payload.get("cashflows", []) or []:
@@ -860,9 +866,8 @@ async def market_ars(settlement: str = "t1") -> dict:
         except (ValueError, KeyError, TypeError):
             cashflows_pairs = []
         metrics = compute_bond_metrics_from_cashflows(cashflows_pairs, last, settlement_date) if (cashflows_pairs and last) else None
-        rows.append({
-            "kind": "tasa_fija",
-            "ticker": ticker,
+        return {
+            "kind": "tasa_fija", "ticker": ticker,
             "maturity_date": saved.maturity_date.isoformat(),
             "last": last, "bid": bid, "offer": ask, "change_pct": change,
             "tir": metrics.get("tir") if metrics else None,
@@ -871,10 +876,22 @@ async def market_ars(settlement: str = "t1") -> dict:
             "duration": metrics.get("duration") if metrics else None,
             "modified_duration": metrics.get("modified_duration") if metrics else None,
             "updated_at": quote.get("updated_at"),
-        })
+        }
 
-    # Ordenar por maturity asc; los sin maturity al final
-    rows.sort(key=lambda r: (r["maturity_date"] is None, r["maturity_date"] or ""))
+    rows: list[dict] = []
+    for ticker in ordered_tickers:
+        # Decidir route: prioridad LECAP saved > TF saved > LECAP universe > TF universe.
+        # Asi el ticker aparece UNA sola vez aunque este en ambos universos.
+        if ticker in saved_lecaps_by_ticker:
+            rows.append(_row_from_lecap(ticker))
+        elif ticker in saved_tf_by_ticker:
+            rows.append(_row_from_tf(ticker))
+        elif ticker in lecap_universe:
+            rows.append(_row_from_lecap(ticker))
+        elif ticker in tf_universe:
+            rows.append(_row_from_tf(ticker))
+        else:
+            rows.append(_row_from_tf(ticker))  # fallback
 
     return {
         "status": market.status,

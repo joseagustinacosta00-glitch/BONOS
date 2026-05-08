@@ -47,6 +47,7 @@ HARD_DOLLAR_TICKERS: tuple[BondTicker, ...] = (
 
 # Bonos Tasa Fija (no LECAPs - las LECAPs viven en LECAP_TICKERS aparte). Solo pesos.
 TASA_FIJA_TICKERS: tuple[BondTicker, ...] = (
+    BondTicker("T30J6", "T30J6", "ARS", BondCategory.TASA_FIJA),
     BondTicker("TO26", "TO26", "ARS", BondCategory.TASA_FIJA),
     BondTicker("S30N6", "S30N6", "ARS", BondCategory.TASA_FIJA),
     BondTicker("T15E7", "T15E7", "ARS", BondCategory.TASA_FIJA),
