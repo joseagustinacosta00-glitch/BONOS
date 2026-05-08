@@ -2218,8 +2218,6 @@ def _expand_recurring_day_month(
     'primer pago en YYYY' explicito."""
     if maturity_date is None:
         return set()
-    if not _RECURRENT_HINT_PATTERN.search(text):
-        return set()
 
     pairs: set[tuple[int, int]] = set()
     # 1) Pares numericos tipo 10/07
@@ -2244,6 +2242,13 @@ def _expand_recurring_day_month(
             pairs.add((day, month))
 
     if not pairs:
+        return set()
+
+    # Heuristica: si hay 2+ pares distintos dia-mes sin anio, es razonable asumir
+    # que es un schedule recurrente aunque falte el hint explicito ("cada anio").
+    # Si hay 1 solo par, exigimos el hint para evitar tomar una fecha aislada
+    # como recurrente.
+    if len(pairs) < 2 and not _RECURRENT_HINT_PATTERN.search(text):
         return set()
 
     # Detectar año/mes de primer pago si se indico
