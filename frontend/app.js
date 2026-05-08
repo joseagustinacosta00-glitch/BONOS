@@ -2276,6 +2276,22 @@ function applySnapshot(snapshot) {
   latestQuotes = snapshot.quotes || [];
   sourceLabel.textContent = snapshot.source || "-";
   updatedAt.textContent = formatTime(snapshot.updated_at);
+  // Sync precios live a _latestArsItems para que la tabla ARS refleje el
+  // ultimo last/bid/offer entre polls del endpoint ARS. Las metricas
+  // (TIR, Duration, etc.) se recalculan recien en el proximo poll.
+  if (_latestArsItems && _latestArsItems.length) {
+    const bySymbol = new Map();
+    for (const q of latestQuotes) bySymbol.set(q.symbol, q);
+    for (const it of _latestArsItems) {
+      const q = bySymbol.get(it.ticker);
+      if (q) {
+        if (q.last != null) it.last = q.last;
+        if (q.bid != null) it.bid = q.bid;
+        if (q.ask != null) it.offer = q.ask;
+        if (q.change != null) it.change_pct = q.change;
+      }
+    }
+  }
   renderQuotes();
   if (currentMarketList === "lecaps") {
     fetchLecapMarket();
@@ -4446,10 +4462,11 @@ async function pollArsMarket() {
   } catch (e) {
     console.error("[ars] fetch error", e);
   }
-  // Re-pol cada 30s mientras estemos en la tab
+  // Re-poll cada 5s mientras estemos en la tab. La metricas se recalculan
+  // server-side con el precio fresco, asi la curva se mueve.
   if (_arsPollTimer) clearTimeout(_arsPollTimer);
   if (currentMarketCategory === "ars") {
-    _arsPollTimer = setTimeout(pollArsMarket, 30000);
+    _arsPollTimer = setTimeout(pollArsMarket, 5000);
   }
 }
 
@@ -4503,11 +4520,20 @@ function renderArsMarket() {
     row.classList.add("ars-row-clickable");
     row.setAttribute("data-ars-ticker", row.getAttribute("data-key"));
   });
-  renderArsCurve();
+  // Solo re-renderear la curva cuando los datos relevantes cambian.
+  // Evita parpadeos cuando WebSocket dispara renderQuotes con datos iguales.
+  const hash = _arsItemsHash(items);
+  if (hash !== _arsCurveLastHash) {
+    _arsCurveLastHash = hash;
+    renderArsCurve();
+  }
 }
 
 // What-ifs: { ticker: { type: "price"|"tna", value, computed: {tir, tna_365, tem, duration, modified_duration, days_to_maturity, price} } }
 const _arsWhatIfs = {};
+// Hash de la ultima versionrenderizada en la curva, para evitar rebuilds
+// en cada WebSocket tick cuando los datos no cambiaron.
+let _arsCurveLastHash = "";
 
 function _arsAttachListeners() {
   if (_arsAttachListeners._done) return;
@@ -4716,13 +4742,24 @@ function renderArsCurve() {
       },
     },
   };
+  // Animation off: chart.update("none") evita el flicker que se ve cuando
+  // los datasets se reasignan (Chart.js por default anima cada update).
   if (_arsCurveChart) {
     _arsCurveChart.data = cfg.data;
     _arsCurveChart.options = cfg.options;
-    _arsCurveChart.update();
+    _arsCurveChart.update("none");
   } else {
+    cfg.options.animation = false;
     _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
   }
+}
+
+// Hash de los datos relevantes para curva: ticker + last + bid + offer + maturity.
+// Si no cambia, no re-construir el chart (evita parpadeos en cada WS tick).
+function _arsItemsHash(items) {
+  return (items || [])
+    .map((it) => `${it.ticker}|${it.last}|${it.bid}|${it.offer}|${it.maturity_date}|${it.tir}`)
+    .join(";") + "|" + Object.keys(_arsWhatIfs).map((k) => `${k}:${_arsWhatIfs[k]?.value}`).join(",");
 }
 
 document.querySelectorAll("[data-market-settlement]").forEach((button) => {
