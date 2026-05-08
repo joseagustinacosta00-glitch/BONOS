@@ -5517,6 +5517,11 @@ function initFrTemplate() {
   $$("#frGraceMode")?.addEventListener("change", refreshFrGraceWraps);
   $$("#frGraceApply")?.addEventListener("click", () => applyFrGrace(false));
 
+  const frPutDateEl = $$("#frPutDate");
+  if (frPutDateEl) attachDdmmAutoformat(frPutDateEl);
+  $$("#frPutApply")?.addEventListener("click", applyFrPut);
+  $$("#frPutRemove")?.addEventListener("click", removeFrPut);
+
   // Generar fechas (HD-mode)
   $$("#frGenerateSchedule")?.addEventListener("click", () => {
     generateFrSchedule().catch((err) => {
@@ -5653,8 +5658,13 @@ function resetFrForm() {
   applyFrLecapMode();
   _frCoupons = [];
   _frCouponsOriginal = [];
+  _frCouponsBeforePut = [];
   _frLatestCalc = null;
   _frLatestPayload = null;
+  const putDateEl = $$("#frPutDate");
+  if (putDateEl) putDateEl.value = "";
+  const putStat = $$("#frPutStatus");
+  if (putStat) putStat.textContent = "-";
   $$("#frSave").disabled = true;
   renderFrCouponsTable();
   $$("#frCashflowBody").innerHTML = '<tr><td colspan="9" class="empty-state">Completa los datos y calcula</td></tr>';
@@ -5751,9 +5761,88 @@ function renderFrCouponsTable() {
 // Snapshot del listado original tras generar/importar fechas, para poder
 // restaurar despues de aplicar deferred. Espejo del patron HD.
 let _frCouponsOriginal = [];
+// Snapshot tomado JUSTO antes de aplicar el put (preserva edits del usuario:
+// rates manuales, gracia aplicada, deferred, etc.). Vacio = no hay put activo.
+let _frCouponsBeforePut = [];
 
 function snapshotFrCouponsOriginal() {
   _frCouponsOriginal = _frCoupons.map((c) => ({ ...c }));
+  // Resetear estado de put: cupones nuevos -> el put previo ya no aplica
+  _frCouponsBeforePut = [];
+  const stat = $$("#frPutStatus");
+  if (stat) stat.textContent = "-";
+}
+
+function applyFrPut() {
+  if (!_frCoupons.length) {
+    setCalculatorStatus("error", "Generar o importar cupones primero");
+    return;
+  }
+  const putIso = parseDdmmYyyy($$("#frPutDate")?.value);
+  if (!putIso) {
+    setCalculatorStatus("error", "Fecha del put invalida (DD/MM/AAAA)");
+    return;
+  }
+  // Valida rango: el put debe caer entre el primer cupon y el vencimiento
+  const first = _frCoupons[0]?.date_iso;
+  const last = _frCoupons[_frCoupons.length - 1]?.date_iso;
+  if (putIso < first || putIso > last) {
+    setCalculatorStatus("error", "El put debe estar entre el primer cupon y el vencimiento");
+    return;
+  }
+  // Snapshot solo si no habia put activo (asi puedo cambiar fecha de put
+  // multiples veces sin perder los edits originales)
+  if (!_frCouponsBeforePut.length) {
+    _frCouponsBeforePut = _frCoupons.map((c) => ({ ...c }));
+  }
+  // Tomar como base el snapshot pre-put y truncar
+  const base = _frCouponsBeforePut.map((c) => ({ ...c }));
+  // Cupones cuya fecha <= putIso: se mantienen
+  let truncated = base.filter((c) => c.date_iso <= putIso);
+  if (!truncated.length) {
+    // El put cae antes del primer cupon: el unico flujo es el put mismo
+    const fallbackRate = parseNumberArg($$("#frCouponRate")?.value) || (base[0]?.annual_rate || 0);
+    truncated = [{ date_iso: putIso, annual_rate: fallbackRate, amort_pct: 100, in_grace: false }];
+  } else {
+    // Todos los cupones intermedios pierden su amort (el 100% va al put final)
+    truncated.forEach((c) => { c.amort_pct = 0; });
+    const lastIso = truncated[truncated.length - 1].date_iso;
+    if (lastIso === putIso) {
+      // El put coincide con un cupon existente: ese cupon se queda como ultimo
+      // y se le pone 100% amort
+      truncated[truncated.length - 1].amort_pct = 100;
+    } else {
+      // El put cae entre dos cupones: agregar nuevo cupon en putIso con misma
+      // tasa que el anterior y 100% amort
+      const prev = truncated[truncated.length - 1];
+      truncated.push({
+        date_iso: putIso,
+        annual_rate: prev.annual_rate || 0,
+        amort_pct: 100,
+        in_grace: false,
+      });
+    }
+  }
+  _frCoupons = truncated;
+  renderFrCouponsTable();
+  refreshFrAuxSelectors();
+  const stat = $$("#frPutStatus");
+  if (stat) stat.textContent = `Put activo el ${formatDate(putIso)} (${truncated.length} flujos)`;
+  setCalculatorStatus("ok", "Put aplicado");
+}
+
+function removeFrPut() {
+  if (!_frCouponsBeforePut.length) {
+    setCalculatorStatus("error", "No hay put activo");
+    return;
+  }
+  _frCoupons = _frCouponsBeforePut.map((c) => ({ ...c }));
+  _frCouponsBeforePut = [];
+  renderFrCouponsTable();
+  refreshFrAuxSelectors();
+  const stat = $$("#frPutStatus");
+  if (stat) stat.textContent = "Sin put";
+  setCalculatorStatus("ok", "Put removido");
 }
 
 function refreshFrAuxSelectors() {

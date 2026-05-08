@@ -1300,6 +1300,23 @@
                   </div>
                 </details>
 
+                <details data-fr-hd id="frPutSection" class="cashflow-preview hd-import-toggle" aria-label="Put">
+                  <summary>
+                    <span class="hd-import-summary-title">Put (opcional)</span>
+                    <span class="hd-import-summary-hint">Click para abrir - acorta el bono a una fecha de ejercicio</span>
+                  </summary>
+                  <p class="hd-help">Si el bono tiene un put a una fecha especifica, el bonista lo ejerce y el flujo se acorta. Por default se valua sin put. Al aplicar: se truncan los cupones posteriores a la fecha del put y el ultimo cupon paga el 100% del valor residual al valor tecnico.</p>
+                  <div class="hd-amort-controls">
+                    <label>
+                      <span>Fecha del put</span>
+                      <input id="frPutDate" class="form-control form-control-sm" type="text" inputmode="numeric" placeholder="DD/MM/AAAA" maxlength="10" autocomplete="off">
+                    </label>
+                    <button id="frPutApply" class="btn btn-sm btn-dark" type="button">Aplicar put</button>
+                    <button id="frPutRemove" class="btn btn-sm btn-outline-dark" type="button">Quitar put (restaurar)</button>
+                    <span id="frPutStatus" class="calc-status">-</span>
+                  </div>
+                </details>
+
                 <details data-fr-hd id="frImportSection" class="cashflow-preview hd-import-toggle" aria-label="Importar fechas">
                   <summary>
                     <span class="hd-import-summary-title">Importar fechas de pago (opcional)</span>
