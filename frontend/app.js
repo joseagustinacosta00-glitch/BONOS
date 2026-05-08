@@ -4218,10 +4218,10 @@ async function submitBondDraft(event) {
     return;
   }
 
-  const faceValueNum = parseNumberArg(faceValue.value);
+  const faceValueNum = parseInt(faceValue.value, 10);
   const temNum = parseNumberArg(temEmission.value);
-  if (!isFinite(faceValueNum) || faceValueNum <= 0) {
-    setCalculatorStatus("error", "VNO invalido");
+  if (!Number.isInteger(faceValueNum) || faceValueNum <= 0) {
+    setCalculatorStatus("error", "VNO debe ser entero positivo");
     return;
   }
   if (!isFinite(temNum)) {
