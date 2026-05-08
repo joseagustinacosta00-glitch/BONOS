@@ -458,10 +458,10 @@ HD_FREQUENCY_PERIODS_PER_YEAR: dict[BondHdFrequency, int] = {
 }
 
 HD_CONVENTION_LABELS: dict[BondHdConvention, str] = {
-    BondHdConvention.THIRTY_360_EU: "30/360 EU",
-    BondHdConvention.THIRTY_360_US: "30/360 US",
-    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU (DAYS360 EU / 360)",
-    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US (DAYS360 US / 360 - como Excel)",
+    BondHdConvention.THIRTY_360_EU: "30/360 EU (variable, day count)",
+    BondHdConvention.THIRTY_360_US: "30/360 US (variable, DAYS360 Excel)",
+    BondHdConvention.ONE_EIGHTY_360_EU: "180/360 EU (cupon fijo 1/frec)",
+    BondHdConvention.ONE_EIGHTY_360_US: "180/360 US (cupon fijo 1/frec)",
     BondHdConvention.ACT_360: "Act/360",
     BondHdConvention.ACT_365: "Act/365",
     BondHdConvention.ACT_ACT: "Act/Act",
@@ -558,11 +558,18 @@ def hd_year_fraction(
     if end < start:
         return 0.0
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
-        # 30/360 day count (equivalente a DAYS360 de Excel) sobre 360. Cada
-        # mes vale 30 dias, asi 30/07 -> 31/08 son 30 dias y dan exactamente
-        # 1/12 del año. Periodos largos como 30/06 -> 31/08 dan 60 dias.
+        # 180/360: fraccion FIJA por periodo segun frecuencia. Cada cupon vale
+        # exactamente 1/periods_per_year del cupon anual, sin importar dias
+        # efectivos ni desplazamientos por fin de semana. Asi semianual = 0.5
+        # SIEMPRE, trimestral = 0.25, etc. Esta es la convencion estandar para
+        # bonos soberanos argentinos donde el cupon nominal es fijo.
+        # Si frequency = ONE_PAYMENT (sin frecuencia regular) o no hay
+        # frecuencia, fallback al 30/360 day count.
+        if frequency is not None and frequency != BondHdFrequency.ONE_PAYMENT:
+            ppy = HD_FREQUENCY_PERIODS_PER_YEAR.get(frequency, 1)
+            return 1.0 / ppy if ppy > 0 else 0.0
         us = convention == BondHdConvention.ONE_EIGHTY_360_US
-        return _days_30_360(start, end, us=us) / 360.0
+        return days_30_360(start, end, us=us) / 360.0
     if convention == BondHdConvention.ACT_360:
         return (end - start).days / 360
     if convention == BondHdConvention.ACT_365:
@@ -583,8 +590,14 @@ def hd_period_days(
     frequency: BondHdFrequency | None = None,
 ) -> int:
     if convention in (BondHdConvention.ONE_EIGHTY_360_EU, BondHdConvention.ONE_EIGHTY_360_US):
+        # Coherente con hd_year_fraction: para 180/360 cada periodo es FIJO
+        # = 360/periods_per_year (semianual = 180, trimestral = 90, etc.).
+        # ONE_PAYMENT no tiene frecuencia regular -> fallback day count.
+        if frequency is not None and frequency != BondHdFrequency.ONE_PAYMENT:
+            ppy = HD_FREQUENCY_PERIODS_PER_YEAR.get(frequency, 1)
+            return int(360 / ppy) if ppy > 0 else 0
         us = convention == BondHdConvention.ONE_EIGHTY_360_US
-        return _days_30_360(start, end, us=us)
+        return days_30_360(start, end, us=us)
     if convention in (BondHdConvention.THIRTY_360_EU, BondHdConvention.THIRTY_360_US):
         us = convention == BondHdConvention.THIRTY_360_US
         return days_30_360(start, end, us=us)
