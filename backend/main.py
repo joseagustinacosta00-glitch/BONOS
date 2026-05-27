@@ -1033,7 +1033,13 @@ async def fx_spot() -> dict:
     except Exception:
         pass
 
-    # Spot LIVE: ticks intraday via pyRofex
+    # Spot LIVE: ticks intraday via pyRofex.
+    # Red de seguridad: si el cache esta stale, fuerza un fetch REST antes
+    # de leer (cubre el caso en que el poller asyncio se haya muerto).
+    try:
+        await market.ensure_spot_fresh()
+    except Exception:
+        pass
     pyrofex_spot = market.spot_last()
     spot_live = None
     if pyrofex_spot and pyrofex_spot.get("last") is not None:

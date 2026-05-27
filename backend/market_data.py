@@ -6,7 +6,7 @@ import math
 import random
 import re
 import threading
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from backend.bond_calculators import LECAP_TICKERS
@@ -32,6 +32,7 @@ class MarketDataService:
         self._mock_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         self._spot_poller_task: asyncio.Task[None] | None = None
+        self._spot_refresh_lock: asyncio.Lock | None = None
         self._pyrofex: Any | None = None
         self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
         self._futures_provider_to_symbol: dict[str, str] = {}
@@ -1665,6 +1666,42 @@ class MarketDataService:
             for q in self._spot_quotes_dict.values():
                 return dict(q)
         return None
+
+    async def ensure_spot_fresh(self, max_age_seconds: float = 15.0) -> None:
+        """Red de seguridad: si el cache del spot esta mas viejo que
+        max_age_seconds, fuerza un fetch REST. Cubre el caso en que el
+        _spot_rest_poller task se haya muerto silenciosamente y el spot
+        quede congelado mientras el resto del WS sigue actualizando."""
+        if self.settings.market_source != "pyrofex":
+            return
+        if self._pyrofex is None:
+            return
+        spot = self.spot_last()
+        if spot and spot.get("updated_at"):
+            try:
+                age = (now_argentina() - datetime.fromisoformat(spot["updated_at"])).total_seconds()
+                if age < max_age_seconds:
+                    return
+            except Exception:
+                pass
+        try:
+            if not self._is_market_hours():
+                return
+        except Exception:
+            return
+        if self._spot_refresh_lock is None:
+            self._spot_refresh_lock = asyncio.Lock()
+        # Si ya hay otro refresh en curso, no encolar otro
+        if self._spot_refresh_lock.locked():
+            return
+        async with self._spot_refresh_lock:
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self.fetch_spot_via_rest),
+                    timeout=3.0,
+                )
+            except Exception as exc:
+                logger.debug("ensure_spot_fresh: %s", exc)
 
     @staticmethod
     def _fallback_futures_symbols() -> list[str]:
