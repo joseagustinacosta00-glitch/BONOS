@@ -101,6 +101,8 @@ DUAL_TICKERS: tuple[BondTicker, ...] = (
 # Bonos Dollar-Linked (DLK). Solo pesos.
 DLK_TICKERS: tuple[BondTicker, ...] = (
     BondTicker("D30S6", "D30S6", "ARS", BondCategory.DLK),
+    BondTicker("D31L6", "D31L6", "ARS", BondCategory.DLK),
+    BondTicker("D31M7", "D31M7", "ARS", BondCategory.DLK),
     BondTicker("TZV26", "TZV26", "ARS", BondCategory.DLK),
     BondTicker("TZV27", "TZV27", "ARS", BondCategory.DLK),
     BondTicker("TZV28", "TZV28", "ARS", BondCategory.DLK),

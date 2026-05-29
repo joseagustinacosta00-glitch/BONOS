@@ -740,7 +740,7 @@ function renderFxRatios() {
 // DLK: orden fijo TZV26 -> D30S6 -> TZV27 -> TZV28
 // Futuros DLR: 12 columnas con datos extendidos del backend
 
-const DLK_ORDER = ["TZV26", "D30S6", "TZV27", "TZV28"];
+const DLK_ORDER = ["D31L6", "TZV26", "D30S6", "D31M7", "TZV27", "TZV28"];
 const dlkRowRefs = new Map();
 const futRowRefs = new Map();
 
@@ -796,7 +796,9 @@ function _buildDlkRow(symbol) {
 // ===== DLK maturities (editables por celda Vto, persisten en localStorage) =====
 const DLK_DEFAULT_MATURITIES = {
   TZV26: "2026-06-30",
+  D31L6: "2026-07-31",
   D30S6: "2026-09-30",
+  D31M7: "2027-03-31",
   TZV27: "2027-06-30",
   TZV28: "2028-06-30",
 };
@@ -991,7 +993,9 @@ function renderFuturosDlk() {
 // Mapping bono -> simbolo de futuro DLR para arbitrar.
 const DLK_TO_FUTURE = {
   TZV26: "DLR/JUN26",
+  D31L6: "DLR/JUL26",
   D30S6: "DLR/SEP26",
+  D31M7: "DLR/MAR27",
   TZV27: "DLR/JUN27",
   TZV28: "DLR/JUN28",
 };
@@ -1593,8 +1597,7 @@ function _bondPrice(q, field) {
 
 // Sidebar: solo los futuros MAPEADOS a un bono DLK que tengan volumen.
 // Muestra BID / LAST / OFFER originales + el valor del futuro al fixing por curva
-// (linea destacada). El fixing es 3 dias habiles antes del vencimiento del BONO
-// asociado (no del futuro).
+// (linea destacada). El fixing es 3 dias habiles antes del vencimiento del FUTURO.
 function _renderSyntheticSidebar(futList, dlkBySymbol, curveAtFixingFn) {
   const sidebar = document.querySelector("#syntheticSidebar");
   if (!sidebar) return;
@@ -1614,7 +1617,7 @@ function _renderSyntheticSidebar(futList, dlkBySymbol, curveAtFixingFn) {
     if (!f || !f.expiration) continue;
     const vol = f.trade_volume != null ? Number(f.trade_volume) : (f.volume != null ? Number(f.volume) : 0);
     if (vol <= 0) continue;
-    const fixingIso = _prevBusinessDays(matIso, 3);
+    const fixingIso = _prevBusinessDays(f.expiration, 3);
     const futAtFixing = curveAtFixingFn(fixingIso);
     const rows = [
       { lbl: "BID", cls: "bid",   v: f.bid != null ? Number(f.bid) : null },
@@ -1714,8 +1717,8 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     // Bono cotiza por 100 VN => normalizar a "por USD"
     const bondPxPerUsd = bondPxRaw / 100;
 
-    // Fixing del bono = 3 dias habiles antes del vencimiento del bono
-    const fixingIso = _prevBusinessDays(matIso, 3);
+    // Fixing = 3 dias habiles antes del vencimiento del FUTURO
+    const fixingIso = _prevBusinessDays(futQ.expiration, 3);
     const daysSettleToFixing = _daysBetweenIso(settleIso, fixingIso);
     if (daysSettleToFixing <= 0) continue;
 
@@ -4531,6 +4534,12 @@ function renderArsMarket() {
 
 // What-ifs: { ticker: { type: "price"|"tna", value, computed: {tir, tna_365, tem, duration, modified_duration, days_to_maturity, price} } }
 const _arsWhatIfs = {};
+// Bonos excluidos del fit + scatter principal de la curva. Persisten en
+// localStorage para que sobrevivan al refresh. Click en el punto los toggle.
+const _arsExcluded = new Set(JSON.parse(localStorage.getItem("arsExcluded") || "[]"));
+function _saveArsExcluded() {
+  try { localStorage.setItem("arsExcluded", JSON.stringify([..._arsExcluded])); } catch (_) {}
+}
 // Hash de la ultima versionrenderizada en la curva, para evitar rebuilds
 // en cada WebSocket tick cuando los datos no cambiaron.
 let _arsCurveLastHash = "";
@@ -4558,10 +4567,29 @@ function _arsAttachListeners() {
     Object.keys(_arsWhatIfs).forEach((k) => delete _arsWhatIfs[k]);
     renderArsCurve();
   });
+  document.getElementById("arsCurveResetExcluded")?.addEventListener("click", () => {
+    if (!_arsExcluded.size) return;
+    _arsExcluded.clear();
+    _saveArsExcluded();
+    _arsCurveLastHash = "";
+    renderArsCurve();
+  });
   // Panel what-if buttons
   document.getElementById("arsWhatIfApply")?.addEventListener("click", applyArsWhatIfFromPanel);
   document.getElementById("arsWhatIfRemove")?.addEventListener("click", removeArsWhatIfFromPanel);
   document.getElementById("arsWhatIfClose")?.addEventListener("click", closeArsWhatIfPanel);
+  document.getElementById("arsWhatIfToggleExclude")?.addEventListener("click", () => {
+    const t = _arsActiveWhatIfTicker;
+    if (!t) return;
+    if (_arsExcluded.has(t)) _arsExcluded.delete(t);
+    else _arsExcluded.add(t);
+    _saveArsExcluded();
+    const togBtn = document.getElementById("arsWhatIfToggleExclude");
+    if (togBtn) togBtn.textContent = _arsExcluded.has(t) ? "Incluir en curva" : "Excluir de curva";
+    _arsCurveLastHash = "";
+    renderArsCurve();
+  });
+  document.getElementById("arsCurveShowForwards")?.addEventListener("change", renderArsCurve);
   // Inputs: aceptar Enter para aplicar, ESC para cerrar; mutex price <-> tna
   const priceEl = document.getElementById("arsWhatIfPrice");
   const tnaEl = document.getElementById("arsWhatIfTna");
@@ -4601,6 +4629,9 @@ function openArsWhatIfPanel(ticker) {
   const existing = _arsWhatIfs[ticker];
   if (priceEl) priceEl.value = existing?.type === "price" ? String(existing.value) : "";
   if (tnaEl) tnaEl.value = existing?.type === "tna" ? String(existing.value) : "";
+  // Estado del toggle excluir
+  const togBtn = document.getElementById("arsWhatIfToggleExclude");
+  if (togBtn) togBtn.textContent = _arsExcluded.has(ticker) ? "Incluir en curva" : "Excluir de curva";
   panel.hidden = false;
   panel.classList.add("is-open");
   // Auto-focus al primer input vacio
@@ -4680,6 +4711,20 @@ function renderArsCurve() {
     .map((el) => el.dataset.arsField);
   if (!fields.length) fields.push("last");
 
+  // Forwards implicitas requieren tiempo en anios y tasa efectiva anual,
+  // asi que solo tienen sentido con xKey=days e yKey=tir.
+  const fwdAvailable = yKey === "tir" && xKey === "days";
+  const fwdChk = document.getElementById("arsCurveShowForwards");
+  const fwdWrap = document.getElementById("arsCurveShowForwardsWrap");
+  if (fwdChk) fwdChk.disabled = !fwdAvailable;
+  if (fwdWrap) {
+    fwdWrap.style.opacity = fwdAvailable ? "" : "0.5";
+    fwdWrap.title = fwdAvailable
+      ? "Forwards implicitas: TIR anual efectiva entre dos plazos consecutivos, derivada de la curva fiteada."
+      : "Forwards solo disponibles con Eje Y = TIR efectiva y Eje X = Dias al vto.";
+  }
+  const showForwards = !!(fwdChk?.checked && fwdAvailable);
+
   // Helper para obtener (x, y) de un item dado un field. x > 0 obligatorio
   // (log scale lo requiere; ademas, no tiene sentido plotear bonos vencidos).
   const xy = (it, field) => {
@@ -4698,32 +4743,43 @@ function renderArsCurve() {
   const datasets = [];
   for (const field of fields) {
     const def = ARS_FIELD_DEFS[field] || ARS_FIELD_DEFS.last;
-    const points = items.map((it) => xy(it, field)).filter(Boolean).sort((a, b) => a.x - b.x);
-    if (!points.length) continue;
-    // Scatter de los puntos (sin linea recta conectandolos: la curva real
-    // viene del modelo fiteado abajo).
-    datasets.push({
-      type: "scatter", label: `${def.label}`,
-      data: points.map((p) => ({ x: p.x, y: p.y, _meta: p })),
-      backgroundColor: def.stroke, borderColor: def.stroke,
-      pointRadius: 5, pointHoverRadius: 7, order: 2,
-    });
-    // Modelo teorico (reusa FuturesCurve.fitModel). El modelo espera puntos
-    // con shape { isIncludedInCurve, tnaPct, daysToMaturity } — el filtro
-    // del fitter requiere esos campos.
-    if (modelName !== "none" && points.length >= 2 && window.FuturesCurve?.fitModel) {
+    const allPoints = items.map((it) => xy(it, field)).filter(Boolean).sort((a, b) => a.x - b.x);
+    if (!allPoints.length) continue;
+    // Split entre incluidos en el fit y excluidos (los excluidos se ven en
+    // gris claro y no entran al modelo).
+    const pointsIn = allPoints.filter((p) => !_arsExcluded.has(p.ticker));
+    const pointsOut = allPoints.filter((p) => _arsExcluded.has(p.ticker));
+    if (pointsIn.length) {
+      datasets.push({
+        type: "scatter", label: `${def.label}`,
+        data: pointsIn.map((p) => ({ x: p.x, y: p.y, _meta: p })),
+        backgroundColor: def.stroke, borderColor: def.stroke,
+        pointRadius: 5, pointHoverRadius: 7, order: 2,
+      });
+    }
+    if (pointsOut.length) {
+      datasets.push({
+        type: "scatter", label: `${def.label} (excluidos)`,
+        data: pointsOut.map((p) => ({ x: p.x, y: p.y, _meta: { ...p, excluded: true } })),
+        backgroundColor: "rgba(160,160,160,0.35)",
+        borderColor: "rgba(120,120,120,0.6)",
+        pointRadius: 5, pointHoverRadius: 7, pointStyle: "crossRot", order: 4,
+      });
+    }
+    // Modelo teorico (reusa FuturesCurve.fitModel) — solo con incluidos.
+    if (modelName !== "none" && pointsIn.length >= 2 && window.FuturesCurve?.fitModel) {
       try {
         // FuturesCurve.fitModel trabaja con tnaPct en porcentaje (0-100).
         // Mi y esta en decimal (0.35 = 35%). Escalo *100 para fittear y /100
         // para predecir, asi mantengo coherencia.
-        const observedForFit = points.map((p) => ({
+        const observedForFit = pointsIn.map((p) => ({
           isIncludedInCurve: true,
           tnaPct: p.y * 100,
           daysToMaturity: p.x,
         }));
         const model = window.FuturesCurve.fitModel(observedForFit, modelName);
         if (model && typeof model.predict === "function") {
-          const minX = points[0].x, maxX = points[points.length - 1].x;
+          const minX = pointsIn[0].x, maxX = pointsIn[pointsIn.length - 1].x;
           const N = 120;
           const theoLine = [];
           for (let i = 0; i <= N; i++) {
@@ -4737,8 +4793,32 @@ function renderArsCurve() {
             borderWidth: 2, pointRadius: 0, order: 3, spanGaps: true,
             tension: 0.2,
           });
+          // Forwards implicitas: f(t1,t2) = ((1+r2)^t2 / (1+r1)^t1)^(1/(t2-t1)) - 1
+          // donde r es TIR efectiva anual y t en anios. Se plotea en el punto
+          // medio (t1+t2)/2 entre cada par consecutivo de la curva teorica.
+          if (showForwards) {
+            const fwds = [];
+            for (let i = 0; i < theoLine.length - 1; i++) {
+              const t1 = theoLine[i].x / 365, t2 = theoLine[i + 1].x / 365;
+              const r1 = theoLine[i].y, r2 = theoLine[i + 1].y;
+              if (!(t2 > t1) || r1 <= -1 || r2 <= -1) continue;
+              const f = Math.pow(Math.pow(1 + r2, t2) / Math.pow(1 + r1, t1), 1 / (t2 - t1)) - 1;
+              if (!isFinite(f)) continue;
+              fwds.push({ x: (theoLine[i].x + theoLine[i + 1].x) / 2, y: f, _meta: { forward: true, fromDays: theoLine[i].x, toDays: theoLine[i + 1].x } });
+            }
+            if (fwds.length) {
+              datasets.push({
+                type: "line", label: `${def.label} forwards`,
+                data: fwds,
+                borderColor: "#d8801b", backgroundColor: "rgba(216,128,27,0.08)",
+                borderWidth: 2, borderDash: [6, 4],
+                pointRadius: 0, pointHoverRadius: 4,
+                order: 5, spanGaps: true, tension: 0.2,
+              });
+            }
+          }
         } else {
-          console.warn("[ars] fitModel devolvio null/sin predict", modelName, points.length);
+          console.warn("[ars] fitModel devolvio null/sin predict", modelName, pointsIn.length);
         }
       } catch (e) { console.warn("[ars] fitModel fallo", e); }
     }
@@ -4783,13 +4863,59 @@ function renderArsCurve() {
   const yPadding = Math.max(0.02, (maxY - minY) * 0.15);
   const yMin = Math.max(0, minY - yPadding); // arranca debajo del minimo
 
+  // Plugin custom: pinta el ticker al lado de cada punto del scatter (no en
+  // la linea teorica ni en datasets sin ticker). Excluidos en gris.
+  const arsTickerLabelsPlugin = {
+    id: "arsTickerLabels",
+    afterDatasetsDraw(chart) {
+      const c = chart.ctx;
+      chart.data.datasets.forEach((ds, dsIdx) => {
+        if (ds.type !== "scatter") return;
+        const meta = chart.getDatasetMeta(dsIdx);
+        if (!meta || meta.hidden) return;
+        ds.data.forEach((raw, ptIdx) => {
+          const ticker = raw?._meta?.ticker;
+          if (!ticker) return;
+          const point = meta.data[ptIdx];
+          if (!point) return;
+          c.save();
+          c.font = "10px system-ui, -apple-system, sans-serif";
+          c.fillStyle = raw._meta.excluded ? "#888" : (raw._meta.whatif ? "#7d1f15" : "#1f3d2e");
+          c.textBaseline = "middle";
+          c.textAlign = "left";
+          c.fillText(ticker, point.x + 7, point.y);
+          c.restore();
+        });
+      });
+    },
+  };
   const cfg = {
     type: "scatter",
     data: { datasets },
+    plugins: [arsTickerLabelsPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "nearest", intersect: false },
+      // Click en un punto: toggle excluir/incluir (excepto what-ifs, que
+      // tienen su panel propio via row click).
+      onClick: (_evt, elements, chart) => {
+        if (!elements?.length) return;
+        const el = elements[0];
+        const ds = chart.data.datasets[el.datasetIndex];
+        const raw = ds.data[el.index];
+        const ticker = raw?._meta?.ticker;
+        if (!ticker || raw._meta.whatif) return;
+        if (_arsExcluded.has(ticker)) _arsExcluded.delete(ticker);
+        else _arsExcluded.add(ticker);
+        _saveArsExcluded();
+        _arsCurveLastHash = ""; // forzar re-render desde renderArsMarket
+        renderArsCurve();
+      },
+      onHover: (evt, elements) => {
+        const t = evt?.native?.target;
+        if (t) t.style.cursor = elements?.length ? "pointer" : "default";
+      },
       scales: {
         x: {
           type: xScale, // "log" expande la zona corta; "linear" estandar
@@ -4810,9 +4936,19 @@ function renderArsCurve() {
             label: (ctx) => {
               const m = ctx.raw?._meta || {};
               const yV = (ctx.parsed.y * 100).toFixed(2) + "%";
-              const xV = ctx.parsed.x.toFixed(0);
-              const tag = m.whatif ? " [WHAT-IF]" : "";
+              const xV = ctx.parsed.x.toFixed(2);
+              if (m.forward) {
+                return `Forward ${Math.round(m.fromDays)}d → ${Math.round(m.toDays)}d: ${yV}`;
+              }
+              const tag = m.whatif ? " [WHAT-IF]" : m.excluded ? " [EXCLUIDO]" : "";
               return `${m.ticker || ""}${tag}: ${yV} @ ${xV}`;
+            },
+            afterLabel: (ctx) => {
+              const m = ctx.raw?._meta || {};
+              if (m.forward) return "TIR anual efectiva implicita entre ambos plazos";
+              if (m.whatif) return "Click en fila de tabla para editar";
+              if (m.ticker) return m.excluded ? "Click para volver a incluir" : "Click para excluir de la curva";
+              return null;
             },
           },
         },
@@ -4823,24 +4959,28 @@ function renderArsCurve() {
   // vs linear) cambio, hay que destruir y recrear el chart porque Chart.js
   // no maneja bien el cambio de tipo via options reassignment.
   cfg.options.animation = false;
+  // Cleanup robusto: destruye TANTO la referencia local como cualquier chart
+  // "fantasma" que Chart.js tenga registrado contra el canvas. Sin esto, si
+  // un intento previo de new Chart() falla (o destroy() tira silenciosamente),
+  // Chart.js marca el canvas como en uso y los renders siguientes tiran
+  // "Canvas is already in use".
+  const _destroyChart = () => {
+    try { _arsCurveChart?.destroy(); } catch (e) { console.warn("[ars] destroy local", e); }
+    try { Chart.getChart(canvas)?.destroy(); } catch (e) { console.warn("[ars] destroy by canvas", e); }
+    _arsCurveChart = null;
+  };
   try {
-    const prevXType = _arsCurveChart?.options?.scales?.x?.type;
-    if (_arsCurveChart && prevXType === xScale) {
-      _arsCurveChart.data = cfg.data;
-      _arsCurveChart.options = cfg.options;
-      _arsCurveChart.update("none");
-    } else {
-      if (_arsCurveChart) {
-        try { _arsCurveChart.destroy(); } catch (e) { console.warn("[ars] destroy", e); }
-        _arsCurveChart = null;
-      }
-      _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
-    }
+    // Siempre destroy+recreate: cfg.plugins es a nivel chart (no options.plugins),
+    // y mutar options en un chart vivo no aplica plugins nuevos ni refresca bien
+    // labels/titles de ejes cuando cambia xKey. El hash gating ya evita renders
+    // redundantes desde polling, asi que no hay flicker percibido.
+    _destroyChart();
+    _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
   } catch (e) {
     console.error("[ars] renderArsCurve fallo:", e);
     // Fallback: limpiar y re-intentar lineal
     try {
-      if (_arsCurveChart) { _arsCurveChart.destroy(); _arsCurveChart = null; }
+      _destroyChart();
       cfg.options.scales.x.type = "linear";
       _arsCurveChart = new Chart(canvas.getContext("2d"), cfg);
     } catch (e2) {
@@ -4854,7 +4994,9 @@ function renderArsCurve() {
 function _arsItemsHash(items) {
   return (items || [])
     .map((it) => `${it.ticker}|${it.last}|${it.bid}|${it.offer}|${it.maturity_date}|${it.tir}`)
-    .join(";") + "|" + Object.keys(_arsWhatIfs).map((k) => `${k}:${_arsWhatIfs[k]?.value}`).join(",");
+    .join(";")
+    + "|" + Object.keys(_arsWhatIfs).map((k) => `${k}:${_arsWhatIfs[k]?.value}`).join(",")
+    + "|" + [..._arsExcluded].sort().join(",");
 }
 
 document.querySelectorAll("[data-market-settlement]").forEach((button) => {
