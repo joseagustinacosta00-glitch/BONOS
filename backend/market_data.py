@@ -127,11 +127,16 @@ class MarketDataService:
                     if not self._is_market_hours():
                         continue
                     age = self._seconds_since_last_tick()
-                    if age is None or age < STALE_THRESHOLD_SECONDS:
+                    # Reconectar si: nunca hubo tick (None) o paso el umbral de stale.
+                    # El caso "None" es critico: el WS pudo conectarse en horario cerrado
+                    # y al abrir la rueda no llegan ticks; sin reconexion los precios
+                    # quedan pegados indefinidamente.
+                    if age is not None and age < STALE_THRESHOLD_SECONDS:
                         continue
+                    reason = "nunca llego un tick" if age is None else f"stale hace {age:.0f}s"
                     logger.warning(
-                        "watchdog: precios stale hace %.0fs en horario de mercado, reconectando pyRofex",
-                        age,
+                        "watchdog: %s en horario de mercado, reconectando pyRofex",
+                        reason,
                     )
                     try:
                         await asyncio.to_thread(self._reconnect_pyrofex)
