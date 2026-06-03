@@ -33,6 +33,7 @@ class MarketDataService:
         self._watchdog_task: asyncio.Task[None] | None = None
         self._spot_poller_task: asyncio.Task[None] | None = None
         self._spot_refresh_lock: asyncio.Lock | None = None
+        self._futures_poller_task: asyncio.Task[None] | None = None
         self._pyrofex: Any | None = None
         self._rofex_to_quote: dict[str, tuple[str, str, str | None]] = {}
         self._futures_provider_to_symbol: dict[str, str] = {}
@@ -60,6 +61,9 @@ class MarketDataService:
             self._watchdog_task = asyncio.create_task(self._watchdog_loop())
             # Arrancar poller del spot via REST (fallback si WS no manda ticks)
             self._spot_poller_task = asyncio.create_task(self._spot_rest_poller())
+            # Arrancar poller de futuros via REST (fallback para contratos que el WS
+            # no manda, tipico de meses cercanos al vencimiento o poco liquidos)
+            self._futures_poller_task = asyncio.create_task(self._futures_rest_poller())
             return
 
         self.status = "mock"
@@ -87,6 +91,13 @@ class MarketDataService:
             except asyncio.CancelledError:
                 pass
 
+        if getattr(self, "_futures_poller_task", None):
+            self._futures_poller_task.cancel()
+            try:
+                await self._futures_poller_task
+            except asyncio.CancelledError:
+                pass
+
         if self._pyrofex is not None:
             await asyncio.to_thread(self._disconnect_pyrofex)
 
@@ -110,6 +121,28 @@ class MarketDataService:
                     raise
                 except Exception as exc:
                     logger.debug("spot_rest_poller error: %s", exc)
+        except asyncio.CancelledError:
+            return
+
+    async def _futures_rest_poller(self) -> None:
+        """Poll de futuros via REST cada 30s en horario de mercado, cada 300s
+        fuera. Necesario para contratos que el WS no manda ticks (tipico de
+        meses cercanos al vencimiento o poco liquidos): pyRofex suele devolver
+        CL/LA por REST aunque el WS quede mudo."""
+        try:
+            while True:
+                in_market = False
+                try:
+                    in_market = self._is_market_hours()
+                except Exception:
+                    pass
+                await asyncio.sleep(30 if in_market else 300)
+                try:
+                    await asyncio.to_thread(self.fetch_futures_via_rest)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.debug("futures_rest_poller error: %s", exc)
         except asyncio.CancelledError:
             return
 
@@ -1650,6 +1683,41 @@ class MarketDataService:
                 else:
                     sym_results.append({"market": mkt_name, "no_marketData": True, "response_keys": list((response or {}).keys()) if response else None})
             results[symbol] = sym_results
+        return results
+
+    def fetch_futures_via_rest(self) -> dict[str, Any]:
+        """Llama al REST de pyRofex.get_market_data para todos los futuros DLR
+        registrados. Reutiliza _update_quote_from_message para que la respuesta
+        REST llene LA/BI/OF/CL/SE igual que un tick WS. Cubre contratos que el
+        WS no envia (meses cercanos al vencimiento, baja liquidez)."""
+        if self._pyrofex is None:
+            return {"error": "pyRofex no inicializado"}
+        pyRofex = self._pyrofex
+        environment = self._environment(pyRofex)
+        market_rofx = getattr(pyRofex.Market, "ROFX", self._market(pyRofex))
+        entries = self._market_data_entries(pyRofex)
+        results: dict[str, Any] = {}
+        for symbol in list(self._futures_provider_to_symbol.keys()):
+            try:
+                response = pyRofex.get_market_data(
+                    ticker=symbol,
+                    entries=entries,
+                    depth=1,
+                    market=market_rofx,
+                    environment=environment,
+                )
+            except Exception as exc:
+                results[symbol] = {"error": str(exc)}
+                continue
+            md = (response or {}).get("marketData") or (response or {}).get("market_data")
+            if not md:
+                results[symbol] = {"no_marketData": True}
+                continue
+            try:
+                self._update_quote_from_message(response, provider_symbol_override=symbol)
+                results[symbol] = {"ok": True, "fields": list(md.keys()) if isinstance(md, dict) else None}
+            except Exception as exc:
+                results[symbol] = {"update_error": str(exc)}
         return results
 
     def spot_last(self) -> dict[str, Any] | None:

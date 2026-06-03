@@ -1189,6 +1189,20 @@ async def fx_spot_fetch_rest() -> dict:
     return {"ok": True, "results": result, "spot_now": market.spot_quotes()}
 
 
+@app.api_route("/api/futures/fetch-rest", methods=["GET", "POST"])
+async def futures_fetch_rest() -> dict:
+    """Fuerza fetch via REST de todos los futuros DLR. Util cuando el WS no
+    manda ticks para algunos contratos (tipico de meses cercanos al vencimiento)
+    y para diagnosticar que devuelve el broker sin esperar al poller automatico."""
+    if market.settings.market_source != "pyrofex":
+        raise HTTPException(status_code=400, detail="Market source no es pyRofex.")
+    try:
+        result = await asyncio.to_thread(market.fetch_futures_via_rest)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "results": result, "futures_now": market.futures_quotes()}
+
+
 @app.get("/api/fx/spot/diagnose")
 async def fx_spot_diagnose() -> dict:
     """Diagnostico: devuelve los simbolos del catalogo de pyRofex que
