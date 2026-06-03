@@ -1713,7 +1713,12 @@ function renderSyntheticArsCurve(dlkBySymbol, settleIso, spot) {
     if (!bondQ || !futQ || !futQ.expiration) continue;
     const bondPxRaw = _bondPrice(bondQ, mode.bondField);
     const futPx = _futurePrice(futQ, mode.futField);
-    if (bondPxRaw == null || futPx == null || bondPxRaw <= 0 || futPx <= 0) continue;
+    // El precio puntual del futuro mapeado NO se usa en el calculo (la sintetica
+    // descuenta por curva via futAtFixing, fiteada con TODOS los futuros). Solo
+    // se guarda para mostrar en el tooltip. Por eso no filtramos por futPx aca:
+    // sino, un futuro sin precio en el campo del modo (last/bid/ask) excluiria al
+    // bono de la curva, aunque la curva podria estimar el fixing perfectamente.
+    if (bondPxRaw == null || bondPxRaw <= 0) continue;
     // Bono cotiza por 100 VN => normalizar a "por USD"
     const bondPxPerUsd = bondPxRaw / 100;
 
