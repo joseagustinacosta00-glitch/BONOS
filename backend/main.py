@@ -3272,6 +3272,7 @@ async def system_cleanup_history() -> dict:
     este deploy."""
     result: dict = {}
 
+    import logging
     _log = logging.getLogger(__name__)
     # SQLite fx_snapshots
     try:
