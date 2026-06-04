@@ -3256,6 +3256,50 @@ async def assistant_message(payload: AssistantMessageRequest) -> dict:
     )
 
 
+@app.post("/api/system/cleanup-history")
+async def system_cleanup_history() -> dict:
+    """DESTRUCTIVO: aplica retroactivamente las ventanas de captura sobre el
+    historico almacenado.
+
+    - fx_snapshots (SQLite): borra/NULLifica filas fuera de la ventana segun
+      columna. Spot/A3500 valen [10:00, 15:00]; MEP/CCL/canje valen [10:30, 17:00].
+      Borra dias no habiles. Borra filas resultantes todas-NULL.
+    - market_ticks (Postgres): borra ticks fuera de la ventana de su categoria.
+      Futuros valen [10:00, 15:00]; el resto [10:30, 17:00]. Borra dias no habiles.
+
+    No tiene marcha atras. Llamar manualmente cuando haga falta limpiar basura
+    pre-existente. La captura corriente ya respeta las ventanas a partir de
+    este deploy."""
+    result: dict = {}
+
+    _log = logging.getLogger(__name__)
+    # SQLite fx_snapshots
+    try:
+        result["fx_snapshots"] = await asyncio.to_thread(fx_history.cleanup_outside_window)
+    except Exception as exc:
+        result["fx_snapshots_error"] = str(exc)
+        _log.exception("cleanup fx_snapshots fallo")
+
+    # Postgres market_ticks
+    try:
+        from backend.market_calendar import market_calendar as _mc
+        dates_ar = await market_history_storage.list_distinct_dates_ar()
+        non_business = [d for d in dates_ar if not _mc.is_business_day(d)]
+        result["market_ticks"] = await market_history_storage.cleanup_outside_window(
+            future_open_minutes=1000,
+            future_close_minutes=1500,
+            other_open_minutes=1030,
+            other_close_minutes=1700,
+            non_business_days=non_business,
+        )
+        result["market_ticks"]["non_business_days_count"] = len(non_business)
+    except Exception as exc:
+        result["market_ticks_error"] = str(exc)
+        _log.exception("cleanup market_ticks fallo")
+
+    return {"ok": True, **result}
+
+
 @app.get("/api/system/health")
 async def system_health() -> dict:
     """Diagnostico completo: SQLite, backups, market history, entorno."""

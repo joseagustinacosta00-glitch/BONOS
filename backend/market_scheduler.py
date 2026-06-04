@@ -23,6 +23,7 @@ CATEGORY_OTHER_BOND = "bond_other"
 CATEGORY_CER = "cer"
 CATEGORY_TAMAR = "tamar"
 CATEGORY_DUAL = "dual"
+CATEGORY_FUTURE = "future"
 
 
 CATEGORY_INTERVAL_SECONDS: dict[str, int] = {
@@ -33,7 +34,16 @@ CATEGORY_INTERVAL_SECONDS: dict[str, int] = {
     CATEGORY_CER: 5,
     CATEGORY_TAMAR: 5,
     CATEGORY_DUAL: 5,
+    CATEGORY_FUTURE: 1,
 }
+
+# Ventana de mercado por categoria (hora local AR).
+#   futuros / spot:  10:00 - 15:00
+#   resto:           10:30 - 17:00
+FUTURE_OPEN  = time(10, 0)
+FUTURE_CLOSE = time(15, 0)
+BONOS_OPEN   = time(10, 30)
+BONOS_CLOSE  = time(17, 0)
 
 
 @dataclass
@@ -155,11 +165,41 @@ class MarketHistoryScheduler:
             )
             self._instrument_by_symbol[symbol] = row
 
+        # Futuros DLR: ventana 10-15. Tomamos los simbolos de la whitelist del
+        # MarketDataService (ALLOWED_DLR_SYMBOLS), incluye mensuales y mayoristas.
+        future_symbols = getattr(self.market, "ALLOWED_DLR_SYMBOLS", ()) or ()
+        for fut_sym in future_symbols:
+            stored_symbol = f"FUT:{fut_sym}"
+            row = await self.storage.upsert_instrument(
+                symbol=stored_symbol,
+                family=str(fut_sym),
+                category=CATEGORY_FUTURE,
+                currency="ARS",
+                snapshot_interval_seconds=CATEGORY_INTERVAL_SECONDS[CATEGORY_FUTURE],
+                metadata={"underlying": "DLR"},
+            )
+            self._instrument_by_symbol[stored_symbol] = row
+
     def _is_market_open(self, when: datetime) -> bool:
+        """True si AL MENOS UN mercado esta abierto (union de ventanas).
+        Usado por el sample_loop para decidir si entrar al ciclo. La validacion
+        fina por categoria la hace _is_open_for_category."""
         if not market_calendar.is_business_day(when.date()):
             return False
         current = when.time()
-        return self.market_open <= current <= self.market_close
+        # Union: [10:00, 17:00] cubre futuros y bonos.
+        wide_open = min(FUTURE_OPEN, BONOS_OPEN, self.market_open)
+        wide_close = max(FUTURE_CLOSE, BONOS_CLOSE, self.market_close)
+        return wide_open <= current <= wide_close
+
+    def _is_open_for_category(self, when: datetime, category: str | None) -> bool:
+        """Ventana especifica por categoria de instrumento."""
+        if not market_calendar.is_business_day(when.date()):
+            return False
+        current = when.time()
+        if category == CATEGORY_FUTURE:
+            return FUTURE_OPEN <= current <= FUTURE_CLOSE
+        return BONOS_OPEN <= current <= BONOS_CLOSE
 
     async def _sample_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -180,21 +220,34 @@ class MarketHistoryScheduler:
         for quote in snapshot.get("quotes", []):
             symbol = quote.get("symbol")
             if symbol and symbol in self._instrument_by_symbol:
-                self._maybe_enqueue(symbol, quote, ts)
+                self._maybe_enqueue(symbol, quote, ts, when)
 
         for ticker in LECAP_TICKERS:
             quote = self.market.lecap_quote(ticker, "t1")
             if quote:
-                self._maybe_enqueue(f"LECAP:{ticker}", quote, ts)
+                self._maybe_enqueue(f"LECAP:{ticker}", quote, ts, when)
 
         for caucion in self.market.caucion_quotes():
             symbol = caucion.get("symbol")
             if symbol:
-                self._maybe_enqueue(f"CAUCION:{symbol}", caucion, ts)
+                self._maybe_enqueue(f"CAUCION:{symbol}", caucion, ts, when)
 
-    def _maybe_enqueue(self, symbol: str, quote: dict[str, Any], ts: datetime) -> None:
+        # Futuros DLR (ventana 10-15). _maybe_enqueue filtra por categoria.
+        try:
+            for fut in self.market.futures_quotes():
+                symbol = fut.get("symbol")
+                if symbol:
+                    self._maybe_enqueue(f"FUT:{symbol}", fut, ts, when)
+        except Exception as exc:
+            logger.debug("market scheduler: futures sample fallo: %s", exc)
+
+    def _maybe_enqueue(self, symbol: str, quote: dict[str, Any], ts: datetime, when: datetime | None = None) -> None:
         instrument = self._instrument_by_symbol.get(symbol)
         if instrument is None:
+            return
+        # Filtro fino por ventana de categoria: el _sample_loop entra dentro de
+        # la union [10:00,17:00] pero cada instrumento solo se guarda en su franja.
+        if when is not None and not self._is_open_for_category(when, instrument.category):
             return
         last = quote.get("last")
         cumulative = quote.get("cumulative_volume")
