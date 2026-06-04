@@ -7,13 +7,9 @@ Tabla fx_snapshots:
     ccl_bid, ccl_last, ccl_offer,
     canje_last (= (ccl_last/mep_last - 1) * 100, en pp).
 
-Ventanas de captura por componente (solo en dia habil):
-    - Spot / A3500:           10:00 - 15:00  (mercado mayorista USD)
-    - MEP / CCL / canje:      10:30 - 17:00  (mercado de bonos)
-
-Fuera de esas franjas las columnas correspondientes se guardan como NULL.
-Si TODAS quedan NULL no se inserta. Si afuera de 10:00-17:00 directamente
-se duerme largo sin samplear.
+Captura cada SAMPLE_SECONDS segundos via asyncio.Task. Solo registra en
+horario de mercado (06:00-22:00 local) para no spammear durante la noche
+sin movimiento, y solo si hay al menos un valor != None.
 """
 from __future__ import annotations
 
@@ -22,7 +18,7 @@ import logging
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 # Usamos la TZ del resto del app (Argentina) para que los buckets/labels
 # coincidan con los timestamps de quotes/futuros que ya guarda el backend.
@@ -41,40 +37,6 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_SECONDS = 5
 RETENTION_DAYS = 730  # 2 anios
-
-# Ventanas (hora local AR). Editar aca centraliza la politica.
-SPOT_OPEN  = time(10, 0)
-SPOT_CLOSE = time(15, 0)
-BONOS_OPEN  = time(10, 30)
-BONOS_CLOSE = time(17, 0)
-# Ventana global (union): fuera de aca el loop duerme largo.
-WIDE_OPEN  = time(10, 0)
-WIDE_CLOSE = time(17, 0)
-
-
-def _in_spot_window(when: datetime) -> bool:
-    t = when.time()
-    return SPOT_OPEN <= t <= SPOT_CLOSE
-
-
-def _in_bonos_window(when: datetime) -> bool:
-    t = when.time()
-    return BONOS_OPEN <= t <= BONOS_CLOSE
-
-
-def _in_wide_window(when: datetime) -> bool:
-    t = when.time()
-    return WIDE_OPEN <= t <= WIDE_CLOSE
-
-
-def _is_business_day(when: datetime) -> bool:
-    """True si es dia habil ART. Cae al market_calendar si esta disponible;
-    sino chequea solo sab/dom."""
-    try:
-        from backend.market_calendar import market_calendar
-        return market_calendar.is_business_day(when.date())
-    except Exception:
-        return when.weekday() < 5
 
 
 @dataclass(frozen=True)
@@ -421,87 +383,6 @@ class FxHistoryStore:
             cur = conn.execute("DELETE FROM fx_snapshots WHERE ts < ?", (cutoff,))
         return cur.rowcount
 
-    def cleanup_outside_window(self) -> dict[str, int]:
-        """Aplica retroactivamente las ventanas de captura sobre fx_snapshots:
-
-        - Borra filas en dias no habiles (sab/dom/feriados).
-        - Borra filas con hora fuera de [10:00, 17:00].
-        - NULL-ifica MEP/CCL/canje en filas con hora en [10:00, 10:30) (fuera
-          de su ventana 10:30-17).
-        - NULL-ifica spot/a3500 en filas con hora en (15:00, 17:00] (fuera de
-          su ventana 10:00-15).
-        - Borra filas resultantes que quedan todas NULL.
-
-        DESTRUCTIVO. Devuelve stats con cuantas filas afecto cada paso.
-        """
-        stats = {
-            "deleted_non_business_day": 0,
-            "deleted_outside_wide_window": 0,
-            "nullified_bonos_early": 0,
-            "nullified_spot_late": 0,
-            "deleted_all_null": 0,
-        }
-        with closing(self._connect()) as conn, conn:
-            # 1) Dias no habiles. SQLite no sabe de feriados ART asi que
-            #    pasamos por Python: listamos fechas distintas y filtramos.
-            cur = conn.execute("SELECT DISTINCT substr(ts, 1, 10) AS d FROM fx_snapshots")
-            all_dates = [row[0] for row in cur.fetchall()]
-            try:
-                from backend.market_calendar import market_calendar
-                from datetime import date as _date
-                non_business: list[str] = []
-                for d_str in all_dates:
-                    try:
-                        d_obj = _date.fromisoformat(d_str)
-                    except Exception:
-                        continue
-                    if not market_calendar.is_business_day(d_obj):
-                        non_business.append(d_str)
-                if non_business:
-                    placeholders = ",".join("?" * len(non_business))
-                    cur = conn.execute(
-                        f"DELETE FROM fx_snapshots WHERE substr(ts, 1, 10) IN ({placeholders})",
-                        non_business,
-                    )
-                    stats["deleted_non_business_day"] = cur.rowcount or 0
-            except Exception:
-                logger.exception("[fx_history] cleanup non-business-day fallo")
-
-            # 2) Fuera de [10:00, 17:00]. Usamos substr(ts,12,5) -> "HH:MM".
-            cur = conn.execute(
-                "DELETE FROM fx_snapshots "
-                "WHERE substr(ts, 12, 5) < '10:00' OR substr(ts, 12, 5) > '17:00'"
-            )
-            stats["deleted_outside_wide_window"] = cur.rowcount or 0
-
-            # 3) Hora en [10:00, 10:30): NULL MEP/CCL/canje (no es su ventana).
-            cur = conn.execute(
-                "UPDATE fx_snapshots SET "
-                "  mep_bid=NULL, mep_last=NULL, mep_offer=NULL, "
-                "  ccl_bid=NULL, ccl_last=NULL, ccl_offer=NULL, "
-                "  canje_last=NULL "
-                "WHERE substr(ts, 12, 5) >= '10:00' AND substr(ts, 12, 5) < '10:30'"
-            )
-            stats["nullified_bonos_early"] = cur.rowcount or 0
-
-            # 4) Hora en (15:00, 17:00]: NULL spot/a3500 (fuera de su ventana).
-            cur = conn.execute(
-                "UPDATE fx_snapshots SET spot=NULL, a3500=NULL "
-                "WHERE substr(ts, 12, 5) > '15:00' AND substr(ts, 12, 5) <= '17:00'"
-            )
-            stats["nullified_spot_late"] = cur.rowcount or 0
-
-            # 5) Filas all-NULL despues de 3-4.
-            cur = conn.execute(
-                "DELETE FROM fx_snapshots WHERE "
-                "  spot IS NULL AND a3500 IS NULL "
-                "  AND mep_bid IS NULL AND mep_last IS NULL AND mep_offer IS NULL "
-                "  AND ccl_bid IS NULL AND ccl_last IS NULL AND ccl_offer IS NULL "
-                "  AND canje_last IS NULL"
-            )
-            stats["deleted_all_null"] = cur.rowcount or 0
-        return stats
-
     # ---------- Helpers ----------
     @staticmethod
     def _tc_column(instr: str, field: str) -> str | None:
@@ -618,17 +499,8 @@ class FxHistoryStore:
         logger.info("[fx_history] capture loop iniciado (cada %ds)", SAMPLE_SECONDS)
         cleanup_counter = 0
         while not self._stop.is_set():
-            now_ar = _now()
-            # Solo capturamos en dia habil dentro de la ventana global 10-17 AR.
-            # Fuera de eso dormimos largo (5 min) para no spammear.
-            if not _is_business_day(now_ar) or not _in_wide_window(now_ar):
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=300)
-                except asyncio.TimeoutError:
-                    pass
-                continue
             try:
-                snap = self._build_snapshot(market_service, bcra_client, ratios_resolver, now_ar)
+                snap = self._build_snapshot(market_service, bcra_client, ratios_resolver)
                 if snap is not None:
                     self.insert(snap)
                 cleanup_counter += 1
@@ -646,62 +518,53 @@ class FxHistoryStore:
     def stop(self) -> None:
         self._stop.set()
 
-    def _build_snapshot(self, market_service: Any, bcra_client: Any, ratios_resolver: Any, when: datetime | None = None) -> FxSnapshot | None:
+    def _build_snapshot(self, market_service: Any, bcra_client: Any, ratios_resolver: Any) -> FxSnapshot | None:
         try:
-            now_ar = when if when is not None else _now()
-            capture_spot = _in_spot_window(now_ar)
-            capture_bonos = _in_bonos_window(now_ar)
-
-            # Spot live (solo en su ventana 10-15)
+            # Spot live
+            spot_obj = market_service.spot_last() if hasattr(market_service, "spot_last") else None
             spot_val: float | None = None
-            if capture_spot:
-                spot_obj = market_service.spot_last() if hasattr(market_service, "spot_last") else None
-                if isinstance(spot_obj, dict) and spot_obj.get("last") is not None:
-                    try: spot_val = float(spot_obj["last"])
-                    except (TypeError, ValueError): spot_val = None
+            if isinstance(spot_obj, dict) and spot_obj.get("last") is not None:
+                try: spot_val = float(spot_obj["last"])
+                except (TypeError, ValueError): spot_val = None
 
-            # A3500: BCRA series ultimo punto (misma ventana que spot)
+            # A3500: BCRA series ultimo punto
             a3500_val: float | None = None
-            if capture_spot:
-                try:
-                    a35 = bcra_client.get_series("usd_mayorista_a3500")
-                    pts = (a35 or {}).get("data") or []
-                    if pts:
-                        last_pt = pts[-1]
-                        v = last_pt.get("value") if isinstance(last_pt, dict) else None
-                        if v is not None:
-                            a3500_val = float(v)
-                except Exception:
-                    pass
+            try:
+                a35 = bcra_client.get_series("usd_mayorista_a3500")
+                pts = (a35 or {}).get("data") or []
+                if pts:
+                    last_pt = pts[-1]
+                    v = last_pt.get("value") if isinstance(last_pt, dict) else None
+                    if v is not None:
+                        a3500_val = float(v)
+            except Exception:
+                pass
 
-            # MEP / CCL / canje via ratios_resolver (solo en 10:30-17)
-            mep_bid = mep_last = mep_offer = None
-            ccl_bid = ccl_last = ccl_offer = None
+            # MEP / CCL via ratios_resolver
+            ratios = ratios_resolver() if callable(ratios_resolver) else {"items": []}
+            items = (ratios or {}).get("items") or []
+            mep = next((it for it in items if str(it.get("label", "")).upper() == "MEP"), None)
+            ccl = next((it for it in items if str(it.get("label", "")).upper() == "CCL"), None)
+
+            def _f(d: dict | None, k: str) -> float | None:
+                if not d: return None
+                v = d.get(k)
+                if v is None: return None
+                try: return float(v)
+                except (TypeError, ValueError): return None
+
+            mep_bid   = _f(mep, "ratio_bid")
+            mep_last  = _f(mep, "ratio")
+            mep_offer = _f(mep, "ratio_offer")
+            ccl_bid   = _f(ccl, "ratio_bid")
+            ccl_last  = _f(ccl, "ratio")
+            ccl_offer = _f(ccl, "ratio_offer")
+
             canje_last: float | None = None
-            if capture_bonos:
-                ratios = ratios_resolver() if callable(ratios_resolver) else {"items": []}
-                items = (ratios or {}).get("items") or []
-                mep = next((it for it in items if str(it.get("label", "")).upper() == "MEP"), None)
-                ccl = next((it for it in items if str(it.get("label", "")).upper() == "CCL"), None)
+            if mep_last is not None and ccl_last is not None and mep_last != 0:
+                canje_last = ((ccl_last / mep_last) - 1) * 100
 
-                def _f(d: dict | None, k: str) -> float | None:
-                    if not d: return None
-                    v = d.get(k)
-                    if v is None: return None
-                    try: return float(v)
-                    except (TypeError, ValueError): return None
-
-                mep_bid   = _f(mep, "ratio_bid")
-                mep_last  = _f(mep, "ratio")
-                mep_offer = _f(mep, "ratio_offer")
-                ccl_bid   = _f(ccl, "ratio_bid")
-                ccl_last  = _f(ccl, "ratio")
-                ccl_offer = _f(ccl, "ratio_offer")
-
-                if mep_last is not None and ccl_last is not None and mep_last != 0:
-                    canje_last = ((ccl_last / mep_last) - 1) * 100
-
-            ts = now_ar.isoformat()
+            ts = _now().isoformat()
             return FxSnapshot(
                 ts=ts, spot=spot_val, a3500=a3500_val,
                 mep_bid=mep_bid, mep_last=mep_last, mep_offer=mep_offer,
